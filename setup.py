@@ -20,6 +20,11 @@ setup(
     classifiers=[
         'Development Status :: 3 - Alpha',
         'License :: OSI Approved :: BSD License',
+        'Operating System :: OS Independent',
+        'Environment :: Console',
+        'Intended Audience :: Science/Research',
+        'Topic :: Scientific/Engineering :: Bio-Informatics',
+        'Topic :: Scientific/Engineering :: Chemistry',
         'Programming Language :: Python :: 2',
         'Programming Language :: Python :: 2.7',
         'Programming Language :: Python :: 3',
@@ -28,7 +33,8 @@ setup(
         'Programming Language :: Python :: 3.6',
     ],
     packages=find_packages(exclude=['contrib', 'docs', 'tests']),
-    install_requires=['Click','numpy','scipy','pandas','pyopenms','pyprophet'],
+    include_package_data=True,
+    install_requires=['Click','numpy','scipy','pandas','pyopenms','pyprophet','lxml'],
     # extras_require={  # Optional
     #     'dev': ['check-manifest'],
     #     'test': ['coverage'],
