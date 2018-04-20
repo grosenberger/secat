@@ -30,7 +30,7 @@ def preprocess(infiles, outfile, secfile, netfile, uniprotfile, columns):
         os.remove(outfile)
     except OSError:
         pass
-        
+
     con = sqlite3.connect(outfile)
 
     # Generate UniProt table
@@ -55,6 +55,11 @@ def preprocess(infiles, outfile, secfile, netfile, uniprotfile, columns):
         click.echo("Info: Parsing peptide quantification file %s." % infile)
         quantification_data = quantification(infile, columns, run_ids)
         quantification_data.to_df().to_sql('QUANTIFICATION' ,con, index=False, if_exists='append')
+
+    # Remove any entries that are not necessary (proteins not covered by LC-MS/MS data)
+    con.execute('DELETE FROM PROTEIN WHERE protein_id NOT IN (SELECT DISTINCT(protein_id) as protein_id FROM QUANTIFICATION);')
+    con.execute('DELETE FROM NETWORK WHERE bait_id NOT IN (SELECT DISTINCT(protein_id) as protein_id FROM QUANTIFICATION) OR prey_id NOT IN (SELECT DISTINCT(protein_id) as protein_id FROM QUANTIFICATION);')
+    con.execute('VACUUM;')
 
     # Close connection to file
     con.close()
