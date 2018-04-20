@@ -3,14 +3,16 @@ import pandas as pd
 import click
 from sklearn import preprocessing
 import sys
+import csv
 
 from lxml import etree
+
+from pandas.api.types import is_numeric_dtype
 
 class uniprot:
     def __init__(self, uniprotfile):
         self.namespaces = {'uniprot': "http://uniprot.org/uniprot"}
         self.df = self.read(uniprotfile)
-
 
     def read(self, uniprotfile):
         def _extract(lst):
@@ -18,7 +20,6 @@ class uniprot:
                 return lst[0]
             else:
                 return None
-
 
         df = pd.DataFrame(columns=["protein_id", "protein_name", "ensembl_id", "protein_mw"])
 
@@ -39,17 +40,14 @@ class uniprot:
 
         return df
 
-
-    def table(self):
-        return self.df
-
+    def to_df(self):
+        return self.df[['protein_id','protein_name','protein_mw']]
 
     def expand(self):
         ensembl = self.df.apply(lambda x: pd.Series(x['ensembl_id']),axis=1).stack().reset_index(level=1, drop=True)
         ensembl.name = 'ensembl_id'
 
         return self.df.drop('ensembl_id', axis=1).join(ensembl).reset_index(drop=True)[["protein_id", "protein_name", "ensembl_id", "protein_mw"]]
-
 
 class mitab:
     def __init__(self, mitabfile):
@@ -59,10 +57,8 @@ class mitab:
         def _extract_uniprotkb(string):
             return [u for u in string.split("|") if "uniprotkb" in u][0].split("uniprotkb:")[1]
 
-
         def _extract_score(string):
             return float([u for u in string.split("|") if "score" in u][0].split("score:")[1])
-
 
         df = pd.read_table(mitabfile, header = None, usecols=[0,1,14])
         df.columns = ["bait_id","prey_id","interaction_confidence"]
@@ -94,7 +90,6 @@ class mitab:
 
         return df
 
-
 class stringdb:
     def __init__(self, stringdbfile, uniprot):
         self.df = self.read(stringdbfile, uniprot)
@@ -117,7 +112,6 @@ class stringdb:
 
         return df
 
-
 class net:
     def __init__(self, netfile, uniprot):
         self.formats = ['stringdb','mitab']
@@ -127,7 +121,6 @@ class net:
             self.df = stringdb(netfile, uniprot).df
         elif self.format == 'mitab':
             self.df = mitab(netfile).df
-
 
     def identify(self, netfile):
         with open(netfile) as f:
@@ -142,4 +135,151 @@ class net:
             return self.formats[1]
         else:
             sys.exit("Error: Reference network file format is not supported.")
+
+    def to_df(self):
+        return self.df
+
+class sec:
+    def __init__(self, secfile, columns):
+        self.run_id_col = columns[0]
+        self.sec_id_col = columns[1]
+        self.sec_mw_col = columns[2]
+        self.condition_id_col = columns[3]
+        self.replicate_id_col = columns[4]
+        self.delimiter = self.identify(secfile)
+        self.df = self.read(secfile)
+
+    def identify(self, secfile):
+        with open(secfile) as f:
+            header = f.readline()
+        f.close()
+
+        sniffer = csv.Sniffer()
+        dialect = sniffer.sniff(header)
+
+        columns = header.split("\n")[0].split(dialect.delimiter)
+
+        # Check if valid
+        if self.run_id_col in columns and self.sec_mw_col in columns and self.condition_id_col in columns and self.replicate_id_col in columns:
+            return dialect.delimiter
+        else:
+            sys.exit("Error: SEC definition file format is not supported. Try changing the 'columns' parameter.")
+
+    def read(self, secfile):
+        df = pd.read_csv(secfile, sep=self.delimiter)
+
+        # Organize and rename columns
+        df = df[[self.run_id_col, self.sec_id_col, self.sec_mw_col, self.condition_id_col, self.replicate_id_col]]
+        df.columns = ['run_id', 'sec_id', 'sec_mw', 'condition_id', 'replicate_id']
+
+        df = df.sort_values(by=['condition_id','replicate_id','sec_id'])
+
+        if not is_numeric_dtype(df['sec_id']):
+            sys.exit("Error: SEC definition file does not contain numerical '%s' column." % self.sec_id_col)
+
+        if not is_numeric_dtype(df['sec_mw']):
+            sys.exit("Error: SEC definition file does not contain numerical '%s' column." % self.sec_mw_col)
+
+        # run_id, condition_id and replicate_id are categorial values
+        df['run_id'] = df['run_id'].apply(str)
+        df['condition_id'] = df['condition_id'].apply(str)
+        df['replicate_id'] = df['replicate_id'].apply(str)
+
+        return df
+
+    def to_df(self):
+        return self.df
+
+class quantification:
+    def __init__(self, infile, columns, run_ids):
+        self.run_id_col = columns[0]
+        self.protein_id_col = columns[5]
+        self.peptide_id_col = columns[6]
+        self.intensity_id_col = columns[7]
+        self.formats = ['matrix','long']
+        self.format, self.delimiter, self.header = self.identify(infile)
+        self.run_ids = run_ids
+
+        if self.format == 'matrix':
+            self.df = self.read_matrix(infile)
+        elif self.format == 'long':
+            self.df = self.read_long(infile)
+
+    def identify(self, infile):
+        with open(infile) as f:
+            header = f.readline()
+        f.close()
+
+        sniffer = csv.Sniffer()
+        dialect = sniffer.sniff(header)
+
+        columns = header.split("\n")[0].split(dialect.delimiter)
+
+        # Matrix
+        if self.run_id_col not in columns and self.protein_id_col in columns and self.peptide_id_col in columns:
+            return self.formats[0], dialect.delimiter, columns
+        # Long list
+        elif self.run_id_col in columns and self.protein_id_col in columns and self.peptide_id_col and self.intensity_id_col in columns:
+            return self.formats[1], dialect.delimiter, columns
+        else:
+            sys.exit("Error: Peptide quantification file format is not supported. Try changing the 'columns' parameter.")
+
+    def read_matrix(self, infile):
+        # Identify run_ids in header
+        run_id_columns = set(self.run_ids).intersection(self.header)
+
+        # Read data
+        mx = pd.read_csv(infile, sep=self.delimiter)
+        df = pd.melt(mx, id_vars=[self.protein_id_col, self.peptide_id_col], value_vars=run_id_columns, var_name=self.run_id_col, value_name=self.intensity_id_col)
+
+        # Organize and rename columns
+        df = df[[self.run_id_col, self.protein_id_col, self.peptide_id_col, self.intensity_id_col]]
+        df.columns = ['run_id', 'protein_id', 'peptide_id', 'peptide_intensity']
+
+        # run_id, condition_id and replicate_id are categorial values, peptide_intensity must be float
+        df['run_id'] = df['run_id'].apply(str)
+        df['protein_id'] = df['protein_id'].apply(str)
+        df['peptide_id'] = df['peptide_id'].apply(str)
+        df['peptide_intensity'] = df['peptide_intensity'].apply(float)
+
+        df = df.sort_values(by=['protein_id','peptide_id','run_id'])
+
+        # Simple validation
+        if len(run_id_columns) < 10:
+            sys.exit("Error: Peptide quantification file could not be linked to SEC definition file. Try changing the 'columns' parameter.")
+
+        # Remove zero values to save space
+        df = df[df['peptide_intensity'] > 0]
+
+        return df
+
+    def read_long(self, infile):
+        # Read data
+        df = pd.read_csv(infile, sep=self.delimiter)
+
+        # Organize and rename columns
+        df = df[[self.run_id_col, self.protein_id_col, self.peptide_id_col, self.intensity_id_col]]
+        df.columns = ['run_id', 'protein_id', 'peptide_id', 'peptide_intensity']
+
+        # run_id, condition_id and replicate_id are categorial values, peptide_intensity must be float
+        df['run_id'] = df['run_id'].apply(str)
+        df['protein_id'] = df['protein_id'].apply(str)
+        df['peptide_id'] = df['peptide_id'].apply(str)
+        df['peptide_intensity'] = df['peptide_intensity'].apply(float)
+
+        df = df.sort_values(by=['protein_id','peptide_id','run_id'])
+
+        # Simple validation
+        run_id_columns = set(self.run_ids).intersection(set(df['run_id'].unique()))
+
+        if len(run_id_columns) < 10:
+            sys.exit("Error: Peptide quantification file could not be linked to SEC definition file. Try changing the 'columns' parameter.")
+
+        # Remove zero values to save space
+        df = df[df['peptide_intensity'] > 0]
+
+        return df
+
+    def to_df(self):
+        return self.df
 
