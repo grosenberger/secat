@@ -3,7 +3,6 @@ import pandas as pd
 import click
 from sklearn import preprocessing
 import sys
-import csv
 
 from lxml import etree
 
@@ -123,15 +122,15 @@ class net:
             self.df = mitab(netfile).df
 
     def identify(self, netfile):
-        with open(netfile) as f:
-            header = f.readline()
-        f.close()
+        header = pd.read_table(netfile, sep=None, nrows=1, engine='python')
+
+        columns = list(header.columns.values)
 
         # STRING-DB
-        if header.split("\n")[0].split(" ") == ['protein1', 'protein2', 'combined_score']:
+        if columns == ['protein1', 'protein2', 'combined_score']:
             return self.formats[0]
         # MITAB 2.5, 2.6, 2.7
-        elif len(header.split("\n")[0].split("\t")) in [15, 36, 42]:
+        elif len(header.columns) in [15, 36, 42]:
             return self.formats[1]
         else:
             sys.exit("Error: Reference network file format is not supported.")
@@ -146,27 +145,23 @@ class sec:
         self.sec_mw_col = columns[2]
         self.condition_id_col = columns[3]
         self.replicate_id_col = columns[4]
-        self.delimiter = self.identify(secfile)
+        self.formats = ['secdef']
+        self.format = self.identify(secfile)
         self.df = self.read(secfile)
 
     def identify(self, secfile):
-        with open(secfile) as f:
-            header = f.readline()
-        f.close()
+        header = pd.read_table(secfile, sep=None, nrows=1, engine='python')
 
-        sniffer = csv.Sniffer()
-        dialect = sniffer.sniff(header)
-
-        columns = header.split("\n")[0].split(dialect.delimiter)
+        columns = list(header.columns.values)
 
         # Check if valid
         if self.run_id_col in columns and self.sec_mw_col in columns and self.condition_id_col in columns and self.replicate_id_col in columns:
-            return dialect.delimiter
+            return 'secdef'
         else:
             sys.exit("Error: SEC definition file format is not supported. Try changing the 'columns' parameter.")
 
     def read(self, secfile):
-        df = pd.read_csv(secfile, sep=self.delimiter)
+        df = pd.read_csv(secfile, sep=None, engine='python')
 
         # Organize and rename columns
         df = df[[self.run_id_col, self.sec_id_col, self.sec_mw_col, self.condition_id_col, self.replicate_id_col]]
@@ -197,7 +192,7 @@ class quantification:
         self.peptide_id_col = columns[6]
         self.intensity_id_col = columns[7]
         self.formats = ['matrix','long']
-        self.format, self.delimiter, self.header = self.identify(infile)
+        self.format, self.header = self.identify(infile)
         self.run_ids = run_ids
 
         if self.format == 'matrix':
@@ -206,21 +201,16 @@ class quantification:
             self.df = self.read_long(infile)
 
     def identify(self, infile):
-        with open(infile) as f:
-            header = f.readline()
-        f.close()
+        header = pd.read_table(infile, sep=None, nrows=1, engine='python')
 
-        sniffer = csv.Sniffer()
-        dialect = sniffer.sniff(header)
-
-        columns = header.split("\n")[0].split(dialect.delimiter)
+        columns = list(header.columns.values)
 
         # Matrix
         if self.run_id_col not in columns and self.protein_id_col in columns and self.peptide_id_col in columns:
-            return self.formats[0], dialect.delimiter, columns
+            return self.formats[0], columns
         # Long list
         elif self.run_id_col in columns and self.protein_id_col in columns and self.peptide_id_col and self.intensity_id_col in columns:
-            return self.formats[1], dialect.delimiter, columns
+            return self.formats[1], columns
         else:
             sys.exit("Error: Peptide quantification file format is not supported. Try changing the 'columns' parameter.")
 
@@ -229,7 +219,7 @@ class quantification:
         run_id_columns = set(self.run_ids).intersection(self.header)
 
         # Read data
-        mx = pd.read_csv(infile, sep=self.delimiter)
+        mx = pd.read_csv(infile, sep=None, engine='python')
         df = pd.melt(mx, id_vars=[self.protein_id_col, self.peptide_id_col], value_vars=run_id_columns, var_name=self.run_id_col, value_name=self.intensity_id_col)
 
         # Organize and rename columns
@@ -255,7 +245,7 @@ class quantification:
 
     def read_long(self, infile):
         # Read data
-        df = pd.read_csv(infile, sep=self.delimiter)
+        df = pd.read_csv(infile, sep=None, engine='python')
 
         # Organize and rename columns
         df = df[[self.run_id_col, self.protein_id_col, self.peptide_id_col, self.intensity_id_col]]

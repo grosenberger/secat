@@ -15,18 +15,22 @@ def cli():
 # SECAT import data
 @cli.command()
 @click.argument('infiles', nargs=-1, type=click.Path(exists=True))
-@click.option('--out', 'outfile', required=True, type=click.Path(exists=False), help='Reference binary protein-protein interaction file.')
+@click.option('--out', 'outfile', required=True, type=click.Path(exists=False), help='Output SECAT file.')
 # # Reference files
-@click.option('--sec', 'secfile', type=click.Path(exists=False), help='The input SEC calibration file.')
+@click.option('--sec', 'secfile', required=True, type=click.Path(exists=True), help='The input SEC calibration file.')
 @click.option('--net', 'netfile', required=True, type=click.Path(exists=True), help='Reference binary protein-protein interaction file in STRING-DB or HUPO-PSI MITAB (2.5-2.7) format.')
-@click.option('--uniprot', 'uniprotfile', type=click.Path(exists=True), help='Reference molecular weights file in UniProt XML format.')
+@click.option('--uniprot', 'uniprotfile', required=True, type=click.Path(exists=True), help='Reference molecular weights file in UniProt XML format.')
 @click.option('--columns', default=["run_id","sec_id","sec_mw","condition_id","replicate_id","protein_id","peptide_id","peptide_intensity"], show_default=True, type=(str,str,str,str,str,str,str,str), help='Column names for SEC & peptide quantification files')
 def preprocess(infiles, outfile, secfile, netfile, uniprotfile, columns):
     """
     Import and preprocess SEC data.
     """
     # Prepare output file
-    os.remove(outfile)
+    try:
+        os.remove(outfile)
+    except OSError:
+        pass
+        
     con = sqlite3.connect(outfile)
 
     # Generate UniProt table
