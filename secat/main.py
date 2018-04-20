@@ -1,7 +1,9 @@
 import click
 import sqlite3
 import os
-from preprocess import uniprot, net, sec, quantification
+from shutil import copyfile
+from preprocess import uniprot, net, sec, quantification, meta, queries
+from detect import signalprocess
 
 @click.group(chain=True)
 @click.version_option()
@@ -16,15 +18,20 @@ def cli():
 @cli.command()
 @click.argument('infiles', nargs=-1, type=click.Path(exists=True))
 @click.option('--out', 'outfile', required=True, type=click.Path(exists=False), help='Output SECAT file.')
-# # Reference files
+# Reference files
 @click.option('--sec', 'secfile', required=True, type=click.Path(exists=True), help='The input SEC calibration file.')
 @click.option('--net', 'netfile', required=True, type=click.Path(exists=True), help='Reference binary protein-protein interaction file in STRING-DB or HUPO-PSI MITAB (2.5-2.7) format.')
 @click.option('--uniprot', 'uniprotfile', required=True, type=click.Path(exists=True), help='Reference molecular weights file in UniProt XML format.')
 @click.option('--columns', default=["run_id","sec_id","sec_mw","condition_id","replicate_id","protein_id","peptide_id","peptide_intensity"], show_default=True, type=(str,str,str,str,str,str,str,str), help='Column names for SEC & peptide quantification files')
-def preprocess(infiles, outfile, secfile, netfile, uniprotfile, columns):
+# Parameters for decoys
+@click.option('--decoy_intensity_bins', 'decoy_intensity_bins', default=1, show_default=True, type=int, help='Number of decoy bins for intensity.')
+@click.option('--decoy_left_sec_bins', 'decoy_left_sec_bins', default=1, show_default=True, type=int, help='Number of decoy bins for left SEC fraction.')
+@click.option('--decoy_right_sec_bins', 'decoy_right_sec_bins', default=1, show_default=True, type=int, help='Number of decoy bins for right SEC fraction.')
+def preprocess(infiles, outfile, secfile, netfile, uniprotfile, columns, decoy_intensity_bins, decoy_left_sec_bins, decoy_right_sec_bins):
     """
     Import and preprocess SEC data.
     """
+
     # Prepare output file
     try:
         os.remove(outfile)
@@ -36,17 +43,17 @@ def preprocess(infiles, outfile, secfile, netfile, uniprotfile, columns):
     # Generate UniProt table
     click.echo("Info: Parsing UniProt XML file %s." % uniprotfile)
     uniprot_data = uniprot(uniprotfile)
-    uniprot_data.to_df().to_sql('PROTEIN' ,con, index=False)
+    uniprot_data.to_df().to_sql('PROTEIN', con, index=False)
 
     # Generate Network table
     click.echo("Info: Parsing network file %s." % netfile)
     net_data = net(netfile, uniprot_data)
-    net_data.to_df().to_sql('NETWORK' ,con, index=False)
+    net_data.to_df().to_sql('NETWORK', con, index=False)
 
     # Generate SEC definition table
     click.echo("Info: Parsing SEC definition file %s." % secfile)
     sec_data = sec(secfile, columns)
-    sec_data.to_df().to_sql('SEC' ,con, index=False)
+    sec_data.to_df().to_sql('SEC', con, index=False)
 
     # Generate Peptide quantification table
     run_ids = sec_data.to_df()['run_id'].unique() # Extract valid run_ids from SEC definition table
@@ -55,6 +62,17 @@ def preprocess(infiles, outfile, secfile, netfile, uniprotfile, columns):
         click.echo("Info: Parsing peptide quantification file %s." % infile)
         quantification_data = quantification(infile, columns, run_ids)
         quantification_data.to_df().to_sql('QUANTIFICATION' ,con, index=False, if_exists='append')
+
+    # Generate peptide and protein meta data over all conditions and replicates
+    click.echo("Info: Generating peptide and protein meta data.")
+    meta_data = meta(quantification_data, sec_data, decoy_intensity_bins, decoy_left_sec_bins, decoy_right_sec_bins)
+    meta_data.peptide_meta.to_sql('PEPTIDE_META', con, index=False)
+    meta_data.protein_meta.to_sql('PROTEIN_META', con, index=False)
+
+    # Generate interaction query data
+    click.echo("Info: Generating interaction query data.")
+    queries_data = queries(net_data, meta_data.protein_meta)
+    queries_data.to_df().to_sql('QUERIES', con, index=False)
 
     # Remove any entries that are not necessary (proteins not covered by LC-MS/MS data)
     con.execute('DELETE FROM PROTEIN WHERE protein_id NOT IN (SELECT DISTINCT(protein_id) as protein_id FROM QUANTIFICATION);')
@@ -65,3 +83,33 @@ def preprocess(infiles, outfile, secfile, netfile, uniprotfile, columns):
     con.close()
 
     click.echo("Info: Data successfully preprocessed and stored in %s." % outfile)
+
+# SECAT detect features
+@cli.command()
+@click.option('--in', 'infile', required=True, type=click.Path(exists=True), help='Input SECAT file.')
+@click.option('--out', 'outfile', required=False, type=click.Path(exists=False), help='Output SECAT file.')
+# Parameters for peptides
+@click.option('--min_peptides', 'min_peptides', default=3, show_default=True, type=int, help='Minimum number of required peptides per protein.')
+@click.option('--max_peptides', 'max_peptides', default=3, show_default=True, type=int, help='Maximum number of (most intense) peptides per protein.')
+@click.option('--det_peptides', 'det_peptides', default=3, show_default=True, type=int, help='Number of (most intense) peptides per assay for detection.')
+# Parameters for peak picking
+@click.option('--peak_method', 'peak_method', default='gauss', show_default=True, type=click.Choice(['gauss', 'sgolay']), help='Use Gaussian or Savitzky-Golay smoothing.')
+@click.option('--peak_width', 'peak_width', default=2, show_default=True, type=int, help='Force a certain minimal peak width (sec units; -1 to disable) on the data (e.g. extend the peak at least by this amount on both sides).')
+@click.option('--gauss_width', 'gauss_width', default=6, show_default=True, type=int, help='Specify expected gaussian width in SEC units at FWHM.')
+@click.option('--sgolay_frame_length', 'sgolay_frame_length', default=15, show_default=True, type=int, help='Specify Savitzky-Golay frame length.')
+@click.option('--sgolay_polynomial_order', 'sgolay_polynomial_order', default=3, show_default=True, type=int, help='Specify Savitzky-Golay polynomial order.')
+@click.option('--sn_win_len', 'sn_win_len', default=30, show_default=True, type=int, help='Signal to noise window length.')
+@click.option('--sn_bin_count', 'sn_bin_count', default=15, show_default=True, type=int, help='Signal to noise bin count.')
+def detect(infile, outfile, min_peptides, max_peptides, det_peptides, peak_method, peak_width, gauss_width, sgolay_frame_length, sgolay_polynomial_order, sn_win_len, sn_bin_count):
+    """
+    Detect protein and interaction features in SEC data.
+    """
+
+    # Define outfile
+    if outfile is None:
+        outfile = infile
+    else:
+        copyfile(infile, outfile)
+        outfile = outfile
+
+    signalprocess(outfile, min_peptides, max_peptides, det_peptides, peak_method, peak_width, gauss_width, sgolay_frame_length, sgolay_polynomial_order, sn_win_len, sn_bin_count)

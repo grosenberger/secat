@@ -117,9 +117,11 @@ class net:
         self.format = self.identify(netfile)
 
         if self.format == 'stringdb':
-            self.df = stringdb(netfile, uniprot).df
+            network = stringdb(netfile, uniprot).df
         elif self.format == 'mitab':
-            self.df = mitab(netfile).df
+            network = mitab(netfile).df
+
+        self.df = self.expand(network, uniprot)
 
     def identify(self, netfile):
         header = pd.read_table(netfile, sep=None, nrows=1, engine='python')
@@ -134,6 +136,18 @@ class net:
             return self.formats[1]
         else:
             sys.exit("Error: Reference network file format is not supported.")
+
+    def expand(self, network, uniprot):
+        network_rev = network.copy()
+
+        network_rev = network_rev[['prey_id','bait_id','interaction_confidence']]
+        network_rev.columns = ["bait_id","prey_id","interaction_confidence"]
+
+        proteins = uniprot.to_df()[['protein_id','protein_id']]
+        proteins.columns = ["bait_id","prey_id"]
+        proteins['interaction_confidence'] = 1.0
+
+        return pd.concat([proteins, network, network_rev])
 
     def to_df(self):
         return self.df
@@ -273,3 +287,97 @@ class quantification:
     def to_df(self):
         return self.df
 
+class meta:
+    def __init__(self, quantification_data, sec_data, decoy_intensity_bins, decoy_left_sec_bins, decoy_right_sec_bins):
+        self.decoy_intensity_bins = decoy_intensity_bins
+        self.decoy_left_sec_bins = decoy_left_sec_bins
+        self.decoy_right_sec_bins = decoy_right_sec_bins
+
+        self.peptide_meta, self.protein_meta = self.generate(quantification_data, sec_data)
+
+    def generate(self, quantification_data, sec_data):
+        df = pd.merge(quantification_data.to_df(), sec_data.to_df(), on='run_id')
+
+        # Peptide-level meta data
+        top_pep_tg = df.groupby(['peptide_id'])
+        top_pep_s = top_pep_tg['peptide_intensity'].sum()
+        top_pep = pd.DataFrame(top_pep_s)
+        top_pep['peptide_id']=top_pep.index
+        top_pep.columns = ['sumIntensity','peptide_id']
+        top_pep_merged = pd.merge(df[['peptide_id','protein_id']], top_pep, on='peptide_id', how='inner')
+        top_pep_rank = top_pep_merged[['protein_id','peptide_id','sumIntensity']].drop_duplicates()
+        top_pep_rank['peptide_rank'] = top_pep_rank.groupby(['protein_id'])['sumIntensity'].rank(ascending=False)
+
+        # Store peptide-level meta data
+        peptide_meta = top_pep_rank[['peptide_id','peptide_rank']]
+
+        # Protein-level meta data
+        num_pep = pd.DataFrame(top_pep_rank.groupby(['protein_id'])['peptide_id'].count())
+        num_pep['protein_id']=num_pep.index
+        num_pep.columns = ['peptide_count','protein_id']
+
+        # Generate intensity bins
+        inpep_intensity = df.groupby(['protein_id'])
+        inpep_intensity_sum = inpep_intensity['peptide_intensity'].sum()
+        inpep_intensity_ranks = pd.DataFrame(inpep_intensity_sum)
+        inpep_intensity_ranks['protein_id']=inpep_intensity_ranks.index
+        inpep_intensity_ranks.columns = ['sum_intensity','protein_id']
+        inpep_intensity_ranks['intensity_rank'] = inpep_intensity_ranks['sum_intensity'].rank(ascending=False)
+        inpep_intensity_ranks['intensity_bin'] = pd.cut(inpep_intensity_ranks['intensity_rank'], bins=self.decoy_intensity_bins, right=False, labels=False)
+
+        # Generate left sec bins
+        inpep_min_sec = df.groupby(['protein_id'])
+        inpep_min_sec_cnt = inpep_min_sec['sec_id'].min()
+        inpep_min_sec_ranks = pd.DataFrame(inpep_min_sec_cnt)
+        inpep_min_sec_ranks['protein_id']=inpep_min_sec_ranks.index
+        inpep_min_sec_ranks.columns = ['min_sec','protein_id']
+        inpep_min_sec_ranks['sec_min_rank'] = inpep_min_sec_ranks['min_sec'].rank(ascending=False)
+        inpep_min_sec_ranks['sec_min_bin'] = pd.cut(inpep_min_sec_ranks['sec_min_rank'], bins=self.decoy_left_sec_bins, right=False, labels=False)
+
+        # Generate right sec bins
+        inpep_max_sec = df.groupby(['protein_id'])
+        inpep_max_sec_cnt = inpep_max_sec['sec_id'].max()
+        inpep_max_sec_ranks = pd.DataFrame(inpep_max_sec_cnt)
+        inpep_max_sec_ranks['protein_id']=inpep_max_sec_ranks.index
+        inpep_max_sec_ranks.columns = ['max_sec','protein_id']
+        inpep_max_sec_ranks['sec_max_rank'] = inpep_max_sec_ranks['max_sec'].rank(ascending=False)
+        inpep_max_sec_ranks['sec_max_bin'] = pd.cut(inpep_max_sec_ranks['sec_max_rank'], bins=self.decoy_right_sec_bins, right=False, labels=False)
+
+        # Store protein-level meta data
+        protein_meta = pd.merge(pd.merge(pd.merge(num_pep[['protein_id','peptide_count']], inpep_intensity_ranks[['protein_id','intensity_bin']], on='protein_id', how='inner'), inpep_min_sec_ranks[['protein_id','sec_min_bin','min_sec']], on='protein_id', how='inner'), inpep_max_sec_ranks[['protein_id','sec_max_bin','max_sec']], on='protein_id', how='inner')
+
+        return peptide_meta, protein_meta
+
+class queries:
+    def __init__(self, net_data, protein_meta_data):
+        self.df = self.generate_queries(net_data, protein_meta_data)
+
+    def generate_queries(self, net_data, protein_meta_data):
+        def _random_nonidentical_array(data):
+            np.random.shuffle(data['bait_id'].values)
+            return data
+
+        # Merge data
+        queries = pd.merge(net_data.to_df(), protein_meta_data, left_on='prey_id', right_on='protein_id', how='inner')
+        queries['decoy'] = False
+
+        # Append decoys
+        decoy_queries = queries.copy()
+        decoy_queries = decoy_queries.groupby(['intensity_bin','sec_min_bin','sec_max_bin'])
+
+        for it in range(0, 1):
+            if it == 0:
+                decoy_queries_shuffled = decoy_queries.apply(_random_nonidentical_array).reset_index()
+            else:
+                decoy_queries_shuffled = pd.concat([decoy_queries_shuffled, decoy_queries.apply(random_nonidentical_array).reset_index()])
+        decoy_queries = decoy_queries_shuffled
+
+        # Exclude conflicting data from decoys (present in both targets and decoys)
+        decoy_queries = pd.merge(decoy_queries.drop(['decoy'], axis=1), queries[['bait_id','prey_id','decoy']], on=['bait_id','prey_id'], how='left')
+        decoy_queries = decoy_queries.fillna(True)
+        decoy_queries = decoy_queries[decoy_queries['decoy'] == True]
+
+        return pd.concat([queries, decoy_queries]).drop_duplicates()
+
+    def to_df(self):
+        return self.df
