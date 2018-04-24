@@ -3,7 +3,12 @@ import sqlite3
 import os
 from shutil import copyfile
 from preprocess import uniprot, net, sec, quantification, meta, queries
-from detect import signalprocess
+from detect import prepare, process
+import pandas as pd
+
+from multiprocessing import Pool, freeze_support, RLock, cpu_count
+from tqdm import tqdm
+
 
 @click.group(chain=True)
 @click.version_option()
@@ -77,6 +82,7 @@ def preprocess(infiles, outfile, secfile, netfile, uniprotfile, columns, decoy_i
     # Remove any entries that are not necessary (proteins not covered by LC-MS/MS data)
     con.execute('DELETE FROM PROTEIN WHERE protein_id NOT IN (SELECT DISTINCT(protein_id) as protein_id FROM QUANTIFICATION);')
     con.execute('DELETE FROM NETWORK WHERE bait_id NOT IN (SELECT DISTINCT(protein_id) as protein_id FROM QUANTIFICATION) OR prey_id NOT IN (SELECT DISTINCT(protein_id) as protein_id FROM QUANTIFICATION);')
+    con.execute('DELETE FROM QUERIES WHERE bait_id NOT IN (SELECT DISTINCT(protein_id) as protein_id FROM QUANTIFICATION) OR prey_id NOT IN (SELECT DISTINCT(protein_id) as protein_id FROM QUANTIFICATION);')
     con.execute('VACUUM;')
 
     # Close connection to file
@@ -95,15 +101,20 @@ def preprocess(infiles, outfile, secfile, netfile, uniprotfile, columns, decoy_i
 # Parameters for peak picking
 @click.option('--peak_method', 'peak_method', default='gauss', show_default=True, type=click.Choice(['gauss', 'sgolay']), help='Use Gaussian or Savitzky-Golay smoothing.')
 @click.option('--peak_width', 'peak_width', default=2, show_default=True, type=int, help='Force a certain minimal peak width (sec units; -1 to disable) on the data (e.g. extend the peak at least by this amount on both sides).')
+@click.option('--signal_to_noise', 'signal_to_noise', default=0.75, show_default=True, type=int, help='Signal-to-noise threshold at which a peak will not be extended any more. Note that setting this too high (e.g. 1.0) can lead to peaks whose flanks are not fully captured.')
 @click.option('--gauss_width', 'gauss_width', default=6, show_default=True, type=int, help='Specify expected gaussian width in SEC units at FWHM.')
 @click.option('--sgolay_frame_length', 'sgolay_frame_length', default=15, show_default=True, type=int, help='Specify Savitzky-Golay frame length.')
 @click.option('--sgolay_polynomial_order', 'sgolay_polynomial_order', default=3, show_default=True, type=int, help='Specify Savitzky-Golay polynomial order.')
 @click.option('--sn_win_len', 'sn_win_len', default=30, show_default=True, type=int, help='Signal to noise window length.')
 @click.option('--sn_bin_count', 'sn_bin_count', default=15, show_default=True, type=int, help='Signal to noise bin count.')
-def detect(infile, outfile, min_peptides, max_peptides, det_peptides, peak_method, peak_width, gauss_width, sgolay_frame_length, sgolay_polynomial_order, sn_win_len, sn_bin_count):
+@click.option('--threads', 'threads', default=1, show_default=True, type=int, help='Number of threads used for parallel processing of SEC runs. -1 means all available CPUs.')
+
+def detect(infile, outfile, min_peptides, max_peptides, det_peptides, peak_method, peak_width, signal_to_noise, gauss_width, sgolay_frame_length, sgolay_polynomial_order, sn_win_len, sn_bin_count, threads):
     """
     Detect protein and interaction features in SEC data.
     """
+
+    click.echo("Info: The signal processing module will display warning messages if your data is sparse. In most scenarios, these warnings can be ignored.")
 
     # Define outfile
     if outfile is None:
@@ -112,4 +123,21 @@ def detect(infile, outfile, min_peptides, max_peptides, det_peptides, peak_metho
         copyfile(infile, outfile)
         outfile = outfile
 
-    signalprocess(outfile, min_peptides, max_peptides, det_peptides, peak_method, peak_width, gauss_width, sgolay_frame_length, sgolay_polynomial_order, sn_win_len, sn_bin_count)
+    # Prepare SEC experiments, e.g. individual conditions + replicates
+    exps = prepare(outfile, min_peptides, max_peptides, det_peptides, peak_method, peak_width, signal_to_noise, gauss_width, sgolay_frame_length, sgolay_polynomial_order, sn_win_len, sn_bin_count)
+
+    # Execute workflow in parallel
+    if threads == -1:
+        n_cpus = cpu_count()
+    else:
+        n_cpus = threads
+
+    freeze_support()
+    p = Pool(processes=n_cpus, initializer=tqdm.set_lock, initargs=(RLock(),))
+    dfs = p.map(process, exps)
+
+    df = pd.concat(dfs)
+
+    con = sqlite3.connect(outfile)
+    df.to_sql('FEATURES', con, index=False, if_exists='replace')
+    con.close()

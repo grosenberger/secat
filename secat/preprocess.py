@@ -377,7 +377,7 @@ class queries:
         decoy_queries = decoy_queries.fillna(True)
         decoy_queries = decoy_queries[decoy_queries['decoy'] == True]
 
-        return pd.concat([queries, decoy_queries]).drop_duplicates()
+        return pd.concat([queries, decoy_queries])[['bait_id','prey_id','decoy']].drop_duplicates()
 
     def to_df(self):
         return self.df
