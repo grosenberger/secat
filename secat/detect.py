@@ -108,7 +108,7 @@ class signalprocess:
                                     "bait_id": bait,
                                     "prey_id": prey,
                                     "feature_id": str(feature.getUniqueId()),
-                                    "decoy": "0", # decoy
+                                    "decoy": False, # decoy
                                     "RT": feature.getRT(),
                                     "leftWidth": feature.getMetaValue("leftWidth"),
                                     "rightWidth": feature.getMetaValue("rightWidth"),
@@ -120,16 +120,16 @@ class signalprocess:
                                     "bait_elution_model_fit": feature.getMetaValue("var_elution_model_fit_score"),
                                     "bait_intensity": feature.getIntensity(),
                                     "prey_peptide_id": feature.getMetaValue("id_target_transition_names").split(";")[i],
-                                    "prey_peptide_intensity": feature.getMetaValue("id_target_area_intensity").split(";")[i],
-                                    "prey_peptide_total_intensity": feature.getMetaValue("id_target_total_area_intensity").split(";")[i],
-                                    "prey_peptide_total_mi": feature.getMetaValue("id_target_total_mi").split(";")[i],
-                                    "main_var_xcorr_shape_score": feature.getMetaValue("id_target_ind_xcorr_shape").split(";")[i],
-                                    "var_xcorr_coelution_score": feature.getMetaValue("id_target_ind_xcorr_coelution").split(";")[i],
-                                    "var_log_sn_score": feature.getMetaValue("id_target_ind_log_sn_score").split(";")[i],
-                                    "var_mi_score": feature.getMetaValue("id_target_ind_mi_score").split(";")[i],
-                                    "var_mi_ratio_score": feature.getMetaValue("id_target_ind_mi_ratio_score").split(";")[i],
-                                    "var_intensity_score": feature.getMetaValue("id_target_intensity_score").split(";")[i],
-                                    "var_intensity_ratio_score": feature.getMetaValue("id_target_intensity_ratio_score").split(";")[i],
+                                    "prey_peptide_intensity": float(feature.getMetaValue("id_target_area_intensity").split(";")[i]),
+                                    "prey_peptide_total_intensity": float(feature.getMetaValue("id_target_total_area_intensity").split(";")[i]),
+                                    "prey_peptide_total_mi": float(feature.getMetaValue("id_target_total_mi").split(";")[i]),
+                                    "main_var_xcorr_shape_score": float(feature.getMetaValue("id_target_ind_xcorr_shape").split(";")[i]),
+                                    "var_xcorr_coelution_score": float(feature.getMetaValue("id_target_ind_xcorr_coelution").split(";")[i]),
+                                    "var_log_sn_score": float(feature.getMetaValue("id_target_ind_log_sn_score").split(";")[i]),
+                                    "var_mi_score": float(feature.getMetaValue("id_target_ind_mi_score").split(";")[i]),
+                                    "var_mi_ratio_score": float(feature.getMetaValue("id_target_ind_mi_ratio_score").split(";")[i]),
+                                    "var_intensity_score": float(feature.getMetaValue("id_target_intensity_score").split(";")[i]),
+                                    "var_intensity_ratio_score": float(feature.getMetaValue("id_target_intensity_ratio_score").split(";")[i]),
                                     "var_stoichiometry_score": var_stoichiometry_score
                                     }
                     subfeatures.append(subfeature)
@@ -149,7 +149,7 @@ class signalprocess:
                                     "bait_id": bait,
                                     "prey_id": prey,
                                     "feature_id": str(feature.getUniqueId()),
-                                    "decoy": "1", # decoy
+                                    "decoy": True, # decoy
                                     "RT": feature.getRT(),
                                     "leftWidth": feature.getMetaValue("leftWidth"),
                                     "rightWidth": feature.getMetaValue("rightWidth"),
@@ -161,16 +161,16 @@ class signalprocess:
                                     "bait_elution_model_fit": feature.getMetaValue("var_elution_model_fit_score"),
                                     "bait_intensity": feature.getIntensity(),
                                     "prey_peptide_id": feature.getMetaValue("id_decoy_transition_names").split(";")[i],
-                                    "prey_peptide_intensity": feature.getMetaValue("id_decoy_area_intensity").split(";")[i],
-                                    "prey_peptide_total_intensity": feature.getMetaValue("id_decoy_total_area_intensity").split(";")[i],
-                                    "prey_peptide_total_mi": feature.getMetaValue("id_decoy_total_mi").split(";")[i],
-                                    "main_var_xcorr_shape_score": feature.getMetaValue("id_decoy_ind_xcorr_shape").split(";")[i],
-                                    "var_xcorr_coelution_score": feature.getMetaValue("id_decoy_ind_xcorr_coelution").split(";")[i],
-                                    "var_log_sn_score": feature.getMetaValue("id_decoy_ind_log_sn_score").split(";")[i],
-                                    "var_mi_score": feature.getMetaValue("id_decoy_ind_mi_score").split(";")[i],
-                                    "var_mi_ratio_score": feature.getMetaValue("id_decoy_ind_mi_ratio_score").split(";")[i],
-                                    "var_intensity_score": feature.getMetaValue("id_decoy_intensity_score").split(";")[i],
-                                    "var_intensity_ratio_score": feature.getMetaValue("id_decoy_intensity_ratio_score").split(";")[i],
+                                    "prey_peptide_intensity": float(feature.getMetaValue("id_decoy_area_intensity").split(";")[i]),
+                                    "prey_peptide_total_intensity": float(feature.getMetaValue("id_decoy_total_area_intensity").split(";")[i]),
+                                    "prey_peptide_total_mi": float(feature.getMetaValue("id_decoy_total_mi").split(";")[i]),
+                                    "main_var_xcorr_shape_score": float(feature.getMetaValue("id_decoy_ind_xcorr_shape").split(";")[i]),
+                                    "var_xcorr_coelution_score": float(feature.getMetaValue("id_decoy_ind_xcorr_coelution").split(";")[i]),
+                                    "var_log_sn_score": float(feature.getMetaValue("id_decoy_ind_log_sn_score").split(";")[i]),
+                                    "var_mi_score": float(feature.getMetaValue("id_decoy_ind_mi_score").split(";")[i]),
+                                    "var_mi_ratio_score": float(feature.getMetaValue("id_decoy_ind_mi_ratio_score").split(";")[i]),
+                                    "var_intensity_score": float(feature.getMetaValue("id_decoy_intensity_score").split(";")[i]),
+                                    "var_intensity_ratio_score": float(feature.getMetaValue("id_decoy_intensity_ratio_score").split(";")[i]),
                                     "var_stoichiometry_score": var_stoichiometry_score
                                     }
                     subfeatures.append(subfeature)

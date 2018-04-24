@@ -1,14 +1,16 @@
 import click
+from tqdm import tqdm
+
+from multiprocessing import Pool, freeze_support, RLock, cpu_count
 import sqlite3
 import os
 from shutil import copyfile
-from preprocess import uniprot, net, sec, quantification, meta, queries
-from detect import prepare, process
+
 import pandas as pd
 
-from multiprocessing import Pool, freeze_support, RLock, cpu_count
-from tqdm import tqdm
-
+from preprocess import uniprot, net, sec, quantification, meta, queries
+from detect import prepare, process
+from score import mw, filter_training
 
 @click.group(chain=True)
 @click.version_option()
@@ -108,7 +110,6 @@ def preprocess(infiles, outfile, secfile, netfile, uniprotfile, columns, decoy_i
 @click.option('--sn_win_len', 'sn_win_len', default=30, show_default=True, type=int, help='Signal to noise window length.')
 @click.option('--sn_bin_count', 'sn_bin_count', default=15, show_default=True, type=int, help='Signal to noise bin count.')
 @click.option('--threads', 'threads', default=1, show_default=True, type=int, help='Number of threads used for parallel processing of SEC runs. -1 means all available CPUs.')
-
 def detect(infile, outfile, min_peptides, max_peptides, det_peptides, peak_method, peak_width, signal_to_noise, gauss_width, sgolay_frame_length, sgolay_polynomial_order, sn_win_len, sn_bin_count, threads):
     """
     Detect protein and interaction features in SEC data.
@@ -141,3 +142,30 @@ def detect(infile, outfile, min_peptides, max_peptides, det_peptides, peak_metho
     con = sqlite3.connect(outfile)
     df.to_sql('FEATURES', con, index=False, if_exists='replace')
     con.close()
+
+# SECAT score features
+@cli.command()
+@click.option('--in', 'infile', required=True, type=click.Path(exists=True), help='Input SECAT file.')
+@click.option('--out', 'outfile', required=False, type=click.Path(exists=False), help='Output SECAT file.')
+@click.option('--complex_threshold_factor', 'complex_threshold_factor', default=2.0, show_default=True, type=float, help='Factor threshold to consider a feature a complex rather than a monomer.')
+@click.option('--threads', 'threads', default=1, show_default=True, type=int, help='Number of threads used for parallel processing of SEC runs. -1 means all available CPUs.')
+def score(infile, outfile, complex_threshold_factor, threads):
+    """
+    Score protein and interaction features in SEC data.
+    """
+
+    # Define outfile
+    if outfile is None:
+        outfile = infile
+    else:
+        copyfile(infile, outfile)
+        outfile = outfile
+
+    # mw_data = mw(outfile, complex_threshold_factor)
+
+    # con = sqlite3.connect(outfile)
+    # mw_data.to_sql('FEATURES_MW', con, index=False, if_exists='replace')
+    # con.close()
+
+    filter_training(outfile)
+
