@@ -104,10 +104,10 @@ class signalprocess:
                     subfeature = {
                                     "condition_id": self.condition_id,
                                     "replicate_id": self.replicate_id,
-                                    "group_id": bait + "_" + prey + "-" + str(feature.getUniqueId()) + "-" + feature.getMetaValue("id_target_transition_names").split(";")[i],
+                                    "bait_feature_id": self.condition_id + "_" + self.replicate_id + "_" + bait + "_" + prey + "_" + str(feature.getUniqueId()),
+                                    "feature_id": self.condition_id + "_" + self.replicate_id + "_" + bait + "_" + prey + "_" + str(feature.getUniqueId()) + "_" + feature.getMetaValue("id_target_transition_names").split(";")[i],
                                     "bait_id": bait,
                                     "prey_id": prey,
-                                    "feature_id": str(feature.getUniqueId()),
                                     "decoy": False, # decoy
                                     "RT": feature.getRT(),
                                     "leftWidth": feature.getMetaValue("leftWidth"),
@@ -145,10 +145,10 @@ class signalprocess:
                     subfeature = {
                                     "condition_id": self.condition_id,
                                     "replicate_id": self.replicate_id,
-                                    "group_id": bait + "_" + prey + "-" + str(feature.getUniqueId()) + "-" + feature.getMetaValue("id_decoy_transition_names").split(";")[i],
+                                    "bait_feature_id": "DECOY_" + self.condition_id + "_" + self.replicate_id + "_" + bait + "_" + prey + "_" + str(feature.getUniqueId()),
+                                    "feature_id": "DECOY_" + self.condition_id + "_" + self.replicate_id + "_" + bait + "_" + prey + "_" + str(feature.getUniqueId()) + "_" + feature.getMetaValue("id_decoy_transition_names").split(";")[i],
                                     "bait_id": bait,
                                     "prey_id": prey,
-                                    "feature_id": str(feature.getUniqueId()),
                                     "decoy": True, # decoy
                                     "RT": feature.getRT(),
                                     "leftWidth": feature.getMetaValue("leftWidth"),

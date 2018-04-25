@@ -7,10 +7,13 @@ import os
 from shutil import copyfile
 
 import pandas as pd
+import numpy as np
 
 from preprocess import uniprot, net, sec, quantification, meta, queries
 from detect import prepare, process
-from score import mw, filter_training
+from score import mw, filter_training, pyprophet, infer
+
+from pyprophet.data_handling import transform_pi0_lambda
 
 @click.group(chain=True)
 @click.version_option()
@@ -140,7 +143,7 @@ def detect(infile, outfile, min_peptides, max_peptides, det_peptides, peak_metho
     df = pd.concat(dfs)
 
     con = sqlite3.connect(outfile)
-    df.to_sql('FEATURES', con, index=False, if_exists='replace')
+    df.to_sql('FEATURE', con, index=False, if_exists='replace')
     con.close()
 
 # SECAT score features
@@ -148,8 +151,27 @@ def detect(infile, outfile, min_peptides, max_peptides, det_peptides, peak_metho
 @click.option('--in', 'infile', required=True, type=click.Path(exists=True), help='Input SECAT file.')
 @click.option('--out', 'outfile', required=False, type=click.Path(exists=False), help='Output SECAT file.')
 @click.option('--complex_threshold_factor', 'complex_threshold_factor', default=2.0, show_default=True, type=float, help='Factor threshold to consider a feature a complex rather than a monomer.')
+# Semi-supervised learning
+@click.option('--xeval_fraction', default=0.5, show_default=True, type=float, help='Data fraction used for cross-validation of semi-supervised learning step.')
+@click.option('--xeval_num_iter', default=10, show_default=True, type=int, help='Number of iterations for cross-validation of semi-supervised learning step.')
+@click.option('--ss_initial_fdr', default=0.15, show_default=True, type=float, help='Initial FDR cutoff for best scoring targets.')
+@click.option('--ss_iteration_fdr', default=0.02, show_default=True, type=float, help='Iteration FDR cutoff for best scoring targets.')
+@click.option('--ss_num_iter', default=10, show_default=True, type=int, help='Number of iterations for semi-supervised learning step.')
+# Statistics
+@click.option('--parametric/--no-parametric', default=False, show_default=True, help='Do parametric estimation of p-values.')
+@click.option('--pfdr/--no-pfdr', default=False, show_default=True, help='Compute positive false discovery rate (pFDR) instead of FDR.')
+@click.option('--pi0_lambda', default=[0.1,0.5,0.05], show_default=True, type=(float, float, float), help='Use non-parametric estimation of p-values. Either use <START END STEPS>, e.g. 0.1, 1.0, 0.1 or set to fixed value, e.g. 0.4, 0, 0.', callback=transform_pi0_lambda)
+@click.option('--pi0_method', default='bootstrap', show_default=True, type=click.Choice(['smoother', 'bootstrap']), help='Either "smoother" or "bootstrap"; the method for automatically choosing tuning parameter in the estimation of pi_0, the proportion of true null hypotheses.')
+@click.option('--pi0_smooth_df', default=3, show_default=True, type=int, help='Number of degrees-of-freedom to use when estimating pi_0 with a smoother.')
+@click.option('--pi0_smooth_log_pi0/--no-pi0_smooth_log_pi0', default=False, show_default=True, help='If True and pi0_method = "smoother", pi0 will be estimated by applying a smoother to a scatterplot of log(pi0) estimates against the tuning parameter lambda.')
+@click.option('--lfdr_truncate/--no-lfdr_truncate', show_default=True, default=True, help='If True, local FDR values >1 are set to 1.')
+@click.option('--lfdr_monotone/--no-lfdr_monotone', show_default=True, default=True, help='If True, local FDR values are non-decreasing with increasing p-values.')
+@click.option('--lfdr_transformation', default='probit', show_default=True, type=click.Choice(['probit', 'logit']), help='Either a "probit" or "logit" transformation is applied to the p-values so that a local FDR estimate can be formed that does not involve edge effects of the [0,1] interval in which the p-values lie.')
+@click.option('--lfdr_adj', default=1.5, show_default=True, type=float, help='Numeric value that is applied as a multiple of the smoothing bandwidth used in the density estimation.')
+@click.option('--lfdr_eps', default=np.power(10.0,-8), show_default=True, type=float, help='Numeric value that is threshold for the tails of the empirical p-value distribution.')
 @click.option('--threads', 'threads', default=1, show_default=True, type=int, help='Number of threads used for parallel processing of SEC runs. -1 means all available CPUs.')
-def score(infile, outfile, complex_threshold_factor, threads):
+@click.option('--test/--no-test', default=False, show_default=True, help='Run in test mode with fixed seed.')
+def score(infile, outfile, complex_threshold_factor, xeval_fraction, xeval_num_iter, ss_initial_fdr, ss_iteration_fdr, ss_num_iter, parametric, pfdr, pi0_lambda, pi0_method, pi0_smooth_df, pi0_smooth_log_pi0, lfdr_truncate, lfdr_monotone, lfdr_transformation, lfdr_adj, lfdr_eps, threads, test):
     """
     Score protein and interaction features in SEC data.
     """
@@ -161,11 +183,28 @@ def score(infile, outfile, complex_threshold_factor, threads):
         copyfile(infile, outfile)
         outfile = outfile
 
+    # Assess molecular weight
     # mw_data = mw(outfile, complex_threshold_factor)
 
     # con = sqlite3.connect(outfile)
-    # mw_data.to_sql('FEATURES_MW', con, index=False, if_exists='replace')
+    # mw_data.to_sql('FEATURE_MW', con, index=False, if_exists='replace')
     # con.close()
 
-    filter_training(outfile)
+    # Filter training data
+    # training_data = filter_training(outfile)
 
+    # con = sqlite3.connect(outfile)
+    # training_data.to_sql('FEATURE_TRAINING', con, index=False, if_exists='replace')
+    # con.close()
+
+    # Run PyProphet training
+    # scored_data = pyprophet(outfile, xeval_fraction, xeval_num_iter, ss_initial_fdr, ss_iteration_fdr, ss_num_iter, parametric, pfdr, pi0_lambda, pi0_method, pi0_smooth_df, pi0_smooth_log_pi0, lfdr_truncate, lfdr_monotone, lfdr_transformation, lfdr_adj, lfdr_eps, threads, test)
+
+    # con = sqlite3.connect(outfile)
+    # scored_data.df.to_sql('FEATURE_SCORED', con, index=False, if_exists='replace')
+    # con.close()
+
+    # Infer proteins
+    infer_data = infer(outfile)
+    print infer_data.interactions
+    print infer_data.proteins
