@@ -9,9 +9,9 @@ from shutil import copyfile
 import pandas as pd
 import numpy as np
 
-from preprocess import uniprot, net, sec, quantification, meta, queries
+from preprocess import uniprot, net, sec, quantification, meta, query
 from detect import prepare, process
-from score import mw, filter_training, pyprophet, infer
+from score import filter_mw, filter_training, pyprophet, infer
 
 from pyprophet.data_handling import transform_pi0_lambda
 
@@ -81,13 +81,14 @@ def preprocess(infiles, outfile, secfile, netfile, uniprotfile, columns, decoy_i
 
     # Generate interaction query data
     click.echo("Info: Generating interaction query data.")
-    queries_data = queries(net_data, meta_data.protein_meta)
-    queries_data.to_df().to_sql('QUERIES', con, index=False)
+    query_data = query(net_data, meta_data.protein_meta)
+    query_data.to_df().to_sql('QUERY', con, index=False)
 
     # Remove any entries that are not necessary (proteins not covered by LC-MS/MS data)
     con.execute('DELETE FROM PROTEIN WHERE protein_id NOT IN (SELECT DISTINCT(protein_id) as protein_id FROM QUANTIFICATION);')
     con.execute('DELETE FROM NETWORK WHERE bait_id NOT IN (SELECT DISTINCT(protein_id) as protein_id FROM QUANTIFICATION) OR prey_id NOT IN (SELECT DISTINCT(protein_id) as protein_id FROM QUANTIFICATION);')
-    con.execute('DELETE FROM QUERIES WHERE bait_id NOT IN (SELECT DISTINCT(protein_id) as protein_id FROM QUANTIFICATION) OR prey_id NOT IN (SELECT DISTINCT(protein_id) as protein_id FROM QUANTIFICATION);')
+    con.execute('DELETE FROM SEC WHERE run_id NOT IN (SELECT DISTINCT(run_id) as run_id FROM QUANTIFICATION);')
+    con.execute('DELETE FROM QUERY WHERE bait_id NOT IN (SELECT DISTINCT(protein_id) as protein_id FROM QUANTIFICATION) OR prey_id NOT IN (SELECT DISTINCT(protein_id) as protein_id FROM QUANTIFICATION);')
     con.execute('VACUUM;')
 
     # Close connection to file
@@ -127,6 +128,10 @@ def detect(infile, outfile, min_peptides, max_peptides, det_peptides, peak_metho
         copyfile(infile, outfile)
         outfile = outfile
 
+    con = sqlite3.connect(outfile)
+    con.execute('DROP TABLE IF EXISTS FEATURE;')
+    con.close()
+
     # Prepare SEC experiments, e.g. individual conditions + replicates
     exps = prepare(outfile, min_peptides, max_peptides, det_peptides, peak_method, peak_width, signal_to_noise, gauss_width, sgolay_frame_length, sgolay_polynomial_order, sn_win_len, sn_bin_count)
 
@@ -138,13 +143,7 @@ def detect(infile, outfile, min_peptides, max_peptides, det_peptides, peak_metho
 
     freeze_support()
     p = Pool(processes=n_cpus, initializer=tqdm.set_lock, initargs=(RLock(),))
-    dfs = p.map(process, exps)
-
-    df = pd.concat(dfs)
-
-    con = sqlite3.connect(outfile)
-    df.to_sql('FEATURE', con, index=False, if_exists='replace')
-    con.close()
+    p.map(process, exps)
 
 # SECAT score features
 @cli.command()
@@ -184,27 +183,30 @@ def score(infile, outfile, complex_threshold_factor, xeval_fraction, xeval_num_i
         outfile = outfile
 
     # Assess molecular weight
-    # mw_data = mw(outfile, complex_threshold_factor)
+    mw_data = filter_mw(outfile, complex_threshold_factor)
 
-    # con = sqlite3.connect(outfile)
-    # mw_data.to_sql('FEATURE_MW', con, index=False, if_exists='replace')
-    # con.close()
+    con = sqlite3.connect(outfile)
+    mw_data.to_sql('FEATURE_MW', con, index=False, if_exists='replace')
+    con.close()
 
     # Filter training data
-    # training_data = filter_training(outfile)
+    training_data = filter_training(outfile)
 
-    # con = sqlite3.connect(outfile)
-    # training_data.to_sql('FEATURE_TRAINING', con, index=False, if_exists='replace')
-    # con.close()
+    con = sqlite3.connect(outfile)
+    training_data.to_sql('FEATURE_TRAINING', con, index=False, if_exists='replace')
+    con.close()
 
     # Run PyProphet training
-    # scored_data = pyprophet(outfile, xeval_fraction, xeval_num_iter, ss_initial_fdr, ss_iteration_fdr, ss_num_iter, parametric, pfdr, pi0_lambda, pi0_method, pi0_smooth_df, pi0_smooth_log_pi0, lfdr_truncate, lfdr_monotone, lfdr_transformation, lfdr_adj, lfdr_eps, threads, test)
+    scored_data = pyprophet(outfile, xeval_fraction, xeval_num_iter, ss_initial_fdr, ss_iteration_fdr, ss_num_iter, parametric, pfdr, pi0_lambda, pi0_method, pi0_smooth_df, pi0_smooth_log_pi0, lfdr_truncate, lfdr_monotone, lfdr_transformation, lfdr_adj, lfdr_eps, threads, test)
 
-    # con = sqlite3.connect(outfile)
-    # scored_data.df.to_sql('FEATURE_SCORED', con, index=False, if_exists='replace')
-    # con.close()
+    con = sqlite3.connect(outfile)
+    scored_data.df.to_sql('FEATURE_SCORED', con, index=False, if_exists='replace')
+    con.close()
 
     # Infer proteins
     infer_data = infer(outfile)
-    print infer_data.interactions
-    print infer_data.proteins
+
+    con = sqlite3.connect(outfile)
+    infer_data.interactions.to_sql('COMPLEX', con, index=False, if_exists='replace')
+    infer_data.proteins.to_sql('MONOMER', con, index=False, if_exists='replace')
+    con.close()

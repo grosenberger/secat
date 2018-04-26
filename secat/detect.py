@@ -8,6 +8,7 @@ import click
 import sqlite3
 
 import multiprocessing as mp
+import mmh3
 from tqdm import tqdm
 
 import pyopenms as po
@@ -25,8 +26,7 @@ def prepare(outfile, min_peptides, max_peptides, det_peptides, peak_method, peak
     return experiments
 
 def process(exp):
-    sp = signalprocess(exp)
-    return sp.df
+    signalprocess(exp)
 
 class signalprocess:
     def __init__(self, exp):
@@ -104,8 +104,8 @@ class signalprocess:
                     subfeature = {
                                     "condition_id": self.condition_id,
                                     "replicate_id": self.replicate_id,
-                                    "bait_feature_id": self.condition_id + "_" + self.replicate_id + "_" + bait + "_" + prey + "_" + str(feature.getUniqueId()),
-                                    "feature_id": self.condition_id + "_" + self.replicate_id + "_" + bait + "_" + prey + "_" + str(feature.getUniqueId()) + "_" + feature.getMetaValue("id_target_transition_names").split(";")[i],
+                                    "bait_feature_id": mmh3.hash(self.condition_id + "_" + self.replicate_id + "_" + bait + "_" + prey + "_" + str(feature.getUniqueId())) & 0xffffffff,
+                                    "feature_id": mmh3.hash(self.condition_id + "_" + self.replicate_id + "_" + bait + "_" + prey + "_" + str(feature.getUniqueId()) + "_" + feature.getMetaValue("id_target_transition_names").split(";")[i]) & 0xffffffff,
                                     "bait_id": bait,
                                     "prey_id": prey,
                                     "decoy": False, # decoy
@@ -145,8 +145,8 @@ class signalprocess:
                     subfeature = {
                                     "condition_id": self.condition_id,
                                     "replicate_id": self.replicate_id,
-                                    "bait_feature_id": "DECOY_" + self.condition_id + "_" + self.replicate_id + "_" + bait + "_" + prey + "_" + str(feature.getUniqueId()),
-                                    "feature_id": "DECOY_" + self.condition_id + "_" + self.replicate_id + "_" + bait + "_" + prey + "_" + str(feature.getUniqueId()) + "_" + feature.getMetaValue("id_decoy_transition_names").split(";")[i],
+                                    "bait_feature_id": mmh3.hash("DECOY_" + self.condition_id + "_" + self.replicate_id + "_" + bait + "_" + prey + "_" + str(feature.getUniqueId())) & 0xffffffff,
+                                    "feature_id": mmh3.hash("DECOY_" + self.condition_id + "_" + self.replicate_id + "_" + bait + "_" + prey + "_" + str(feature.getUniqueId()) + "_" + feature.getMetaValue("id_decoy_transition_names").split(";")[i]) & 0xffffffff,
                                     "bait_id": bait,
                                     "prey_id": prey,
                                     "decoy": True, # decoy
@@ -282,19 +282,17 @@ class signalprocess:
             for feature in features:
                 results.append(self.convert_feature(feature, pepprot))
 
-            return pd.concat(results)
+            con = sqlite3.connect(self.outfile)
+            pd.concat(results).to_sql('FEATURE', con, index=False, if_exists='append')
+            con.close()
 
     def read(self):
         con = sqlite3.connect(self.outfile)
-        netdata = pd.read_sql('SELECT bait_id, QUERIES.prey_id AS prey_id, decoy, PEPTIDES.peptide_id AS peptide_id, peptide_rank FROM QUERIES INNER JOIN (SELECT DISTINCT protein_id AS prey_id, peptide_id FROM QUANTIFICATION INNER JOIN SEC ON QUANTIFICATION.run_id = SEC.run_id WHERE condition_id == "%s" and replicate_id == "%s") AS PEPTIDES ON QUERIES.prey_id == PEPTIDES.prey_id INNER JOIN PEPTIDE_META ON PEPTIDES.peptide_id = PEPTIDE_META.peptide_id INNER JOIN PROTEIN_META ON QUERIES.prey_id == PROTEIN_META.protein_id WHERE peptide_count >= %s AND peptide_rank <= %s;' % (self.condition_id, self.replicate_id, self.min_peptides, self.max_peptides), con)
+        netdata = pd.read_sql('SELECT bait_id, QUERY.prey_id AS prey_id, decoy, PEPTIDES.peptide_id AS peptide_id, peptide_rank FROM QUERY INNER JOIN (SELECT DISTINCT protein_id AS prey_id, peptide_id FROM QUANTIFICATION INNER JOIN SEC ON QUANTIFICATION.run_id = SEC.run_id WHERE condition_id == "%s" and replicate_id == "%s") AS PEPTIDES ON QUERY.prey_id == PEPTIDES.prey_id INNER JOIN PEPTIDE_META ON PEPTIDES.peptide_id = PEPTIDE_META.peptide_id INNER JOIN PROTEIN_META ON QUERY.prey_id == PROTEIN_META.protein_id WHERE peptide_count >= %s AND peptide_rank <= %s;' % (self.condition_id, self.replicate_id, self.min_peptides, self.max_peptides), con)
         con.close()
 
         # Generate MRMTransitionGroup and compute scores
         netgroups = netdata.drop_duplicates().groupby('bait_id')
 
-        exp_res = []
         for _, gr_it in tqdm(netdata.drop_duplicates().groupby('bait_id'), desc=self.condition_id + "_" + self.replicate_id, position=self.idx):
             res = self.score(gr_it)
-            exp_res.append(res)
-
-        return pd.concat(exp_res)

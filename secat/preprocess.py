@@ -348,11 +348,11 @@ class meta:
 
         return peptide_meta, protein_meta
 
-class queries:
+class query:
     def __init__(self, net_data, protein_meta_data):
-        self.df = self.generate_queries(net_data, protein_meta_data)
+        self.df = self.generate_query(net_data, protein_meta_data)
 
-    def generate_queries(self, net_data, protein_meta_data):
+    def generate_query(self, net_data, protein_meta_data):
         def _random_nonidentical_array(data):
             np.random.shuffle(data['bait_id'].values)
             return data

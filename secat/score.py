@@ -2,6 +2,7 @@ import pandas as pd
 import numpy as np
 import click
 import sqlite3
+import os
 
 from sklearn import linear_model
 
@@ -11,7 +12,7 @@ from pyprophet.report import save_report
 from scipy.stats import rankdata
 
 
-def mw(outfile, complex_threshold_factor):
+def filter_mw(outfile, complex_threshold_factor):
     def model(df):
         y = df[['log_sec_mw']].values
         X = df[['sec_id']].values
@@ -108,15 +109,15 @@ class pyprophet:
 
     def learn(self, learning_data):
         (result, scorer, weights) = PyProphet(self.xeval_fraction, self.xeval_num_iter, self.ss_initial_fdr, self.ss_iteration_fdr, self.ss_num_iter, self.group_id, self.parametric, self.pfdr, self.pi0_lambda, self.pi0_method, self.pi0_smooth_df, self.pi0_smooth_log_pi0, self.lfdr_truncate, self.lfdr_monotone, self.lfdr_transformation, self.lfdr_adj, self.lfdr_eps, False, self.threads, self.test).learn_and_apply(learning_data)
-        self.plot(result, scorer.pi0)
+        self.plot(result, scorer.pi0, "learn")
         return result, weights
 
     def apply(self, all_data):
         (result, scorer, weights) = PyProphet(self.xeval_fraction, self.xeval_num_iter, self.ss_initial_fdr, self.ss_iteration_fdr, self.ss_num_iter, self.group_id, self.parametric, self.pfdr, self.pi0_lambda, self.pi0_method, self.pi0_smooth_df, self.pi0_smooth_log_pi0, self.lfdr_truncate, self.lfdr_monotone, self.lfdr_transformation, self.lfdr_adj, self.lfdr_eps, False, self.threads, self.test).apply_weights(all_data, self.weights)
-        self.plot(result, scorer.pi0)
+        self.plot(result, scorer.pi0, "all")
         return result.scored_tables
 
-    def plot(self, result, pi0):
+    def plot(self, result, pi0, tag):
         cutoffs = result.final_statistics["cutoff"].values
         svalues = result.final_statistics["svalue"].values
         qvalues = result.final_statistics["qvalue"].values
@@ -125,7 +126,7 @@ class pyprophet:
         top_targets = result.scored_tables.loc[(result.scored_tables.peak_group_rank == 1) & (result.scored_tables.decoy == 0)]["d_score"].values
         top_decoys = result.scored_tables.loc[(result.scored_tables.peak_group_rank == 1) & (result.scored_tables.decoy == 1)]["d_score"].values
 
-        save_report("test.pdf", "test", top_decoys, top_targets, cutoffs, svalues, qvalues, pvalues, pi0)
+        save_report(os.path.splitext(os.path.basename(self.outfile))[0]+"_"+tag+".pdf", tag, top_decoys, top_targets, cutoffs, svalues, qvalues, pvalues, pi0)
 
 class infer:
     def __init__(self, outfile):
