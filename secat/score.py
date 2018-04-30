@@ -24,7 +24,7 @@ def filter_mw(outfile, complex_threshold_factor):
         return np.exp(df['intercept_'] + df['coef_']*df[val])
 
     con = sqlite3.connect(outfile)
-    df = pd.read_sql('SELECT DISTINCT condition_id, replicate_id, FEATURE.bait_id AS bait_id, FEATURE.prey_id AS prey_id, feature_id, RT, leftWidth, rightWidth, bait_mw, prey_mw FROM FEATURE INNER JOIN (SELECT protein_id AS bait_id, protein_mw AS bait_mw FROM PROTEIN) AS BAIT_MW ON FEATURE.bait_id = BAIT_MW.bait_id INNER JOIN (SELECT protein_id AS prey_id, protein_mw AS prey_mw FROM PROTEIN) AS PREY_MW ON FEATURE.prey_id = PREY_MW.prey_id;', con)
+    df = pd.read_sql('SELECT DISTINCT condition_id, replicate_id, FEATURE.bait_id AS bait_id, FEATURE.prey_id AS prey_id, interaction_feature_id, RT, leftWidth, rightWidth, bait_mw, prey_mw FROM FEATURE INNER JOIN (SELECT protein_id AS bait_id, protein_mw AS bait_mw FROM PROTEIN) AS BAIT_MW ON FEATURE.bait_id = BAIT_MW.bait_id INNER JOIN (SELECT protein_id AS prey_id, protein_mw AS prey_mw FROM PROTEIN) AS PREY_MW ON FEATURE.prey_id = PREY_MW.prey_id;', con)
     sec_mw = pd.read_sql('SELECT DISTINCT condition_id, replicate_id, sec_id, sec_mw FROM SEC;', con)
     con.close()
 
@@ -42,25 +42,25 @@ def filter_mw(outfile, complex_threshold_factor):
     df['complex'] = pd.Series((df['sec_mw'].astype(float) > complex_threshold_factor*df['bait_mw'].astype(float)) & (df['sec_mw'].astype(float) > complex_threshold_factor*df['prey_mw'].astype(float)))
     df['monomer'] = pd.Series((df['bait_id'] == df['prey_id']) & (df['left_sec_mw'].astype(float) > df['bait_mw'].astype(float)) & (df['right_sec_mw'].astype(float) < df['bait_mw'].astype(float)) & (df['sec_mw'].astype(float) <= complex_threshold_factor*df['bait_mw'].astype(float)))
 
-    return df[['feature_id','sec_mw','left_sec_mw','right_sec_mw','complex','monomer']]
+    return df[['interaction_feature_id','sec_mw','left_sec_mw','right_sec_mw','complex','monomer']]
 
 def filter_training(outfile):
     con = sqlite3.connect(outfile)
-    df = pd.read_sql('SELECT FEATURE.bait_feature_id AS bait_feature_id, FEATURE.bait_id AS bait_id, FEATURE.prey_id AS prey_id, FEATURE.feature_id AS feature_id, FEATURE.decoy AS decoy, complex, monomer, bait_elution_model_fit, bait_log_sn, bait_xcorr_shape, bait_xcorr_coelution, main_var_xcorr_shape_score, var_xcorr_coelution_score, var_log_sn_score, var_stoichiometry_score FROM FEATURE INNER JOIN FEATURE_MW ON FEATURE.feature_id = FEATURE_MW.feature_id;', con)
+    df = pd.read_sql('SELECT FEATURE.interaction_feature_id AS interaction_feature_id, complex, monomer, bait_elution_model_fit, bait_log_sn, bait_xcorr_shape, bait_xcorr_coelution, main_var_xcorr_shape_score, var_xcorr_coelution_score, var_log_sn_score, var_stoichiometry_score FROM FEATURE INNER JOIN FEATURE_MW ON FEATURE.interaction_feature_id = FEATURE_MW.interaction_feature_id;', con)
     con.close()
 
     # bait-feature-level filtering
     df = df[((df['complex'] == True) | (df['monomer'] == True)) & (df['bait_xcorr_coelution'] < 3) & (df['bait_xcorr_shape'] > 0.8) & (df['bait_elution_model_fit'] > 0.9) & (df['bait_log_sn'] > 1.0)]
 
     # prey-feature-level filtering
-    df = df.groupby(['bait_feature_id'])[['main_var_xcorr_shape_score','var_xcorr_coelution_score','var_log_sn_score','var_stoichiometry_score']].quantile([0.33, 0.66]).reset_index()
+    df = df.groupby(['interaction_feature_id'])[['main_var_xcorr_shape_score','var_xcorr_coelution_score','var_log_sn_score','var_stoichiometry_score']].quantile([0.33, 0.66]).reset_index()
     df = df.rename(index=str, columns={"level_1": "quantile"})
 
-    df_high = (df[(df['quantile'] == 0.33) & (df['main_var_xcorr_shape_score'] > 0.8) & (df['var_log_sn_score'] > 0.0) & (df['var_stoichiometry_score'] > 0.1)][['bait_feature_id']])
+    df_high = (df[(df['quantile'] == 0.33) & (df['main_var_xcorr_shape_score'] > 0.8) & (df['var_log_sn_score'] > 0.0) & (df['var_stoichiometry_score'] > 0.1)][['interaction_feature_id']])
 
-    df_low = (df[(df['quantile'] == 0.66) & (df['var_xcorr_coelution_score'] < 2.0) & (df['quantile'] == 0.66) & (df['var_stoichiometry_score'] < 2.0)][['bait_feature_id']]) 
+    df_low = (df[(df['quantile'] == 0.66) & (df['var_xcorr_coelution_score'] < 2.0) & (df['quantile'] == 0.66) & (df['var_stoichiometry_score'] < 2.0)][['interaction_feature_id']]) 
 
-    return pd.merge(df_high, df_low, on=['bait_feature_id'])
+    return pd.merge(df_high, df_low, on=['interaction_feature_id'])
 
 class pyprophet:
     def __init__(self, outfile, xeval_fraction, xeval_num_iter, ss_initial_fdr, ss_iteration_fdr, ss_num_iter, parametric, pfdr, pi0_lambda, pi0_method, pi0_smooth_df, pi0_smooth_log_pi0, lfdr_truncate, lfdr_monotone, lfdr_transformation, lfdr_adj, lfdr_eps, threads, test):
@@ -87,22 +87,34 @@ class pyprophet:
         self.threads = threads
         self.test = test
 
+        # learn from training data
         learning_data = self.read_learning()
-        _, self.weights = self.learn(learning_data)
+        learned_data, self.weights = self.learn(learning_data)
         print self.weights
-        all_data = self.read_all()
-        self.df = self.apply(all_data)[['feature_id','d_score','p_value','q_value','pep']]
+
+        # conduct preliminary inference
+        con = sqlite3.connect(self.outfile)
+        learned_data.scored_tables[['peptide_feature_id','pep']].to_sql('FEATURE_TRAINING_SCORED', con, index=False, if_exists='replace')
+        con.close()
+
+        inf_data = infer(self.outfile, 'FEATURE_TRAINING_SCORED')
+        print inf_data.proteins
+        print inf_data.interactions
+        sys.exit()
+
+        # all_data = self.read_all()
+        # self.df = self.apply(all_data)[['feature_id','d_score','p_value','q_value','pep']]
 
     def read_learning(self):
         con = sqlite3.connect(self.outfile)
-        df = pd.read_sql('SELECT * FROM FEATURE INNER JOIN FEATURE_TRAINING ON FEATURE.bait_feature_id = FEATURE_TRAINING.bait_feature_id WHERE var_xcorr_coelution_score < 5 AND var_stoichiometry_score < 2;', con)
+        df = pd.read_sql('SELECT * FROM FEATURE WHERE interaction_feature_id IN (SELECT interaction_feature_id FROM FEATURE_TRAINING) AND var_xcorr_coelution_score < 3 AND var_stoichiometry_score < 2 ORDER BY feature_id;', con)
         con.close()
 
         return df
 
     def read_all(self):
         con = sqlite3.connect(self.outfile)
-        df = pd.read_sql('SELECT * FROM FEATURE WHERE var_xcorr_coelution_score < 5 AND var_stoichiometry_score < 2;', con)
+        df = pd.read_sql('SELECT * FROM FEATURE WHERE var_xcorr_coelution_score < 3 AND var_stoichiometry_score < 2 ORDER BY feature_id;', con)
         con.close()
 
         return df
@@ -129,8 +141,9 @@ class pyprophet:
         save_report(os.path.splitext(os.path.basename(self.outfile))[0]+"_"+tag+".pdf", tag, top_decoys, top_targets, cutoffs, svalues, qvalues, pvalues, pi0)
 
 class infer:
-    def __init__(self, outfile):
+    def __init__(self, outfile, feature_table):
         self.outfile = outfile
+        self.feature_table = feature_table
 
         peptide_data = self.read()
 
@@ -138,7 +151,7 @@ class infer:
 
     def read(self):
         con = sqlite3.connect(self.outfile)
-        df = pd.read_sql('SELECT condition_id, replicate_id, FEATURE.bait_id AS bait_id, FEATURE.prey_id AS prey_id, bait_feature_id, FEATURE.feature_id AS feature_id, monomer, complex, interaction_confidence AS prior, pep, decoy, prey_peptide_intensity, prey_peptide_total_intensity FROM FEATURE INNER JOIN FEATURE_SCORED ON FEATURE.feature_id = FEATURE_SCORED.feature_id INNER JOIN NETWORK ON FEATURE.bait_id = NETWORK.bait_id AND FEATURE.prey_id = NETWORK.prey_id INNER JOIN FEATURE_MW ON FEATURE.feature_id = FEATURE_MW.feature_id;', con)
+        df = pd.read_sql('SELECT condition_id, replicate_id, FEATURE.bait_id AS bait_id, FEATURE.prey_id AS prey_id, FEATURE.feature_id AS feature_id, FEATURE.interaction_feature_id AS interaction_feature_id, monomer, complex, interaction_confidence AS prior, pep, decoy, prey_peptide_id, prey_peptide_intensity, prey_peptide_total_intensity FROM FEATURE INNER JOIN %s AS FEATURE_SCORED ON FEATURE.peptide_feature_id = FEATURE_SCORED.peptide_feature_id INNER JOIN NETWORK ON FEATURE.bait_id = NETWORK.bait_id AND FEATURE.prey_id = NETWORK.prey_id INNER JOIN FEATURE_MW ON FEATURE.interaction_feature_id = FEATURE_MW.interaction_feature_id;' % self.feature_table, con)
         con.close()
 
         return df
@@ -181,13 +194,13 @@ class infer:
         # protein level
         peptide_data.loc[peptide_data.decoy==1,'prior'] = 0.5
         # peptide_data['prior'] = 0.25
-        protein_data = peptide_data.groupby(["bait_feature_id","bait_id", "prey_id", "decoy", "prior", "monomer"]).apply(self.protein_inference).reset_index()
+        protein_data = peptide_data.groupby(["feature_id", "interaction_feature_id", "bait_id", "prey_id", "decoy", "prior"]).apply(self.protein_inference).reset_index()
 
         # interaction level
-        bait_proteins = protein_data.ix[(protein_data.bait_id == protein_data.prey_id) & (protein_data.decoy==0)][["bait_feature_id","bait_id","pp_score","prey_intensity"]]
-        bait_proteins.columns = ["bait_feature_id","bait_id","bait_pp_score","bait_intensity"]
-        protein_bait_data = pd.merge(protein_data.ix[(protein_data.bait_id != protein_data.prey_id)], bait_proteins, on=["bait_feature_id","bait_id"])
+        bait_proteins = protein_data.ix[(protein_data.bait_id == protein_data.prey_id) & (protein_data.decoy==0)][["feature_id","bait_id","pp_score","prey_intensity"]]
+        bait_proteins.columns = ["feature_id","bait_id","bait_pp_score","bait_intensity"]
+        protein_bait_data = pd.merge(protein_data.ix[(protein_data.bait_id != protein_data.prey_id)], bait_proteins, on=["feature_id","bait_id"])
 
-        interaction_data = protein_bait_data.groupby(["bait_feature_id","bait_id", "prey_id", "decoy", "prior"]).apply(self.interaction_inference).reset_index()
+        interaction_data = protein_bait_data.groupby(["interaction_feature_id", "prior"]).apply(self.interaction_inference).reset_index()
 
-        return([interaction_data, protein_data])
+        return interaction_data, protein_data

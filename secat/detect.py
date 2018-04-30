@@ -104,8 +104,11 @@ class signalprocess:
                     subfeature = {
                                     "condition_id": self.condition_id,
                                     "replicate_id": self.replicate_id,
-                                    "bait_feature_id": mmh3.hash(self.condition_id + "_" + self.replicate_id + "_" + bait + "_" + prey + "_" + str(feature.getUniqueId())) & 0xffffffff,
-                                    "feature_id": mmh3.hash(self.condition_id + "_" + self.replicate_id + "_" + bait + "_" + prey + "_" + str(feature.getUniqueId()) + "_" + feature.getMetaValue("id_target_transition_names").split(";")[i]) & 0xffffffff,
+                                    # "bait_feature_id": mmh3.hash(self.condition_id + "_" + self.replicate_id + "_" + bait + "_" + prey + "_" + str(feature.getUniqueId())) & 0xffffffff,
+                                    # "feature_id": mmh3.hash(self.condition_id + "_" + self.replicate_id + "_" + bait + "_" + prey + "_" + str(feature.getUniqueId()) + "_" + feature.getMetaValue("id_target_transition_names").split(";")[i]) & 0xffffffff,
+                                    "feature_id": str(feature.getUniqueId()),
+                                    "interaction_feature_id": self.condition_id + "_" + self.replicate_id + "_" + bait + "_" + prey + "_" + str(feature.getUniqueId()),
+                                    "peptide_feature_id": self.condition_id + "_" + self.replicate_id + "_" + bait + "_" + prey + "_" + str(feature.getUniqueId()) + "_" + feature.getMetaValue("id_target_transition_names").split(";")[i],
                                     "bait_id": bait,
                                     "prey_id": prey,
                                     "decoy": False, # decoy
@@ -145,8 +148,11 @@ class signalprocess:
                     subfeature = {
                                     "condition_id": self.condition_id,
                                     "replicate_id": self.replicate_id,
-                                    "bait_feature_id": mmh3.hash("DECOY_" + self.condition_id + "_" + self.replicate_id + "_" + bait + "_" + prey + "_" + str(feature.getUniqueId())) & 0xffffffff,
-                                    "feature_id": mmh3.hash("DECOY_" + self.condition_id + "_" + self.replicate_id + "_" + bait + "_" + prey + "_" + str(feature.getUniqueId()) + "_" + feature.getMetaValue("id_decoy_transition_names").split(";")[i]) & 0xffffffff,
+                                    # "bait_feature_id": mmh3.hash("DECOY_" + self.condition_id + "_" + self.replicate_id + "_" + bait + "_" + prey + "_" + str(feature.getUniqueId())) & 0xffffffff,
+                                    # "feature_id": mmh3.hash("DECOY_" + self.condition_id + "_" + self.replicate_id + "_" + bait + "_" + prey + "_" + str(feature.getUniqueId()) + "_" + feature.getMetaValue("id_decoy_transition_names").split(";")[i]) & 0xffffffff,
+                                    "feature_id": "DECOY_" + str(feature.getUniqueId()),
+                                    "interaction_feature_id": "DECOY_" + self.condition_id + "_" + self.replicate_id + "_" + bait + "_" + prey + "_" + str(feature.getUniqueId()),
+                                    "peptide_feature_id": "DECOY_" + self.condition_id + "_" + self.replicate_id + "_" + bait + "_" + prey + "_" + str(feature.getUniqueId()) + "_" + feature.getMetaValue("id_decoy_transition_names").split(";")[i],
                                     "bait_id": bait,
                                     "prey_id": prey,
                                     "decoy": True, # decoy
@@ -282,13 +288,13 @@ class signalprocess:
             for feature in features:
                 results.append(self.convert_feature(feature, pepprot))
 
-            con = sqlite3.connect(self.outfile)
+            con = sqlite3.connect(self.outfile, timeout=30)
             pd.concat(results).to_sql('FEATURE', con, index=False, if_exists='append')
             con.close()
 
     def read(self):
         con = sqlite3.connect(self.outfile)
-        netdata = pd.read_sql('SELECT bait_id, QUERY.prey_id AS prey_id, decoy, PEPTIDES.peptide_id AS peptide_id, peptide_rank FROM QUERY INNER JOIN (SELECT DISTINCT protein_id AS prey_id, peptide_id FROM QUANTIFICATION INNER JOIN SEC ON QUANTIFICATION.run_id = SEC.run_id WHERE condition_id == "%s" and replicate_id == "%s") AS PEPTIDES ON QUERY.prey_id == PEPTIDES.prey_id INNER JOIN PEPTIDE_META ON PEPTIDES.peptide_id = PEPTIDE_META.peptide_id INNER JOIN PROTEIN_META ON QUERY.prey_id == PROTEIN_META.protein_id WHERE peptide_count >= %s AND peptide_rank <= %s;' % (self.condition_id, self.replicate_id, self.min_peptides, self.max_peptides), con)
+        netdata = pd.read_sql('SELECT bait_id, QUERY.prey_id AS prey_id, decoy, PEPTIDES.peptide_id AS peptide_id, peptide_rank FROM QUERY INNER JOIN (SELECT DISTINCT protein_id AS prey_id, peptide_id FROM QUANTIFICATION INNER JOIN SEC ON QUANTIFICATION.run_id = SEC.run_id WHERE condition_id == "%s" and replicate_id == "%s") AS PEPTIDES ON QUERY.prey_id == PEPTIDES.prey_id INNER JOIN PEPTIDE_META ON PEPTIDES.peptide_id = PEPTIDE_META.peptide_id INNER JOIN PROTEIN_META ON QUERY.prey_id == PROTEIN_META.protein_id WHERE peptide_count >= %s AND peptide_rank <= %s ORDER BY bait_id LIMIT 100000;' % (self.condition_id, self.replicate_id, self.min_peptides, self.max_peptides), con)
         con.close()
 
         # Generate MRMTransitionGroup and compute scores

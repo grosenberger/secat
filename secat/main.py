@@ -154,7 +154,7 @@ def detect(infile, outfile, min_peptides, max_peptides, det_peptides, peak_metho
 @click.option('--xeval_fraction', default=0.5, show_default=True, type=float, help='Data fraction used for cross-validation of semi-supervised learning step.')
 @click.option('--xeval_num_iter', default=10, show_default=True, type=int, help='Number of iterations for cross-validation of semi-supervised learning step.')
 @click.option('--ss_initial_fdr', default=0.15, show_default=True, type=float, help='Initial FDR cutoff for best scoring targets.')
-@click.option('--ss_iteration_fdr', default=0.02, show_default=True, type=float, help='Iteration FDR cutoff for best scoring targets.')
+@click.option('--ss_iteration_fdr', default=0.05, show_default=True, type=float, help='Iteration FDR cutoff for best scoring targets.')
 @click.option('--ss_num_iter', default=10, show_default=True, type=int, help='Number of iterations for semi-supervised learning step.')
 # Statistics
 @click.option('--parametric/--no-parametric', default=False, show_default=True, help='Do parametric estimation of p-values.')
@@ -182,31 +182,35 @@ def score(infile, outfile, complex_threshold_factor, xeval_fraction, xeval_num_i
         copyfile(infile, outfile)
         outfile = outfile
 
-    # Assess molecular weight
-    mw_data = filter_mw(outfile, complex_threshold_factor)
+    # # Assess molecular weight
+    # click.echo("Info: Filtering based on molecular weight.")
+    # mw_data = filter_mw(outfile, complex_threshold_factor)
 
-    con = sqlite3.connect(outfile)
-    mw_data.to_sql('FEATURE_MW', con, index=False, if_exists='replace')
-    con.close()
+    # con = sqlite3.connect(outfile)
+    # mw_data.to_sql('FEATURE_MW', con, index=False, if_exists='replace')
+    # con.close()
 
-    # Filter training data
-    training_data = filter_training(outfile)
+    # # Filter training data
+    # click.echo("Info: Filtering based on elution profile scores.")
+    # training_data = filter_training(outfile)
 
-    con = sqlite3.connect(outfile)
-    training_data.to_sql('FEATURE_TRAINING', con, index=False, if_exists='replace')
-    con.close()
+    # con = sqlite3.connect(outfile)
+    # training_data.to_sql('FEATURE_TRAINING', con, index=False, if_exists='replace')
+    # con.close()
 
     # Run PyProphet training
+    click.echo("Info: Running PyProphet.")
     scored_data = pyprophet(outfile, xeval_fraction, xeval_num_iter, ss_initial_fdr, ss_iteration_fdr, ss_num_iter, parametric, pfdr, pi0_lambda, pi0_method, pi0_smooth_df, pi0_smooth_log_pi0, lfdr_truncate, lfdr_monotone, lfdr_transformation, lfdr_adj, lfdr_eps, threads, test)
 
     con = sqlite3.connect(outfile)
     scored_data.df.to_sql('FEATURE_SCORED', con, index=False, if_exists='replace')
     con.close()
 
-    # Infer proteins
-    infer_data = infer(outfile)
+    # # Infer proteins
+    # click.echo("Info: Infering complexes and monomers.")
+    # infer_data = infer(outfile)
 
-    con = sqlite3.connect(outfile)
-    infer_data.interactions.to_sql('COMPLEX', con, index=False, if_exists='replace')
-    infer_data.proteins.to_sql('MONOMER', con, index=False, if_exists='replace')
-    con.close()
+    # con = sqlite3.connect(outfile)
+    # infer_data.interactions.to_sql('COMPLEX', con, index=False, if_exists='replace')
+    # infer_data.proteins.to_sql('MONOMER', con, index=False, if_exists='replace')
+    # con.close()
