@@ -145,6 +145,16 @@ def detect(infile, outfile, min_peptides, max_peptides, det_peptides, peak_metho
     p = Pool(processes=n_cpus, initializer=tqdm.set_lock, initargs=(RLock(),))
     p.map(process, exps)
 
+    # Move temporary files to final table
+    con = sqlite3.connect(outfile)
+    for exp in exps:
+        con.execute('ATTACH DATABASE "%s" AS tmp;' % exp['tmpoutfile'])
+        con.execute('CREATE TABLE IF NOT EXISTS FEATURE AS SELECT * FROM tmp.FEATURE WHERE 0;')
+        con.execute('INSERT INTO FEATURE SELECT * FROM tmp.FEATURE;')
+        con.execute('DETACH DATABASE "tmp";')
+        os.remove(exp['tmpoutfile'])
+    con.close()
+  
 # SECAT score features
 @cli.command()
 @click.option('--in', 'infile', required=True, type=click.Path(exists=True), help='Input SECAT file.')
@@ -182,21 +192,21 @@ def score(infile, outfile, complex_threshold_factor, xeval_fraction, xeval_num_i
         copyfile(infile, outfile)
         outfile = outfile
 
-    # # Assess molecular weight
-    # click.echo("Info: Filtering based on molecular weight.")
-    # mw_data = filter_mw(outfile, complex_threshold_factor)
+    # Assess molecular weight
+    click.echo("Info: Filtering based on molecular weight.")
+    mw_data = filter_mw(outfile, complex_threshold_factor)
 
-    # con = sqlite3.connect(outfile)
-    # mw_data.to_sql('FEATURE_MW', con, index=False, if_exists='replace')
-    # con.close()
+    con = sqlite3.connect(outfile)
+    mw_data.to_sql('FEATURE_MW', con, index=False, if_exists='replace')
+    con.close()
 
-    # # Filter training data
-    # click.echo("Info: Filtering based on elution profile scores.")
-    # training_data = filter_training(outfile)
+    # Filter training data
+    click.echo("Info: Filtering based on elution profile scores.")
+    training_data = filter_training(outfile)
 
-    # con = sqlite3.connect(outfile)
-    # training_data.to_sql('FEATURE_TRAINING', con, index=False, if_exists='replace')
-    # con.close()
+    con = sqlite3.connect(outfile)
+    training_data.to_sql('FEATURE_TRAINING', con, index=False, if_exists='replace')
+    con.close()
 
     # Run PyProphet training
     click.echo("Info: Running PyProphet.")
@@ -206,11 +216,11 @@ def score(infile, outfile, complex_threshold_factor, xeval_fraction, xeval_num_i
     scored_data.df.to_sql('FEATURE_SCORED', con, index=False, if_exists='replace')
     con.close()
 
-    # # Infer proteins
-    # click.echo("Info: Infering complexes and monomers.")
-    # infer_data = infer(outfile)
+    # Infer proteins
+    click.echo("Info: Infering complexes and monomers.")
+    infer_data = infer(outfile, 'FEATURE_SCORED')
 
-    # con = sqlite3.connect(outfile)
-    # infer_data.interactions.to_sql('COMPLEX', con, index=False, if_exists='replace')
-    # infer_data.proteins.to_sql('MONOMER', con, index=False, if_exists='replace')
-    # con.close()
+    con = sqlite3.connect(outfile)
+    infer_data.interactions.to_sql('COMPLEX', con, index=False, if_exists='replace')
+    infer_data.proteins.to_sql('MONOMER', con, index=False, if_exists='replace')
+    con.close()

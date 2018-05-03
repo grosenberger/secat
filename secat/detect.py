@@ -21,7 +21,7 @@ def prepare(outfile, min_peptides, max_peptides, det_peptides, peak_method, peak
 
     experiments = []
     for idx, exp in enumerate(df.to_dict('records')):
-        experiments.append({'idx': idx, 'outfile': outfile, 'condition_id': exp['condition_id'], 'replicate_id': exp['replicate_id'], 'min_peptides': min_peptides, 'max_peptides': max_peptides, 'det_peptides': det_peptides, 'peak_method': peak_method, 'peak_width': peak_width, 'signal_to_noise': signal_to_noise, 'gauss_width': gauss_width, 'sgolay_frame_length': sgolay_frame_length, 'sgolay_polynomial_order': sgolay_polynomial_order, 'sn_win_len': sn_win_len, 'sn_bin_count': sn_bin_count})
+        experiments.append({'idx': idx, 'tmpoutfile': outfile + "_tmp" + str(idx), 'outfile': outfile, 'condition_id': exp['condition_id'], 'replicate_id': exp['replicate_id'], 'min_peptides': min_peptides, 'max_peptides': max_peptides, 'det_peptides': det_peptides, 'peak_method': peak_method, 'peak_width': peak_width, 'signal_to_noise': signal_to_noise, 'gauss_width': gauss_width, 'sgolay_frame_length': sgolay_frame_length, 'sgolay_polynomial_order': sgolay_polynomial_order, 'sn_win_len': sn_win_len, 'sn_bin_count': sn_bin_count})
 
     return experiments
 
@@ -31,6 +31,7 @@ def process(exp):
 class signalprocess:
     def __init__(self, exp):
         self.idx = exp['idx']
+        self.tmpoutfile = exp['tmpoutfile']
         self.outfile = exp['outfile']
         self.condition_id = exp['condition_id']
         self.replicate_id = exp['replicate_id']
@@ -48,7 +49,9 @@ class signalprocess:
 
         self.chromatograms, self.protein_index, self.peptide_index = self.generate_chromatograms()
 
-        self.df = self.read()
+        self.con = sqlite3.connect(self.tmpoutfile)
+        self.read()
+        self.con.close()
 
     def generate_chromatograms(self):
         # Read data
@@ -248,6 +251,7 @@ class signalprocess:
 
         tgpicker = po.MRMTransitionGroupPicker()
         tgpicker_params = po.MRMTransitionGroupPicker().getDefaults()
+        tgpicker_params.setValue("compute_total_mi", "true", 'Compute mutual information metrics for individual transitions that can be used for OpenSWATH/IPF scoring.')
 
         peakpicker = po.PeakPickerMRM()
         peakpicker_params = po.PeakPickerMRM().getDefaults()
@@ -271,6 +275,8 @@ class signalprocess:
         featurefinder_params.insert("TransitionGroupPicker:",tgpicker_params)
 
         featurefinder_params.setValue("Scores:use_uis_scores",'true', '')
+        featurefinder_params.setValue("Scores:use_mi_score",'true', '')
+        featurefinder_params.setValue("Scores:use_total_mi_score",'true', '')
         featurefinder_params.setValue("Scores:use_rt_score",'false', '')
         featurefinder_params.setValue("Scores:use_library_score",'false', '')
 
@@ -288,17 +294,15 @@ class signalprocess:
             for feature in features:
                 results.append(self.convert_feature(feature, pepprot))
 
-            con = sqlite3.connect(self.outfile, timeout=30)
-            pd.concat(results).to_sql('FEATURE', con, index=False, if_exists='append')
-            con.close()
+            pd.concat(results).to_sql('FEATURE', self.con, index=False, if_exists='append')
 
     def read(self):
         con = sqlite3.connect(self.outfile)
-        netdata = pd.read_sql('SELECT bait_id, QUERY.prey_id AS prey_id, decoy, PEPTIDES.peptide_id AS peptide_id, peptide_rank FROM QUERY INNER JOIN (SELECT DISTINCT protein_id AS prey_id, peptide_id FROM QUANTIFICATION INNER JOIN SEC ON QUANTIFICATION.run_id = SEC.run_id WHERE condition_id == "%s" and replicate_id == "%s") AS PEPTIDES ON QUERY.prey_id == PEPTIDES.prey_id INNER JOIN PEPTIDE_META ON PEPTIDES.peptide_id = PEPTIDE_META.peptide_id INNER JOIN PROTEIN_META ON QUERY.prey_id == PROTEIN_META.protein_id WHERE peptide_count >= %s AND peptide_rank <= %s ORDER BY bait_id LIMIT 100000;' % (self.condition_id, self.replicate_id, self.min_peptides, self.max_peptides), con)
+        netdata = pd.read_sql('SELECT bait_id, QUERY.prey_id AS prey_id, decoy, PEPTIDES.peptide_id AS peptide_id, peptide_rank FROM QUERY INNER JOIN (SELECT DISTINCT protein_id AS prey_id, peptide_id FROM QUANTIFICATION INNER JOIN SEC ON QUANTIFICATION.run_id = SEC.run_id WHERE condition_id == "%s" and replicate_id == "%s") AS PEPTIDES ON QUERY.prey_id == PEPTIDES.prey_id INNER JOIN PEPTIDE_META ON PEPTIDES.peptide_id = PEPTIDE_META.peptide_id INNER JOIN PROTEIN_META ON QUERY.prey_id == PROTEIN_META.protein_id WHERE peptide_count >= %s AND peptide_rank <= %s ORDER BY bait_id;' % (self.condition_id, self.replicate_id, self.min_peptides, self.max_peptides), con)
         con.close()
 
         # Generate MRMTransitionGroup and compute scores
         netgroups = netdata.drop_duplicates().groupby('bait_id')
 
         for _, gr_it in tqdm(netdata.drop_duplicates().groupby('bait_id'), desc=self.condition_id + "_" + self.replicate_id, position=self.idx):
-            res = self.score(gr_it)
+            self.score(gr_it)
