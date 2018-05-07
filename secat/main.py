@@ -11,7 +11,7 @@ import numpy as np
 
 from preprocess import uniprot, net, sec, quantification, meta, query
 from detect import prepare, process
-from score import filter_mw, filter_training, pyprophet, infer
+from score import prepare_filter, filter_mw, filter_training, pyprophet, infer
 
 from pyprophet.data_handling import transform_pi0_lambda
 
@@ -185,6 +185,14 @@ def score(infile, outfile, complex_threshold_factor, xeval_fraction, xeval_num_i
     Score protein and interaction features in SEC data.
     """
 
+    # Execute workflow in parallel
+    if threads == -1:
+        n_cpus = cpu_count()
+    else:
+        n_cpus = threads
+
+    p = Pool(processes=n_cpus)
+
     # Define outfile
     if outfile is None:
         outfile = infile
@@ -192,21 +200,24 @@ def score(infile, outfile, complex_threshold_factor, xeval_fraction, xeval_num_i
         copyfile(infile, outfile)
         outfile = outfile
 
-    # Assess molecular weight
-    click.echo("Info: Filtering based on molecular weight.")
-    mw_data = filter_mw(outfile, complex_threshold_factor)
+    # Prepare SEC experiments, e.g. individual conditions + replicates
+    exps = prepare_filter(outfile, complex_threshold_factor)
 
-    con = sqlite3.connect(outfile)
-    mw_data.to_sql('FEATURE_MW', con, index=False, if_exists='replace')
-    con.close()
+    # # Assess molecular weight
+    # click.echo("Info: Filtering based on molecular weight.")
+    # mw_data = p.map(filter_mw, exps)
 
-    # Filter training data
-    click.echo("Info: Filtering based on elution profile scores.")
-    training_data = filter_training(outfile)
+    # con = sqlite3.connect(outfile)
+    # pd.concat(mw_data).to_sql('FEATURE_MW', con, index=False, if_exists='replace')
+    # con.close()
 
-    con = sqlite3.connect(outfile)
-    training_data.to_sql('FEATURE_TRAINING', con, index=False, if_exists='replace')
-    con.close()
+    # # Filter training data
+    # click.echo("Info: Filtering based on elution profile scores.")
+    # training_data = p.map(filter_training, exps)
+
+    # con = sqlite3.connect(outfile)
+    # pd.concat(training_data).to_sql('FEATURE_TRAINING', con, index=False, if_exists='replace')
+    # con.close()
 
     # Run PyProphet training
     click.echo("Info: Running PyProphet.")

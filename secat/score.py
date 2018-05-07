@@ -12,8 +12,19 @@ from pyprophet.report import save_report
 
 from scipy.stats import rankdata
 
+def prepare_filter(outfile, complex_threshold_factor):
 
-def filter_mw(outfile, complex_threshold_factor):
+    con = sqlite3.connect(outfile)
+    df = pd.read_sql('SELECT DISTINCT condition_id, replicate_id FROM SEC;', con)
+    con.close()
+
+    experiments = []
+    for idx, exp in enumerate(df.to_dict('records')):
+        experiments.append({'idx': idx, 'tmpoutfile': outfile + "_tmp" + str(idx), 'outfile': outfile, 'condition_id': exp['condition_id'], 'replicate_id': exp['replicate_id'], 'complex_threshold_factor': complex_threshold_factor})
+
+    return experiments
+
+def filter_mw(exp):
     def model(df):
         y = df[['log_sec_mw']].values
         X = df[['sec_id']].values
@@ -24,9 +35,9 @@ def filter_mw(outfile, complex_threshold_factor):
     def lm(df, val):
         return np.exp(df['intercept_'] + df['coef_']*df[val])
 
-    con = sqlite3.connect(outfile)
-    df = pd.read_sql('SELECT DISTINCT condition_id, replicate_id, FEATURE.bait_id AS bait_id, FEATURE.prey_id AS prey_id, interaction_feature_id, RT, leftWidth, rightWidth, bait_mw, prey_mw FROM FEATURE INNER JOIN (SELECT protein_id AS bait_id, protein_mw AS bait_mw FROM PROTEIN) AS BAIT_MW ON FEATURE.bait_id = BAIT_MW.bait_id INNER JOIN (SELECT protein_id AS prey_id, protein_mw AS prey_mw FROM PROTEIN) AS PREY_MW ON FEATURE.prey_id = PREY_MW.prey_id;', con)
-    sec_mw = pd.read_sql('SELECT DISTINCT condition_id, replicate_id, sec_id, sec_mw FROM SEC;', con)
+    con = sqlite3.connect(exp['outfile'])
+    df = pd.read_sql('SELECT DISTINCT condition_id, replicate_id, FEATURE.bait_id AS bait_id, FEATURE.prey_id AS prey_id, interaction_feature_id, RT, leftWidth, rightWidth, bait_mw, prey_mw FROM FEATURE INNER JOIN (SELECT protein_id AS bait_id, protein_mw AS bait_mw FROM PROTEIN) AS BAIT_MW ON FEATURE.bait_id = BAIT_MW.bait_id INNER JOIN (SELECT protein_id AS prey_id, protein_mw AS prey_mw FROM PROTEIN) AS PREY_MW ON FEATURE.prey_id = PREY_MW.prey_id WHERE condition_id = "%s" AND replicate_id = "%s";' % (exp['condition_id'], exp['replicate_id']), con)
+    sec_mw = pd.read_sql('SELECT DISTINCT condition_id, replicate_id, sec_id, sec_mw FROM SEC WHERE condition_id = "%s" AND replicate_id = "%s";' % (exp['condition_id'], exp['replicate_id']), con)
     con.close()
 
     # fit model
@@ -40,14 +51,14 @@ def filter_mw(outfile, complex_threshold_factor):
     df['right_sec_mw'] = df.apply(lambda x: lm(x,'rightWidth'), 1)
 
     # decide whether the feature is a complex or monomer feature
-    df['complex'] = pd.Series((df['sec_mw'].astype(float) > complex_threshold_factor*df['bait_mw'].astype(float)) & (df['sec_mw'].astype(float) > complex_threshold_factor*df['prey_mw'].astype(float)))
-    df['monomer'] = pd.Series((df['bait_id'] == df['prey_id']) & (df['left_sec_mw'].astype(float) > df['bait_mw'].astype(float)) & (df['right_sec_mw'].astype(float) < df['bait_mw'].astype(float)) & (df['sec_mw'].astype(float) <= complex_threshold_factor*df['bait_mw'].astype(float)))
+    df['complex'] = pd.Series((df['sec_mw'].astype(float) > exp['complex_threshold_factor']*df['bait_mw'].astype(float)) & (df['sec_mw'].astype(float) > exp['complex_threshold_factor']*df['prey_mw'].astype(float)))
+    df['monomer'] = pd.Series((df['bait_id'] == df['prey_id']) & (df['left_sec_mw'].astype(float) > df['bait_mw'].astype(float)) & (df['right_sec_mw'].astype(float) < df['bait_mw'].astype(float)) & (df['sec_mw'].astype(float) <= exp['complex_threshold_factor']*df['bait_mw'].astype(float)))
 
     return df[['interaction_feature_id','sec_mw','left_sec_mw','right_sec_mw','complex','monomer']]
 
-def filter_training(outfile):
-    con = sqlite3.connect(outfile)
-    df = pd.read_sql('SELECT FEATURE.interaction_feature_id AS interaction_feature_id, complex, monomer, bait_elution_model_fit, bait_log_sn, bait_xcorr_shape, bait_xcorr_coelution, main_var_xcorr_shape_score, var_xcorr_coelution_score, var_log_sn_score, var_stoichiometry_score FROM FEATURE INNER JOIN FEATURE_MW ON FEATURE.interaction_feature_id = FEATURE_MW.interaction_feature_id;', con)
+def filter_training(exp):
+    con = sqlite3.connect(exp['outfile'])
+    df = pd.read_sql('SELECT FEATURE.interaction_feature_id AS interaction_feature_id, complex, monomer, bait_elution_model_fit, bait_log_sn, bait_xcorr_shape, bait_xcorr_coelution, main_var_xcorr_shape_score, var_xcorr_coelution_score, var_log_sn_score, var_stoichiometry_score FROM FEATURE INNER JOIN FEATURE_MW ON FEATURE.interaction_feature_id = FEATURE_MW.interaction_feature_id WHERE condition_id = "%s" AND replicate_id = "%s";' % (exp['condition_id'], exp['replicate_id']), con)
     con.close()
 
     # bait-feature-level filtering
@@ -95,13 +106,21 @@ class pyprophet:
 
         # conduct preliminary inference
         con = sqlite3.connect(self.outfile)
-        learned_data.scored_tables[['peptide_feature_id','pep']].to_sql('FEATURE_TRAINING_SCORED', con, index=False, if_exists='replace')
+        learned_data.scored_tables[['peptide_feature_id', 'bait_id', 'prey_id', 'prey_peptide_id', 'pep']].to_sql('FEATURE_TRAINING_SCORED', con, index=False, if_exists='replace')
         con.close()
 
         inf_data = infer(self.outfile, 'FEATURE_TRAINING_SCORED')
 
-        all_data = self.read_all(inf_data.proteins, inf_data.interactions)
+        inf_data_ref = pd.concat([inf_data.proteins[(inf_data.proteins['pp_score'] > 0.8) | (inf_data.proteins['decoy'] == True)][['interaction_feature_id']], inf_data.interactions[(inf_data.interactions['pf_score'] > 0.8) | (inf_data.interactions['decoy'] == True)][['interaction_feature_id']]]).drop_duplicates()
 
+        con = sqlite3.connect(self.outfile)
+        inf_data_ref.to_sql('FEATURE_TRAINING_INF', con, index=False, if_exists='replace')
+        con.close()
+
+        # Select subset with at least one condfident detection
+        all_data = self.read_all()
+
+        # Apply scoring model to data
         self.df = self.apply(all_data)[['feature_id','interaction_feature_id','peptide_feature_id','d_score','p_value','q_value','pep']]
 
     def read_learning(self):
@@ -111,22 +130,19 @@ class pyprophet:
 
         return df
 
-    def read_all(self, proteins, interactions):
+    def read_apply(self):
         con = sqlite3.connect(self.outfile)
-        df = pd.read_sql('SELECT * FROM FEATURE WHERE var_xcorr_coelution_score < 3 AND var_stoichiometry_score < 2 ORDER BY feature_id;', con)
+        df = pd.read_sql('SELECT * FROM FEATURE INNER JOIN (SELECT DISTINCT bait_id, prey_id FROM FEATURE_TRAINING_SCORED WHERE pep < 0.01) AS REFERENCE ON FEATURE.bait_id = REFERENCE.bait_id AND FEATURE.prey_id = REFERENCE.prey_id WHERE var_xcorr_coelution_score < 3 AND var_stoichiometry_score < 2 ORDER BY feature_id;', con)
         con.close()
 
-        confident_interaction_seeds = pd.concat([proteins[(proteins['pp_score'] > 0.8) | (proteins['decoy'] == True)][['interaction_feature_id']], interactions[(interactions['pf_score'] > 0.8) | (interactions['decoy'] == True)][['interaction_feature_id']]])
-        confident_interactions = pd.merge(confident_interaction_seeds, df[['interaction_feature_id','bait_id','prey_id','decoy','RT','leftWidth','rightWidth']], on='interaction_feature_id')
-        confident_interactions.columns = ['interaction_feature_id','bait_id','prey_id','decoy','ref_RT','ref_leftWidth','ref_rightWidth']
-        confident_interactions = confident_interactions.drop(['interaction_feature_id'], axis=1)
+        return df
 
-        df_merged = pd.merge(confident_interactions, df, on=['bait_id','prey_id','decoy'])
+    def read_all(self):
+        con = sqlite3.connect(self.outfile)
+        df = pd.read_sql('SELECT FEATURE.* FROM FEATURE INNER JOIN (SELECT DISTINCT bait_id, prey_id, decoy FROM FEATURE INNER JOIN FEATURE_TRAINING_INF ON FEATURE.interaction_feature_id = FEATURE_TRAINING_INF.interaction_feature_id) AS FEATURE_TRAINING_INFB ON FEATURE.bait_id = FEATURE_TRAINING_INFB.bait_id AND FEATURE.prey_id = FEATURE_TRAINING_INFB.prey_id WHERE var_xcorr_coelution_score < 3 AND var_stoichiometry_score < 2 ORDER BY feature_id;', con)
+        con.close()
 
-        df_merged = df_merged[(abs(df_merged['ref_RT']-df_merged['RT']) < 10) & (abs(df_merged['ref_leftWidth']-df_merged['leftWidth']) < 10) & (abs(df_merged['ref_rightWidth']-df_merged['rightWidth']) < 10)]
-        df_merged = df_merged.drop(['ref_RT','ref_leftWidth','ref_rightWidth'], axis=1)
-
-        return df_merged.drop_duplicates()
+        return df
 
     def learn(self, learning_data):
         (result, scorer, weights) = PyProphet(self.xeval_fraction, self.xeval_num_iter, self.ss_initial_fdr, self.ss_iteration_fdr, self.ss_num_iter, self.group_id, self.parametric, self.pfdr, self.pi0_lambda, self.pi0_method, self.pi0_smooth_df, self.pi0_smooth_log_pi0, self.lfdr_truncate, self.lfdr_monotone, self.lfdr_transformation, self.lfdr_adj, self.lfdr_eps, False, self.threads, self.test).learn_and_apply(learning_data)
@@ -160,7 +176,7 @@ class infer:
 
     def read(self):
         con = sqlite3.connect(self.outfile)
-        df = pd.read_sql('SELECT condition_id, replicate_id, FEATURE.bait_id AS bait_id, FEATURE.prey_id AS prey_id, FEATURE.feature_id AS feature_id, FEATURE.interaction_feature_id AS interaction_feature_id, monomer, complex, interaction_confidence AS prior, pep, decoy, prey_peptide_id, prey_peptide_intensity, prey_peptide_total_intensity FROM FEATURE INNER JOIN %s AS FEATURE_SCORED ON FEATURE.peptide_feature_id = FEATURE_SCORED.peptide_feature_id INNER JOIN FEATURE_MW ON FEATURE.interaction_feature_id = FEATURE_MW.interaction_feature_id LEFT JOIN NETWORK ON FEATURE.bait_id = NETWORK.bait_id AND FEATURE.prey_id = NETWORK.prey_id;' % self.feature_table, con)
+        df = pd.read_sql('SELECT condition_id, replicate_id, FEATURE.bait_id AS bait_id, FEATURE.prey_id AS prey_id, FEATURE.feature_id AS feature_id, FEATURE.interaction_feature_id AS interaction_feature_id, monomer, complex, interaction_confidence AS prior, pep, decoy, FEATURE.prey_peptide_id, prey_peptide_intensity, prey_peptide_total_intensity FROM FEATURE INNER JOIN %s AS FEATURE_SCORED ON FEATURE.peptide_feature_id = FEATURE_SCORED.peptide_feature_id INNER JOIN FEATURE_MW ON FEATURE.interaction_feature_id = FEATURE_MW.interaction_feature_id LEFT JOIN NETWORK ON FEATURE.bait_id = NETWORK.bait_id AND FEATURE.prey_id = NETWORK.prey_id;' % self.feature_table, con)
         con.close()
 
         return df
