@@ -8,12 +8,11 @@ import click
 import sqlite3
 
 import multiprocessing as mp
-import mmh3
 from tqdm import tqdm
 
 import pyopenms as po
 
-def prepare(outfile, min_peptides, max_peptides, det_peptides, peak_method, peak_width, signal_to_noise, gauss_width, sgolay_frame_length, sgolay_polynomial_order, sn_win_len, sn_bin_count):
+def prepare(outfile, min_peptides, max_peptides, det_peptides, peak_method, peak_width, signal_to_noise, gauss_width, sgolay_frame_length, sgolay_polynomial_order, sn_win_len, sn_bin_count, max_xcorr_coelution):
 
     con = sqlite3.connect(outfile)
     df = pd.read_sql('SELECT DISTINCT condition_id, replicate_id FROM SEC;', con)
@@ -21,7 +20,7 @@ def prepare(outfile, min_peptides, max_peptides, det_peptides, peak_method, peak
 
     experiments = []
     for idx, exp in enumerate(df.to_dict('records')):
-        experiments.append({'idx': idx, 'tmpoutfile': outfile + "_tmp" + str(idx), 'outfile': outfile, 'condition_id': exp['condition_id'], 'replicate_id': exp['replicate_id'], 'min_peptides': min_peptides, 'max_peptides': max_peptides, 'det_peptides': det_peptides, 'peak_method': peak_method, 'peak_width': peak_width, 'signal_to_noise': signal_to_noise, 'gauss_width': gauss_width, 'sgolay_frame_length': sgolay_frame_length, 'sgolay_polynomial_order': sgolay_polynomial_order, 'sn_win_len': sn_win_len, 'sn_bin_count': sn_bin_count})
+        experiments.append({'idx': idx, 'tmpoutfile': outfile + "_tmp" + str(idx), 'outfile': outfile, 'condition_id': exp['condition_id'], 'replicate_id': exp['replicate_id'], 'min_peptides': min_peptides, 'max_peptides': max_peptides, 'det_peptides': det_peptides, 'peak_method': peak_method, 'peak_width': peak_width, 'signal_to_noise': signal_to_noise, 'gauss_width': gauss_width, 'sgolay_frame_length': sgolay_frame_length, 'sgolay_polynomial_order': sgolay_polynomial_order, 'sn_win_len': sn_win_len, 'sn_bin_count': sn_bin_count, 'max_xcorr_coelution': max_xcorr_coelution})
 
     return experiments
 
@@ -46,6 +45,8 @@ class signalprocess:
         self.sgolay_polynomial_order = exp['sgolay_polynomial_order']
         self.sn_win_len = exp['sn_win_len']
         self.sn_bin_count = exp['sn_bin_count']
+
+        self.max_xcorr_coelution = exp['max_xcorr_coelution']
 
         self.chromatograms, self.protein_index, self.peptide_index = self.generate_chromatograms()
 
@@ -100,18 +101,19 @@ class signalprocess:
                 for prey in pepprot[feature.getMetaValue("id_target_transition_names").split(";")[i]]:
 
                     if (float(feature.getIntensity()) / float(feature.getMetaValue("nr_peaks"))) > 0:
-                        var_stoichiometry_score = float(feature.getMetaValue("id_target_area_intensity").split(";")[i]) / (float(feature.getIntensity()) / float(feature.getMetaValue("nr_peaks")))
+                        prey_peptide_stoichiometry = float(feature.getMetaValue("id_target_area_intensity").split(";")[i]) / (float(feature.getIntensity()) / float(feature.getMetaValue("nr_peaks")))
                     else:
-                        var_stoichiometry_score = 0
+                        prey_peptide_stoichiometry = 0
+
+                    if prey_peptide_stoichiometry > 1:
+                        var_stoichiometry_score = 1.0 / prey_peptide_stoichiometry
+                    else:
+                        var_stoichiometry_score = prey_peptide_stoichiometry
 
                     subfeature = {
                                     "condition_id": self.condition_id,
                                     "replicate_id": self.replicate_id,
-                                    # "bait_feature_id": mmh3.hash(self.condition_id + "_" + self.replicate_id + "_" + bait + "_" + prey + "_" + str(feature.getUniqueId())) & 0xffffffff,
-                                    # "feature_id": mmh3.hash(self.condition_id + "_" + self.replicate_id + "_" + bait + "_" + prey + "_" + str(feature.getUniqueId()) + "_" + feature.getMetaValue("id_target_transition_names").split(";")[i]) & 0xffffffff,
                                     "feature_id": str(feature.getUniqueId()),
-                                    "interaction_feature_id": self.condition_id + "_" + self.replicate_id + "_" + bait + "_" + prey + "_" + str(feature.getUniqueId()),
-                                    "peptide_feature_id": self.condition_id + "_" + self.replicate_id + "_" + bait + "_" + prey + "_" + str(feature.getUniqueId()) + "_" + feature.getMetaValue("id_target_transition_names").split(";")[i],
                                     "bait_id": bait,
                                     "prey_id": prey,
                                     "decoy": False, # decoy
@@ -129,33 +131,35 @@ class signalprocess:
                                     "prey_peptide_intensity": float(feature.getMetaValue("id_target_area_intensity").split(";")[i]),
                                     "prey_peptide_total_intensity": float(feature.getMetaValue("id_target_total_area_intensity").split(";")[i]),
                                     "prey_peptide_total_mi": float(feature.getMetaValue("id_target_total_mi").split(";")[i]),
+                                    "prey_peptide_stoichiometry": prey_peptide_stoichiometry,
                                     "main_var_xcorr_shape_score": float(feature.getMetaValue("id_target_ind_xcorr_shape").split(";")[i]),
                                     "var_xcorr_coelution_score": float(feature.getMetaValue("id_target_ind_xcorr_coelution").split(";")[i]),
                                     "var_log_sn_score": float(feature.getMetaValue("id_target_ind_log_sn_score").split(";")[i]),
                                     "var_mi_score": float(feature.getMetaValue("id_target_ind_mi_score").split(";")[i]),
                                     "var_mi_ratio_score": float(feature.getMetaValue("id_target_ind_mi_ratio_score").split(";")[i]),
-                                    "var_intensity_score": float(feature.getMetaValue("id_target_intensity_score").split(";")[i]),
                                     "var_intensity_ratio_score": float(feature.getMetaValue("id_target_intensity_ratio_score").split(";")[i]),
                                     "var_stoichiometry_score": var_stoichiometry_score
                                     }
-                    subfeatures.append(subfeature)
+                    if float(feature.getMetaValue("id_target_ind_xcorr_coelution").split(";")[i]) < self.max_xcorr_coelution:
+                        subfeatures.append(subfeature)
         if feature.metaValueExists("id_decoy_num_transitions"):
             for i in range(int(feature.getMetaValue("id_decoy_num_transitions"))):
                 for prey in pepprot[feature.getMetaValue("id_decoy_transition_names").split(";")[i]]:
 
                     if (float(feature.getIntensity()) / float(feature.getMetaValue("nr_peaks"))) > 0:
-                        var_stoichiometry_score = float(feature.getMetaValue("id_decoy_area_intensity").split(";")[i]) / (float(feature.getIntensity()) / float(feature.getMetaValue("nr_peaks")))
+                        prey_peptide_stoichiometry = float(feature.getMetaValue("id_decoy_area_intensity").split(";")[i]) / (float(feature.getIntensity()) / float(feature.getMetaValue("nr_peaks")))
                     else:
-                        var_stoichiometry_score = 0
+                        prey_peptide_stoichiometry = 0
+
+                    if prey_peptide_stoichiometry > 1:
+                        var_stoichiometry_score = 1.0 / prey_peptide_stoichiometry
+                    else:
+                        var_stoichiometry_score = prey_peptide_stoichiometry
 
                     subfeature = {
                                     "condition_id": self.condition_id,
                                     "replicate_id": self.replicate_id,
-                                    # "bait_feature_id": mmh3.hash("DECOY_" + self.condition_id + "_" + self.replicate_id + "_" + bait + "_" + prey + "_" + str(feature.getUniqueId())) & 0xffffffff,
-                                    # "feature_id": mmh3.hash("DECOY_" + self.condition_id + "_" + self.replicate_id + "_" + bait + "_" + prey + "_" + str(feature.getUniqueId()) + "_" + feature.getMetaValue("id_decoy_transition_names").split(";")[i]) & 0xffffffff,
                                     "feature_id": "DECOY_" + str(feature.getUniqueId()),
-                                    "interaction_feature_id": "DECOY_" + self.condition_id + "_" + self.replicate_id + "_" + bait + "_" + prey + "_" + str(feature.getUniqueId()),
-                                    "peptide_feature_id": "DECOY_" + self.condition_id + "_" + self.replicate_id + "_" + bait + "_" + prey + "_" + str(feature.getUniqueId()) + "_" + feature.getMetaValue("id_decoy_transition_names").split(";")[i],
                                     "bait_id": bait,
                                     "prey_id": prey,
                                     "decoy": True, # decoy
@@ -173,16 +177,17 @@ class signalprocess:
                                     "prey_peptide_intensity": float(feature.getMetaValue("id_decoy_area_intensity").split(";")[i]),
                                     "prey_peptide_total_intensity": float(feature.getMetaValue("id_decoy_total_area_intensity").split(";")[i]),
                                     "prey_peptide_total_mi": float(feature.getMetaValue("id_decoy_total_mi").split(";")[i]),
+                                    "prey_peptide_stoichiometry": prey_peptide_stoichiometry,
                                     "main_var_xcorr_shape_score": float(feature.getMetaValue("id_decoy_ind_xcorr_shape").split(";")[i]),
                                     "var_xcorr_coelution_score": float(feature.getMetaValue("id_decoy_ind_xcorr_coelution").split(";")[i]),
                                     "var_log_sn_score": float(feature.getMetaValue("id_decoy_ind_log_sn_score").split(";")[i]),
                                     "var_mi_score": float(feature.getMetaValue("id_decoy_ind_mi_score").split(";")[i]),
                                     "var_mi_ratio_score": float(feature.getMetaValue("id_decoy_ind_mi_ratio_score").split(";")[i]),
-                                    "var_intensity_score": float(feature.getMetaValue("id_decoy_intensity_score").split(";")[i]),
                                     "var_intensity_ratio_score": float(feature.getMetaValue("id_decoy_intensity_ratio_score").split(";")[i]),
                                     "var_stoichiometry_score": var_stoichiometry_score
                                     }
-                    subfeatures.append(subfeature)
+                    if float(feature.getMetaValue("id_decoy_ind_xcorr_coelution").split(";")[i]) < self.max_xcorr_coelution:
+                        subfeatures.append(subfeature)
 
         return pd.DataFrame(subfeatures)
 
@@ -280,7 +285,7 @@ class signalprocess:
         featurefinder_params.setValue("Scores:use_rt_score",'false', '')
         featurefinder_params.setValue("Scores:use_library_score",'false', '')
 
-        featurefinder_params.setValue("uis_threshold_sn", -1, '')
+        featurefinder_params.setValue("uis_threshold_sn", 0, '')
         featurefinder_params.setValue("uis_threshold_peak_area", 0, '')
 
         featurefinder.setParameters(featurefinder_params);

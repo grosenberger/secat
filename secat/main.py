@@ -102,8 +102,8 @@ def preprocess(infiles, outfile, secfile, netfile, uniprotfile, columns, decoy_i
 @click.option('--out', 'outfile', required=False, type=click.Path(exists=False), help='Output SECAT file.')
 # Parameters for peptides
 @click.option('--min_peptides', 'min_peptides', default=3, show_default=True, type=int, help='Minimum number of required peptides per protein.')
-@click.option('--max_peptides', 'max_peptides', default=3, show_default=True, type=int, help='Maximum number of (most intense) peptides per protein.')
-@click.option('--det_peptides', 'det_peptides', default=3, show_default=True, type=int, help='Number of (most intense) peptides per assay for detection.')
+@click.option('--max_peptides', 'max_peptides', default=6, show_default=True, type=int, help='Maximum number of (most intense) peptides per protein.')
+@click.option('--det_peptides', 'det_peptides', default=3, show_default=True, type=int, help='Number of (most intense) peptides per query for detection.')
 # Parameters for peak picking
 @click.option('--peak_method', 'peak_method', default='gauss', show_default=True, type=click.Choice(['gauss', 'sgolay']), help='Use Gaussian or Savitzky-Golay smoothing.')
 @click.option('--peak_width', 'peak_width', default=2, show_default=True, type=int, help='Force a certain minimal peak width (sec units; -1 to disable) on the data (e.g. extend the peak at least by this amount on both sides).')
@@ -113,8 +113,9 @@ def preprocess(infiles, outfile, secfile, netfile, uniprotfile, columns, decoy_i
 @click.option('--sgolay_polynomial_order', 'sgolay_polynomial_order', default=3, show_default=True, type=int, help='Specify Savitzky-Golay polynomial order.')
 @click.option('--sn_win_len', 'sn_win_len', default=30, show_default=True, type=int, help='Signal to noise window length.')
 @click.option('--sn_bin_count', 'sn_bin_count', default=15, show_default=True, type=int, help='Signal to noise bin count.')
+@click.option('--max_xcorr_coelution', 'max_xcorr_coelution', default=2.0, show_default=True, type=float, help='Do not consider features with an SEC coelution above the threshold.')
 @click.option('--threads', 'threads', default=1, show_default=True, type=int, help='Number of threads used for parallel processing of SEC runs. -1 means all available CPUs.')
-def detect(infile, outfile, min_peptides, max_peptides, det_peptides, peak_method, peak_width, signal_to_noise, gauss_width, sgolay_frame_length, sgolay_polynomial_order, sn_win_len, sn_bin_count, threads):
+def detect(infile, outfile, min_peptides, max_peptides, det_peptides, peak_method, peak_width, signal_to_noise, gauss_width, sgolay_frame_length, sgolay_polynomial_order, sn_win_len, sn_bin_count, max_xcorr_coelution, threads):
     """
     Detect protein and interaction features in SEC data.
     """
@@ -133,7 +134,7 @@ def detect(infile, outfile, min_peptides, max_peptides, det_peptides, peak_metho
     con.close()
 
     # Prepare SEC experiments, e.g. individual conditions + replicates
-    exps = prepare(outfile, min_peptides, max_peptides, det_peptides, peak_method, peak_width, signal_to_noise, gauss_width, sgolay_frame_length, sgolay_polynomial_order, sn_win_len, sn_bin_count)
+    exps = prepare(outfile, min_peptides, max_peptides, det_peptides, peak_method, peak_width, signal_to_noise, gauss_width, sgolay_frame_length, sgolay_polynomial_order, sn_win_len, sn_bin_count, max_xcorr_coelution)
 
     # Execute workflow in parallel
     if threads == -1:
@@ -191,7 +192,7 @@ def score(infile, outfile, complex_threshold_factor, xeval_fraction, xeval_num_i
     else:
         n_cpus = threads
 
-    p = Pool(processes=n_cpus)
+    # p = Pool(processes=n_cpus)
 
     # Define outfile
     if outfile is None:
@@ -219,9 +220,12 @@ def score(infile, outfile, complex_threshold_factor, xeval_fraction, xeval_num_i
     # pd.concat(training_data).to_sql('FEATURE_TRAINING', con, index=False, if_exists='replace')
     # con.close()
 
+    # # Close parallel execution
+    # p.close()
+
     # Run PyProphet training
     click.echo("Info: Running PyProphet.")
-    scored_data = pyprophet(outfile, xeval_fraction, xeval_num_iter, ss_initial_fdr, ss_iteration_fdr, ss_num_iter, parametric, pfdr, pi0_lambda, pi0_method, pi0_smooth_df, pi0_smooth_log_pi0, lfdr_truncate, lfdr_monotone, lfdr_transformation, lfdr_adj, lfdr_eps, threads, test)
+    scored_data = pyprophet(outfile, xeval_fraction, xeval_num_iter, ss_initial_fdr, ss_iteration_fdr, ss_num_iter, parametric, pfdr, pi0_lambda, pi0_method, pi0_smooth_df, pi0_smooth_log_pi0, lfdr_truncate, lfdr_monotone, lfdr_transformation, lfdr_adj, lfdr_eps, n_cpus, test)
 
     con = sqlite3.connect(outfile)
     scored_data.df.to_sql('FEATURE_SCORED', con, index=False, if_exists='replace')
