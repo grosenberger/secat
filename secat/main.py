@@ -103,7 +103,7 @@ def preprocess(infiles, outfile, secfile, netfile, uniprotfile, columns, decoy_i
 # Parameters for peptides
 @click.option('--min_peptides', 'min_peptides', default=3, show_default=True, type=int, help='Minimum number of required peptides per protein.')
 @click.option('--max_peptides', 'max_peptides', default=6, show_default=True, type=int, help='Maximum number of (most intense) peptides per protein.')
-@click.option('--det_peptides', 'det_peptides', default=3, show_default=True, type=int, help='Number of (most intense) peptides per query for detection.')
+@click.option('--det_peptides', 'det_peptides', default=6, show_default=True, type=int, help='Number of (most intense) peptides per query for detection.')
 # Parameters for peak picking
 @click.option('--peak_method', 'peak_method', default='gauss', show_default=True, type=click.Choice(['gauss', 'sgolay']), help='Use Gaussian or Savitzky-Golay smoothing.')
 @click.option('--peak_width', 'peak_width', default=2, show_default=True, type=int, help='Force a certain minimal peak width (sec units; -1 to disable) on the data (e.g. extend the peak at least by this amount on both sides).')

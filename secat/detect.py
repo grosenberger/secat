@@ -137,7 +137,6 @@ class signalprocess:
                                     "var_log_sn_score": float(feature.getMetaValue("id_target_ind_log_sn_score").split(";")[i]),
                                     "var_mi_score": float(feature.getMetaValue("id_target_ind_mi_score").split(";")[i]),
                                     "var_mi_ratio_score": float(feature.getMetaValue("id_target_ind_mi_ratio_score").split(";")[i]),
-                                    "var_intensity_ratio_score": float(feature.getMetaValue("id_target_intensity_ratio_score").split(";")[i]),
                                     "var_stoichiometry_score": var_stoichiometry_score
                                     }
                     if float(feature.getMetaValue("id_target_ind_xcorr_coelution").split(";")[i]) < self.max_xcorr_coelution:
@@ -183,7 +182,6 @@ class signalprocess:
                                     "var_log_sn_score": float(feature.getMetaValue("id_decoy_ind_log_sn_score").split(";")[i]),
                                     "var_mi_score": float(feature.getMetaValue("id_decoy_ind_mi_score").split(";")[i]),
                                     "var_mi_ratio_score": float(feature.getMetaValue("id_decoy_ind_mi_ratio_score").split(";")[i]),
-                                    "var_intensity_ratio_score": float(feature.getMetaValue("id_decoy_intensity_ratio_score").split(";")[i]),
                                     "var_stoichiometry_score": var_stoichiometry_score
                                     }
                     if float(feature.getMetaValue("id_decoy_ind_xcorr_coelution").split(";")[i]) < self.max_xcorr_coelution:
@@ -285,7 +283,7 @@ class signalprocess:
         featurefinder_params.setValue("Scores:use_rt_score",'false', '')
         featurefinder_params.setValue("Scores:use_library_score",'false', '')
 
-        featurefinder_params.setValue("uis_threshold_sn", 0, '')
+        featurefinder_params.setValue("uis_threshold_sn", -1, '')
         featurefinder_params.setValue("uis_threshold_peak_area", 0, '')
 
         featurefinder.setParameters(featurefinder_params);

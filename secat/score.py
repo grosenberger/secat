@@ -70,19 +70,19 @@ def filter_mw(exp):
 
 def filter_training(exp):
     con = sqlite3.connect(exp['outfile'])
-    df = pd.read_sql('SELECT FEATURE.feature_id AS feature_id, FEATURE.prey_id AS prey_id, complex, monomer, bait_elution_model_fit, bait_log_sn, bait_xcorr_shape, bait_xcorr_coelution, main_var_xcorr_shape_score, var_xcorr_coelution_score, var_log_sn_score, var_stoichiometry_score FROM FEATURE INNER JOIN FEATURE_MW ON FEATURE.feature_id = FEATURE_MW.feature_id AND FEATURE.prey_id = FEATURE_MW.prey_id WHERE condition_id = "%s" AND replicate_id = "%s";' % (exp['condition_id'], exp['replicate_id']), con)
+    df = pd.read_sql('SELECT FEATURE.feature_id AS feature_id, FEATURE.prey_id AS prey_id, complex, monomer, bait_elution_model_fit, bait_log_sn, bait_xcorr_shape, bait_xcorr_coelution, prey_peptide_stoichiometry, main_var_xcorr_shape_score, var_xcorr_coelution_score, var_log_sn_score FROM FEATURE INNER JOIN FEATURE_MW ON FEATURE.feature_id = FEATURE_MW.feature_id AND FEATURE.prey_id = FEATURE_MW.prey_id WHERE condition_id = "%s" AND replicate_id = "%s";' % (exp['condition_id'], exp['replicate_id']), con)
     con.close()
 
     # bait-feature-level filtering
     df = df[((df['complex'] == True) | (df['monomer'] == True)) & (df['bait_xcorr_coelution'] < 3) & (df['bait_xcorr_shape'] > 0.8) & (df['bait_elution_model_fit'] > 0.9) & (df['bait_log_sn'] > 1.0)]
 
     # prey-feature-level filtering
-    df = df.groupby(['feature_id','prey_id'])[['main_var_xcorr_shape_score','var_xcorr_coelution_score','var_log_sn_score','var_stoichiometry_score']].quantile([0.33, 0.66]).reset_index()
+    df = df.groupby(['feature_id','prey_id'])[['main_var_xcorr_shape_score','var_xcorr_coelution_score','var_log_sn_score','prey_peptide_stoichiometry']].quantile([0.33, 0.66]).reset_index()
     df = df.rename(index=str, columns={"level_2": "quantile"})
 
-    df_high = (df[(df['quantile'] == 0.33) & (df['main_var_xcorr_shape_score'] > 0.8) & (df['var_log_sn_score'] > 0.0) & (df['var_stoichiometry_score'] > 0.1)][['feature_id','prey_id']])
+    df_high = (df[(df['quantile'] == 0.33) & (df['main_var_xcorr_shape_score'] > 0.8) & (df['var_log_sn_score'] > 0.0) & (df['prey_peptide_stoichiometry'] > 0.1)][['feature_id','prey_id']])
 
-    df_low = (df[(df['quantile'] == 0.66) & (df['var_xcorr_coelution_score'] < 1.0) & (df['quantile'] == 0.66) & (df['var_stoichiometry_score'] < 2.0)][['feature_id','prey_id']]) 
+    df_low = (df[(df['quantile'] == 0.66) & (df['var_xcorr_coelution_score'] < 1.0) & (df['quantile'] == 0.66) & (df['prey_peptide_stoichiometry'] < 2.0)][['feature_id','prey_id']]) 
 
     return pd.merge(df_high, df_low, on=['feature_id','prey_id'])
 
@@ -111,14 +111,19 @@ class pyprophet:
         self.threads = threads
         self.test = test
 
-        # learn from training data
+        # learn from high confidence data
         learning_data = self.read_learning()
         learned_data, self.weights = self.learn(learning_data)
         print self.weights
 
+        # apply to detecting data
+        detecting_data = self.read_detecting()
+
+        detected_data = detecting_data.groupby('sec_group').apply(self.apply)
+
         # conduct preliminary inference
         con = sqlite3.connect(self.outfile)
-        learned_data.scored_tables[['feature_id', 'bait_id', 'prey_id', 'prey_peptide_id', 'pep']].to_sql('FEATURE_TRAINING_SCORED', con, index=False, if_exists='replace')
+        detected_data[['feature_id', 'bait_id', 'prey_id', 'prey_peptide_id', 'pep']].to_sql('FEATURE_TRAINING_SCORED', con, index=False, if_exists='replace')
         con.close()
 
         inf_data = infer(self.outfile, 'FEATURE_TRAINING_SCORED')
@@ -130,30 +135,31 @@ class pyprophet:
         con.close()
 
         # Select subset with at least one condfident detection
-        all_data = self.read_all()
+        aligning_data = self.read_aligning()
 
         # Apply scoring model to data
-        self.df = self.apply(all_data)[['feature_id','bait_id','prey_id','prey_peptide_id','d_score','p_value','q_value','pep']]
+        self.df = self.apply(aligning_data)[['feature_id','bait_id','prey_id','prey_peptide_id','d_score','p_value','q_value','pep']]
 
     def read_learning(self):
         con = sqlite3.connect(self.outfile)
-        df = pd.read_sql('SELECT FEATURE.*, FEATURE.feature_id || "_" || FEATURE.prey_id || "_" || FEATURE.prey_peptide_id AS pyprophet_feature_id FROM FEATURE INNER JOIN FEATURE_TRAINING ON FEATURE.feature_id = FEATURE_TRAINING.feature_id AND FEATURE.prey_id = FEATURE_TRAINING.prey_id;', con)
+        df = pd.read_sql('SELECT FEATURE.*, FEATURE.feature_id || "_" || FEATURE.prey_id || "_" || FEATURE.prey_peptide_id AS pyprophet_feature_id FROM FEATURE INNER JOIN FEATURE_TRAINING ON FEATURE.feature_id = FEATURE_TRAINING.feature_id AND FEATURE.prey_id = FEATURE_TRAINING.prey_id LEFT OUTER JOIN NETWORK ON FEATURE.bait_id = NETWORK.bait_id AND FEATURE.prey_id = NETWORK.prey_id WHERE interaction_confidence > 0.9 OR decoy == 1;', con)
         con.close()
-
-        df.ix[df.var_stoichiometry_score > 1, 'var_stoichiometry_score'] = 1.0 / df.ix[df.var_stoichiometry_score > 1, 'var_stoichiometry_score']
-        df = df.drop(['var_intensity_score'], axis=1)
-        df = df.drop(['var_intensity_ratio_score'], axis=1)
 
         return df
 
-    def read_all(self):
+    def read_detecting(self):
         con = sqlite3.connect(self.outfile)
-        df = pd.read_sql('SELECT DISTINCT FEATURE.*, FEATURE.feature_id || "_" || FEATURE.prey_id || "_" || FEATURE.prey_peptide_id AS pyprophet_feature_id FROM FEATURE INNER JOIN (SELECT DISTINCT FEATURE.bait_id, FEATURE.prey_id, FEATURE.RT, FEATURE.leftWidth, FEATURE.rightWidth FROM FEATURE INNER JOIN FEATURE_TRAINING_INF ON FEATURE.feature_id = FEATURE_TRAINING_INF.feature_id AND FEATURE.prey_id = FEATURE_TRAINING_INF.prey_id) AS FEATURE_TRAINING_INFB ON FEATURE.bait_id = FEATURE_TRAINING_INFB.bait_id AND FEATURE.prey_id = FEATURE_TRAINING_INFB.prey_id WHERE ABS(FEATURE.RT - FEATURE_TRAINING_INFB.RT) < 3 AND ABS(FEATURE.leftWidth - FEATURE_TRAINING_INFB.leftWidth) < 3 AND ABS(FEATURE.rightWidth - FEATURE_TRAINING_INFB.rightWidth) < 3;', con)
+        df = pd.read_sql('SELECT FEATURE.*, FEATURE.feature_id || "_" || FEATURE.prey_id || "_" || FEATURE.prey_peptide_id AS pyprophet_feature_id, ROUND(FEATURE.RT) AS sec_group FROM FEATURE INNER JOIN FEATURE_TRAINING ON FEATURE.feature_id = FEATURE_TRAINING.feature_id AND FEATURE.prey_id = FEATURE_TRAINING.prey_id;', con)
         con.close()
 
-        df.ix[df.var_stoichiometry_score > 1, 'var_stoichiometry_score'] = 1.0 / df.ix[df.var_stoichiometry_score > 1, 'var_stoichiometry_score']
-        df = df.drop(['var_intensity_score'], axis=1)
-        df = df.drop(['var_intensity_ratio_score'], axis=1)
+        df.loc[df['sec_group'] >= 40,'sec_group'] = 40
+
+        return df
+
+    def read_aligning(self):
+        con = sqlite3.connect(self.outfile)
+        df = pd.read_sql('SELECT DISTINCT FEATURE.*, FEATURE.feature_id || "_" || FEATURE.prey_id || "_" || FEATURE.prey_peptide_id AS pyprophet_feature_id, 0 AS sec_group FROM FEATURE INNER JOIN (SELECT DISTINCT FEATURE.bait_id, FEATURE.prey_id, FEATURE.RT, FEATURE.leftWidth, FEATURE.rightWidth FROM FEATURE INNER JOIN FEATURE_TRAINING_INF ON FEATURE.feature_id = FEATURE_TRAINING_INF.feature_id AND FEATURE.prey_id = FEATURE_TRAINING_INF.prey_id) AS FEATURE_TRAINING_INFB ON FEATURE.bait_id = FEATURE_TRAINING_INFB.bait_id AND FEATURE.prey_id = FEATURE_TRAINING_INFB.prey_id WHERE ABS(FEATURE.RT - FEATURE_TRAINING_INFB.RT) < 5 AND ABS(FEATURE.leftWidth - FEATURE_TRAINING_INFB.leftWidth) < 7 AND ABS(FEATURE.rightWidth - FEATURE_TRAINING_INFB.rightWidth) < 7;', con)
+        con.close()
 
         return df
 
@@ -164,10 +170,9 @@ class pyprophet:
 
         return result, weights
 
-    def apply(self, all_data):
-        (result, scorer, weights) = PyProphet(self.xeval_fraction, self.xeval_num_iter, self.ss_initial_fdr, self.ss_iteration_fdr, self.ss_num_iter, self.group_id, self.parametric, self.pfdr, self.pi0_lambda, self.pi0_method, self.pi0_smooth_df, self.pi0_smooth_log_pi0, self.lfdr_truncate, self.lfdr_monotone, self.lfdr_transformation, self.lfdr_adj, self.lfdr_eps, False, self.threads, self.test).apply_weights(all_data, self.weights)
-        self.plot(result, scorer.pi0, "all")
-        self.plot_scores(result.scored_tables, "all")
+    def apply(self, detecting_data):
+        (result, scorer, weights) = PyProphet(self.xeval_fraction, self.xeval_num_iter, self.ss_initial_fdr, self.ss_iteration_fdr, self.ss_num_iter, self.group_id, self.parametric, self.pfdr, self.pi0_lambda, self.pi0_method, self.pi0_smooth_df, self.pi0_smooth_log_pi0, self.lfdr_truncate, self.lfdr_monotone, self.lfdr_transformation, self.lfdr_adj, self.lfdr_eps, False, self.threads, self.test).apply_weights(detecting_data, self.weights)
+        self.plot(result, scorer.pi0, str(int(detecting_data['sec_group'].values[0])))
         return result.scored_tables
 
     def plot(self, result, pi0, tag):
