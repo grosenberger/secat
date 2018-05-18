@@ -94,9 +94,28 @@ class signalprocess:
     def convert_feature(self, feature, pepprot):
         bait = re.split("bait_",feature.getMetaValue("PeptideRef"))[1]
 
+        metafeatures = []
         subfeatures = []
 
         if feature.metaValueExists("id_target_num_transitions"):
+            metafeature = {
+                                    "feature_id": str(feature.getUniqueId()),
+                                    "condition_id": self.condition_id,
+                                    "replicate_id": self.replicate_id,
+                                    "decoy": False, # decoy
+                                    "RT": feature.getRT(),
+                                    "leftWidth": feature.getMetaValue("leftWidth"),
+                                    "rightWidth": feature.getMetaValue("rightWidth"),
+                                    "bait_sn_ratio": feature.getMetaValue("sn_ratio"),
+                                    "bait_xcorr_coelution": feature.getMetaValue("var_xcorr_coelution"),
+                                    "bait_xcorr_shape": feature.getMetaValue("var_xcorr_shape"),
+                                    "bait_intensity_fraction": feature.getMetaValue("var_intensity_score"),
+                                    "bait_log_sn": feature.getMetaValue("var_log_sn_score"),
+                                    "bait_elution_model_fit": feature.getMetaValue("var_elution_model_fit_score"),
+                                    "bait_intensity": feature.getIntensity(),
+            }
+            metafeatures.append(metafeature)
+
             for i in range(int(feature.getMetaValue("id_target_num_transitions"))):
                 for prey in pepprot[feature.getMetaValue("id_target_transition_names").split(";")[i]]:
 
@@ -111,22 +130,10 @@ class signalprocess:
                         var_stoichiometry_score = prey_peptide_stoichiometry
 
                     subfeature = {
-                                    "condition_id": self.condition_id,
-                                    "replicate_id": self.replicate_id,
                                     "feature_id": str(feature.getUniqueId()),
                                     "bait_id": bait,
                                     "prey_id": prey,
                                     "decoy": False, # decoy
-                                    "RT": feature.getRT(),
-                                    "leftWidth": feature.getMetaValue("leftWidth"),
-                                    "rightWidth": feature.getMetaValue("rightWidth"),
-                                    "bait_sn_ratio": feature.getMetaValue("sn_ratio"),
-                                    "bait_xcorr_coelution": feature.getMetaValue("var_xcorr_coelution"),
-                                    "bait_xcorr_shape": feature.getMetaValue("var_xcorr_shape"),
-                                    "bait_intensity_fraction": feature.getMetaValue("var_intensity_score"),
-                                    "bait_log_sn": feature.getMetaValue("var_log_sn_score"),
-                                    "bait_elution_model_fit": feature.getMetaValue("var_elution_model_fit_score"),
-                                    "bait_intensity": feature.getIntensity(),
                                     "prey_peptide_id": feature.getMetaValue("id_target_transition_names").split(";")[i],
                                     "prey_peptide_intensity": float(feature.getMetaValue("id_target_area_intensity").split(";")[i]),
                                     "prey_peptide_total_intensity": float(feature.getMetaValue("id_target_total_area_intensity").split(";")[i]),
@@ -138,10 +145,28 @@ class signalprocess:
                                     "var_mi_score": float(feature.getMetaValue("id_target_ind_mi_score").split(";")[i]),
                                     "var_mi_ratio_score": float(feature.getMetaValue("id_target_ind_mi_ratio_score").split(";")[i]),
                                     "var_stoichiometry_score": var_stoichiometry_score
-                                    }
+                    }
                     if float(feature.getMetaValue("id_target_ind_xcorr_coelution").split(";")[i]) < self.max_xcorr_coelution:
                         subfeatures.append(subfeature)
         if feature.metaValueExists("id_decoy_num_transitions"):
+            metafeature = {
+                                    "feature_id": "DECOY_" + str(feature.getUniqueId()),
+                                    "condition_id": self.condition_id,
+                                    "replicate_id": self.replicate_id,
+                                    "decoy": True, # decoy
+                                    "RT": feature.getRT(),
+                                    "leftWidth": feature.getMetaValue("leftWidth"),
+                                    "rightWidth": feature.getMetaValue("rightWidth"),
+                                    "bait_sn_ratio": feature.getMetaValue("sn_ratio"),
+                                    "bait_xcorr_coelution": feature.getMetaValue("var_xcorr_coelution"),
+                                    "bait_xcorr_shape": feature.getMetaValue("var_xcorr_shape"),
+                                    "bait_intensity_fraction": feature.getMetaValue("var_intensity_score"),
+                                    "bait_log_sn": feature.getMetaValue("var_log_sn_score"),
+                                    "bait_elution_model_fit": feature.getMetaValue("var_elution_model_fit_score"),
+                                    "bait_intensity": feature.getIntensity(),
+            }
+            metafeatures.append(metafeature)
+
             for i in range(int(feature.getMetaValue("id_decoy_num_transitions"))):
                 for prey in pepprot[feature.getMetaValue("id_decoy_transition_names").split(";")[i]]:
 
@@ -156,22 +181,10 @@ class signalprocess:
                         var_stoichiometry_score = prey_peptide_stoichiometry
 
                     subfeature = {
-                                    "condition_id": self.condition_id,
-                                    "replicate_id": self.replicate_id,
                                     "feature_id": "DECOY_" + str(feature.getUniqueId()),
                                     "bait_id": bait,
                                     "prey_id": prey,
                                     "decoy": True, # decoy
-                                    "RT": feature.getRT(),
-                                    "leftWidth": feature.getMetaValue("leftWidth"),
-                                    "rightWidth": feature.getMetaValue("rightWidth"),
-                                    "bait_sn_ratio": feature.getMetaValue("sn_ratio"),
-                                    "bait_xcorr_coelution": feature.getMetaValue("var_xcorr_coelution"),
-                                    "bait_xcorr_shape": feature.getMetaValue("var_xcorr_shape"),
-                                    "bait_intensity_fraction": feature.getMetaValue("var_intensity_score"),
-                                    "bait_log_sn": feature.getMetaValue("var_log_sn_score"),
-                                    "bait_elution_model_fit": feature.getMetaValue("var_elution_model_fit_score"),
-                                    "bait_intensity": feature.getIntensity(),
                                     "prey_peptide_id": feature.getMetaValue("id_decoy_transition_names").split(";")[i],
                                     "prey_peptide_intensity": float(feature.getMetaValue("id_decoy_area_intensity").split(";")[i]),
                                     "prey_peptide_total_intensity": float(feature.getMetaValue("id_decoy_total_area_intensity").split(";")[i]),
@@ -183,11 +196,11 @@ class signalprocess:
                                     "var_mi_score": float(feature.getMetaValue("id_decoy_ind_mi_score").split(";")[i]),
                                     "var_mi_ratio_score": float(feature.getMetaValue("id_decoy_ind_mi_ratio_score").split(";")[i]),
                                     "var_stoichiometry_score": var_stoichiometry_score
-                                    }
+                    }
                     if float(feature.getMetaValue("id_decoy_ind_xcorr_coelution").split(";")[i]) < self.max_xcorr_coelution:
                         subfeatures.append(subfeature)
 
-        return pd.DataFrame(subfeatures)
+        return pd.DataFrame(metafeatures), pd.DataFrame(subfeatures)
 
     def score(self,queries):
         baits = set()
@@ -290,14 +303,18 @@ class signalprocess:
         featurefinder.prepareProteinPeptideMaps_(targeted)
 
         tgpicker.pickTransitionGroup(tg);
-        results = []
+        metaresults = []
+        subresults = []
         if len(tg.getFeatures()) > 0 and len(tg.getTransitions()) > 0 and len(tg.getChromatograms()) > 0:
             featurefinder.scorePeakgroups(tg, trafo, swath_maps_dummy, features, False)
 
             for feature in features:
-                results.append(self.convert_feature(feature, pepprot))
+                metafeatures, subfeatures = self.convert_feature(feature, pepprot)
+                metaresults.append(metafeatures)
+                subresults.append(subfeatures)
 
-            pd.concat(results).to_sql('FEATURE', self.con, index=False, if_exists='append')
+            pd.concat(metaresults).to_sql('FEATURE_META', self.con, index=False, if_exists='append')
+            pd.concat(subresults).to_sql('FEATURE', self.con, index=False, if_exists='append')
 
     def read(self):
         con = sqlite3.connect(self.outfile)

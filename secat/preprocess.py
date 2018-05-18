@@ -35,7 +35,7 @@ class uniprot:
             mw = entry.xpath('./uniprot:sequence/@mass', namespaces = self.namespaces)
             ensembl = entry.xpath('./uniprot:dbReference[@type="Ensembl"]/uniprot:property[@type="protein sequence ID"]/@value', namespaces = self.namespaces)
 
-            df = df.append({'protein_id': _extract(accession), 'protein_name': _extract(name), 'ensembl_id': ensembl, 'protein_mw': _extract(mw)}, ignore_index=True)
+            df = df.append({'protein_id': _extract(accession), 'protein_name': _extract(name), 'ensembl_id': ensembl, 'protein_mw': float(_extract(mw))}, ignore_index=True)
 
         return df
 
@@ -112,16 +112,19 @@ class stringdb:
         return df
 
 class net:
-    def __init__(self, netfile, uniprot):
+    def __init__(self, netfile, uniprot, min_interaction_confidence):
         self.formats = ['stringdb','mitab']
         self.format = self.identify(netfile)
+        self.min_interaction_confidence = min_interaction_confidence
 
         if self.format == 'stringdb':
             network = stringdb(netfile, uniprot).df
         elif self.format == 'mitab':
             network = mitab(netfile).df
 
-        self.df = self.expand(network, uniprot)
+        df = self.expand(network, uniprot)
+        df = df[df['interaction_confidence'] >= min_interaction_confidence]
+        self.df = df
 
     def identify(self, netfile):
         header = pd.read_table(netfile, sep=None, nrows=1, engine='python')
@@ -377,7 +380,7 @@ class query:
         decoy_queries = decoy_queries.fillna(True)
         decoy_queries = decoy_queries[decoy_queries['decoy'] == True]
 
-        return pd.concat([queries, decoy_queries])[['bait_id','prey_id','decoy']].drop_duplicates()
+        return pd.concat([queries, decoy_queries], sort=True)[['bait_id','prey_id','decoy']].drop_duplicates()
 
     def to_df(self):
         return self.df

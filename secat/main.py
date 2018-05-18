@@ -37,7 +37,8 @@ def cli():
 @click.option('--decoy_intensity_bins', 'decoy_intensity_bins', default=1, show_default=True, type=int, help='Number of decoy bins for intensity.')
 @click.option('--decoy_left_sec_bins', 'decoy_left_sec_bins', default=1, show_default=True, type=int, help='Number of decoy bins for left SEC fraction.')
 @click.option('--decoy_right_sec_bins', 'decoy_right_sec_bins', default=1, show_default=True, type=int, help='Number of decoy bins for right SEC fraction.')
-def preprocess(infiles, outfile, secfile, netfile, uniprotfile, columns, decoy_intensity_bins, decoy_left_sec_bins, decoy_right_sec_bins):
+@click.option('--min_interaction_confidence', 'min_interaction_confidence', default=0.0, show_default=True, type=float, help='Minimum interaction confidence for prior information from network.')
+def preprocess(infiles, outfile, secfile, netfile, uniprotfile, columns, decoy_intensity_bins, decoy_left_sec_bins, decoy_right_sec_bins, min_interaction_confidence):
     """
     Import and preprocess SEC data.
     """
@@ -57,7 +58,7 @@ def preprocess(infiles, outfile, secfile, netfile, uniprotfile, columns, decoy_i
 
     # Generate Network table
     click.echo("Info: Parsing network file %s." % netfile)
-    net_data = net(netfile, uniprot_data)
+    net_data = net(netfile, uniprot_data, min_interaction_confidence)
     net_data.to_df().to_sql('NETWORK', con, index=False)
 
     # Generate SEC definition table
@@ -89,6 +90,20 @@ def preprocess(infiles, outfile, secfile, netfile, uniprotfile, columns, decoy_i
     con.execute('DELETE FROM NETWORK WHERE bait_id NOT IN (SELECT DISTINCT(protein_id) as protein_id FROM QUANTIFICATION) OR prey_id NOT IN (SELECT DISTINCT(protein_id) as protein_id FROM QUANTIFICATION);')
     con.execute('DELETE FROM SEC WHERE run_id NOT IN (SELECT DISTINCT(run_id) as run_id FROM QUANTIFICATION);')
     con.execute('DELETE FROM QUERY WHERE bait_id NOT IN (SELECT DISTINCT(protein_id) as protein_id FROM QUANTIFICATION) OR prey_id NOT IN (SELECT DISTINCT(protein_id) as protein_id FROM QUANTIFICATION);')
+
+    # Add indices
+    con.execute('CREATE INDEX IF NOT EXISTS idx_protein_protein_id ON PROTEIN (protein_id);')
+    con.execute('CREATE INDEX IF NOT EXISTS idx_network_bait_id ON NETWORK (bait_id);')
+    con.execute('CREATE INDEX IF NOT EXISTS idx_network_prey_id ON NETWORK (prey_id);')
+    con.execute('CREATE INDEX IF NOT EXISTS idx_network_bait_id_prey_id ON NETWORK (bait_id, prey_id);')
+    con.execute('CREATE INDEX IF NOT EXISTS idx_quantification_run_id ON QUANTIFICATION (run_id);')
+    con.execute('CREATE INDEX IF NOT EXISTS idx_quantification_protein_id ON QUANTIFICATION (protein_id);')
+    con.execute('CREATE INDEX IF NOT EXISTS idx_quantification_peptide_id ON QUANTIFICATION (peptide_id);')
+    con.execute('CREATE INDEX IF NOT EXISTS idx_peptide_meta_peptide_id ON PEPTIDE_META (peptide_id);')
+    con.execute('CREATE INDEX IF NOT EXISTS idx_protein_meta_protein_id ON PROTEIN_META (protein_id);')
+    con.execute('CREATE INDEX IF NOT EXISTS idx_query_bait_id ON QUERY (bait_id);')
+    con.execute('CREATE INDEX IF NOT EXISTS idx_query_prey_id ON QUERY (prey_id);')
+    con.execute('CREATE INDEX IF NOT EXISTS idx_query_bait_id_prey_id ON QUERY (bait_id, prey_id);')
     con.execute('VACUUM;')
 
     # Close connection to file
@@ -103,7 +118,7 @@ def preprocess(infiles, outfile, secfile, netfile, uniprotfile, columns, decoy_i
 # Parameters for peptides
 @click.option('--min_peptides', 'min_peptides', default=3, show_default=True, type=int, help='Minimum number of required peptides per protein.')
 @click.option('--max_peptides', 'max_peptides', default=6, show_default=True, type=int, help='Maximum number of (most intense) peptides per protein.')
-@click.option('--det_peptides', 'det_peptides', default=6, show_default=True, type=int, help='Number of (most intense) peptides per query for detection.')
+@click.option('--det_peptides', 'det_peptides', default=4, show_default=True, type=int, help='Number of (most intense) peptides per query for detection.')
 # Parameters for peak picking
 @click.option('--peak_method', 'peak_method', default='gauss', show_default=True, type=click.Choice(['gauss', 'sgolay']), help='Use Gaussian or Savitzky-Golay smoothing.')
 @click.option('--peak_width', 'peak_width', default=2, show_default=True, type=int, help='Force a certain minimal peak width (sec units; -1 to disable) on the data (e.g. extend the peak at least by this amount on both sides).')
@@ -113,7 +128,7 @@ def preprocess(infiles, outfile, secfile, netfile, uniprotfile, columns, decoy_i
 @click.option('--sgolay_polynomial_order', 'sgolay_polynomial_order', default=3, show_default=True, type=int, help='Specify Savitzky-Golay polynomial order.')
 @click.option('--sn_win_len', 'sn_win_len', default=30, show_default=True, type=int, help='Signal to noise window length.')
 @click.option('--sn_bin_count', 'sn_bin_count', default=15, show_default=True, type=int, help='Signal to noise bin count.')
-@click.option('--max_xcorr_coelution', 'max_xcorr_coelution', default=2.0, show_default=True, type=float, help='Do not consider features with an SEC coelution above the threshold.')
+@click.option('--max_xcorr_coelution', 'max_xcorr_coelution', default=5.0, show_default=True, type=float, help='Do not consider features with an SEC coelution above the threshold.')
 @click.option('--threads', 'threads', default=1, show_default=True, type=int, help='Number of threads used for parallel processing of SEC runs. -1 means all available CPUs.')
 def detect(infile, outfile, min_peptides, max_peptides, det_peptides, peak_method, peak_width, signal_to_noise, gauss_width, sgolay_frame_length, sgolay_polynomial_order, sn_win_len, sn_bin_count, max_xcorr_coelution, threads):
     """
@@ -151,9 +166,17 @@ def detect(infile, outfile, min_peptides, max_peptides, det_peptides, peak_metho
     for exp in exps:
         con.execute('ATTACH DATABASE "%s" AS tmp;' % exp['tmpoutfile'])
         con.execute('CREATE TABLE IF NOT EXISTS FEATURE AS SELECT * FROM tmp.FEATURE WHERE 0;')
+        con.execute('CREATE TABLE IF NOT EXISTS FEATURE_META AS SELECT * FROM tmp.FEATURE_META WHERE 0;')
         con.execute('INSERT INTO FEATURE SELECT * FROM tmp.FEATURE;')
+        con.execute('INSERT INTO FEATURE_META SELECT * FROM tmp.FEATURE_META;')
         con.execute('DETACH DATABASE "tmp";')
         os.remove(exp['tmpoutfile'])
+    con.execute('CREATE INDEX IF NOT EXISTS idx_feature_bait_id ON FEATURE (bait_id);')
+    con.execute('CREATE INDEX IF NOT EXISTS idx_feature_prey_id ON FEATURE (prey_id);')
+    con.execute('CREATE INDEX IF NOT EXISTS idx_feature_feature_id ON FEATURE (feature_id);')
+    con.execute('CREATE INDEX IF NOT EXISTS idx_feature_feature_id_prey_id ON FEATURE (feature_id, prey_id);')
+    con.execute('CREATE INDEX IF NOT EXISTS idx_feature_meta_condition_id ON FEATURE_META (condition_id);')
+    con.execute('CREATE INDEX IF NOT EXISTS idx_feature_meta_replicate_id ON FEATURE_META (replicate_id);')
     con.close()
   
 # SECAT score features
@@ -210,6 +233,7 @@ def score(infile, outfile, complex_threshold_factor, xeval_fraction, xeval_num_i
 
     # con = sqlite3.connect(outfile)
     # pd.concat(mw_data).to_sql('FEATURE_MW', con, index=False, if_exists='replace')
+    # con.execute("CREATE INDEX IF NOT EXISTS idx_feature_mw_feature_id_prey_id ON FEATURE_MW (feature_id, prey_id);")
     # con.close()
 
     # # Filter training data
@@ -218,6 +242,7 @@ def score(infile, outfile, complex_threshold_factor, xeval_fraction, xeval_num_i
 
     # con = sqlite3.connect(outfile)
     # pd.concat(training_data).to_sql('FEATURE_TRAINING', con, index=False, if_exists='replace')
+    # con.execute("CREATE INDEX IF NOT EXISTS idx_feature_training_feature_id ON FEATURE_TRAINING (feature_id);")
     # con.close()
 
     # # Close parallel execution
