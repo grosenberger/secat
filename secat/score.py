@@ -267,11 +267,12 @@ class infer:
 
     def protein_inference(self, peptide_data):
         if (peptide_data.shape[0] >= 3):
-            top_peptide_data = peptide_data.sort_values('prey_peptide_intensity', ascending=False).head(3)
+            top_peptide_data = peptide_data.sort_values('prey_peptide_total_intensity', ascending=False).head(3)
             prey_intensity = top_peptide_data['prey_peptide_intensity'].mean()
             prey_total_intensity = top_peptide_data['prey_peptide_total_intensity'].mean()
+            prey_intensity_fraction = (top_peptide_data['prey_peptide_intensity'] / top_peptide_data['prey_peptide_total_intensity']).median()
             pp_score = ((1-top_peptide_data['pep']).prod()*0.5) / (((1-top_peptide_data['pep']).prod()*0.5) + ((top_peptide_data['pep']).prod()*0.5))
-            return(pd.DataFrame({'pp_score': [pp_score], 'prey_intensity': [prey_intensity], 'prey_total_intensity': [prey_total_intensity]}))
+            return(pd.DataFrame({'pp_score': [pp_score], 'prey_intensity': [prey_intensity], 'prey_total_intensity': [prey_total_intensity], 'prey_intensity_fraction': [prey_intensity_fraction]}))
 
 
     def interaction_inference(self, protein_data):
@@ -280,7 +281,11 @@ class infer:
         prey_intensity = protein_data['prey_intensity'].mean()
         pf_intensity = prey_intensity / bait_intensity
 
-        return(pd.DataFrame({'interaction_id': ['_'.join(sorted([protein_data['bait_id'].unique()[0], protein_data['prey_id'].unique()[0]]))], 'pf_score': [pf_score], 'pf_intensity': [pf_intensity], 'bait_intensity': [bait_intensity], 'prey_intensity': [prey_intensity]}))
+        bait_intensity_fraction = protein_data['bait_intensity_fraction'].mean()
+        prey_intensity_fraction = protein_data['prey_intensity_fraction'].mean()
+        pf_intensity_fraction = prey_intensity_fraction / bait_intensity_fraction
+
+        return(pd.DataFrame({'interaction_id': ['_'.join(sorted([protein_data['bait_id'].unique()[0], protein_data['prey_id'].unique()[0]]))], 'pf_score': [pf_score], 'pf_intensity': [pf_intensity], 'pf_intensity_fraction': [pf_intensity_fraction], 'bait_intensity': [bait_intensity], 'bait_intensity_fraction': [bait_intensity_fraction], 'prey_intensity': [prey_intensity], 'prey_intensity_fraction': [prey_intensity_fraction]}))
 
 
     def infer_features(self, peptide_data):
@@ -290,8 +295,8 @@ class infer:
         protein_data = peptide_data.groupby(["feature_id", "bait_id", "prey_id", "decoy", "prior"]).apply(self.protein_inference).reset_index()
 
         # interaction level
-        bait_proteins = protein_data.ix[(protein_data.bait_id == protein_data.prey_id) & (protein_data.decoy==0)][["feature_id","bait_id","pp_score","prey_intensity"]]
-        bait_proteins.columns = ["feature_id","bait_id","bait_pp_score","bait_intensity"]
+        bait_proteins = protein_data.ix[(protein_data.bait_id == protein_data.prey_id) & (protein_data.decoy==0)][["feature_id","bait_id","pp_score","prey_intensity","prey_intensity_fraction"]]
+        bait_proteins.columns = ["feature_id","bait_id","bait_pp_score","bait_intensity","bait_intensity_fraction"]
         protein_bait_data = pd.merge(protein_data.ix[(protein_data.bait_id != protein_data.prey_id)], bait_proteins, on=["feature_id","bait_id"])
 
         interaction_data = protein_bait_data.groupby(["feature_id", "bait_id", "prey_id", "decoy", "prior"]).apply(self.interaction_inference).reset_index()

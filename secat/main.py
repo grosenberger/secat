@@ -12,6 +12,7 @@ import numpy as np
 from preprocess import uniprot, net, sec, quantification, meta, query
 from detect import prepare, process
 from score import prepare_filter, filter_mw, filter_training, pyprophet, infer
+from quantify import quantitative_matrix, quantitative_test
 
 from pyprophet.data_handling import transform_pi0_lambda
 
@@ -135,8 +136,6 @@ def detect(infile, outfile, min_peptides, max_peptides, det_peptides, peak_metho
     Detect protein and interaction features in SEC data.
     """
 
-    click.echo("Info: The signal processing module will display warning messages if your data is sparse. In most scenarios, these warnings can be ignored.")
-
     # Define outfile
     if outfile is None:
         outfile = infile
@@ -224,8 +223,8 @@ def score(infile, outfile, complex_threshold_factor, xeval_fraction, xeval_num_i
         copyfile(infile, outfile)
         outfile = outfile
 
-    # Prepare SEC experiments, e.g. individual conditions + replicates
-    exps = prepare_filter(outfile, complex_threshold_factor)
+    # # Prepare SEC experiments, e.g. individual conditions + replicates
+    # exps = prepare_filter(outfile, complex_threshold_factor)
 
     # # Assess molecular weight
     # click.echo("Info: Filtering based on molecular weight.")
@@ -264,3 +263,54 @@ def score(infile, outfile, complex_threshold_factor, xeval_fraction, xeval_num_i
     infer_data.interactions.to_sql('COMPLEX', con, index=False, if_exists='replace')
     infer_data.proteins.to_sql('MONOMER', con, index=False, if_exists='replace')
     con.close()
+
+# SECAT quantify features
+@cli.command()
+@click.option('--in', 'infile', required=True, type=click.Path(exists=True), help='Input SECAT file.')
+@click.option('--out', 'outfile', required=False, type=click.Path(exists=False), help='Output SECAT file.')
+def quantify(infile, outfile):
+    """
+    Quantify protein and interaction features in SEC data.
+    """
+
+    # Define outfile
+    if outfile is None:
+        outfile = infile
+    else:
+        copyfile(infile, outfile)
+        outfile = outfile
+
+    click.echo("Info: Prepare quantitative matrix")
+    qm = quantitative_matrix(outfile)
+
+    con = sqlite3.connect(outfile)
+    qm.complex.to_sql('COMPLEX_QM', con, index=False, if_exists='replace')
+    qm.monomer.to_sql('MONOMER_QM', con, index=False, if_exists='replace')
+    con.close()
+
+    click.echo("Info: Assess differential features")
+    qt = quantitative_test(outfile)
+
+    con = sqlite3.connect(outfile)
+    qt.edges.to_sql('EDGES', con, index=False, if_exists='replace')
+    qt.nodes.to_sql('NODES', con, index=False, if_exists='replace')
+    con.close()
+
+# SECAT export features
+@cli.command()
+@click.option('--in', 'infile', required=True, type=click.Path(exists=True), help='Input SECAT file.')
+def export(infile):
+    """
+    Quantify protein and interaction features in SEC data.
+    """
+
+    outfile_nodes = infile.split(".secat")[0] + "_nodes.csv"
+    outfile_edges = infile.split(".secat")[0] + "_edges.csv"
+
+    con = sqlite3.connect(infile)
+    nodes_data = pd.read_sql('SELECT * FROM nodes;' , con)
+    edges_data = pd.read_sql('SELECT * FROM edges;' , con)
+    con.close()
+
+    nodes_data.to_csv(outfile_nodes, index=False)
+    edges_data.to_csv(outfile_edges, index=False)
