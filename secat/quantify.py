@@ -27,15 +27,15 @@ class quantitative_matrix:
         # CREATE INDEX idx_monomer_feature_id_prey_id ON MONOMER (feature_id, prey_id);
         # CREATE INDEX idx_monomer_feature_id ON MONOMER (feature_id);
 
-        complex_data = pd.read_sql('SELECT feature_meta.condition_id, feature_meta.replicate_id, complex.feature_id, complex.bait_id, complex.prey_id, MIN(complex.bait_intensity, complex.prey_intensity) AS intensity, complex.pf_intensity_fraction AS intensity_fraction, complex.pf_score FROM complex INNER JOIN feature_meta ON complex.feature_id = feature_meta.feature_id WHERE feature_meta.decoy = 0 AND complex.decoy = 0;' , con)
+        complex_data = pd.read_sql('SELECT feature_meta.condition_id, feature_meta.replicate_id, complex.feature_id, complex.bait_id, complex.prey_id, (complex.bait_intensity + complex.prey_intensity)/2 AS intensity, complex.pf_intensity_fraction AS intensity_fraction, complex.pf_score FROM complex INNER JOIN feature_meta ON complex.feature_id = feature_meta.feature_id WHERE feature_meta.decoy = 0 AND complex.decoy = 0;' , con)
 
         monomer_data = pd.read_sql('SELECT feature_meta.condition_id, feature_meta.replicate_id, monomer.feature_id, monomer.bait_id, monomer.prey_id, monomer.prey_intensity AS intensity, monomer.prey_intensity_fraction AS intensity_fraction, monomer.pp_score AS pf_score FROM monomer INNER JOIN feature_meta ON monomer.feature_id = feature_meta.feature_id WHERE feature_meta.decoy = 0 AND monomer.decoy = 0;' , con)
 
         con.close()
 
         # Summarize individual features
-        complex_data = complex_data.groupby(['condition_id','replicate_id','bait_id','prey_id']).sum().reset_index()
-        monomer_data = monomer_data.groupby(['condition_id','replicate_id','bait_id','prey_id']).sum().reset_index()
+        complex_data = complex_data.groupby(['condition_id','replicate_id','bait_id','prey_id']).apply(lambda x: pd.Series({'intensity': sum(x['intensity']), 'intensity_fraction': np.mean(x['intensity_fraction'])})).reset_index()
+        monomer_data = monomer_data.groupby(['condition_id','replicate_id','bait_id','prey_id']).apply(lambda x: pd.Series({'intensity': sum(x['intensity']), 'intensity_fraction': np.mean(x['intensity_fraction'])})).reset_index()
 
         # Log transform raw intensities
         complex_data['intensity'] = np.log(complex_data['intensity'])
