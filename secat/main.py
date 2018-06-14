@@ -292,8 +292,11 @@ def quantify(infile, outfile):
     qt = quantitative_test(outfile)
 
     con = sqlite3.connect(outfile)
-    qt.edges.to_sql('EDGES', con, index=False, if_exists='replace')
-    qt.nodes.to_sql('NODES', con, index=False, if_exists='replace')
+    qt.edge_directional.to_sql('EDGE_DIRECTIONAL', con, index=False, if_exists='replace')
+    qt.edge.to_sql('EDGE', con, index=False, if_exists='replace')
+    qt.edge_level.to_sql('EDGE_LEVEL', con, index=False, if_exists='replace')
+    qt.node.to_sql('NODE', con, index=False, if_exists='replace')
+    qt.node_level.to_sql('NODE_LEVEL', con, index=False, if_exists='replace')
     con.close()
 
 # SECAT export features
@@ -305,12 +308,21 @@ def export(infile):
     """
 
     outfile_nodes = infile.split(".secat")[0] + "_nodes.csv"
+    outfile_nodes_level = infile.split(".secat")[0] + "_nodes_level.csv"
+    outfile_edges_directional = infile.split(".secat")[0] + "_edges_directional.csv"
     outfile_edges = infile.split(".secat")[0] + "_edges.csv"
+    outfile_edges_level = infile.split(".secat")[0] + "_edges_level.csv"
 
     con = sqlite3.connect(infile)
-    nodes_data = pd.read_sql('SELECT * FROM nodes;' , con)
-    edges_data = pd.read_sql('SELECT * FROM edges;' , con)
+    node_data = pd.read_sql('SELECT * FROM node;' , con)
+    node_level_data = pd.read_sql('SELECT * FROM node_level;' , con)
+    edge_directional_data = pd.read_sql('SELECT * FROM edge_directional;' , con)
+    edge_data = pd.read_sql('SELECT * FROM edge;' , con)
+    edge_level_data = pd.read_sql('SELECT * FROM edge_level;' , con)
     con.close()
 
-    nodes_data.to_csv(outfile_nodes, index=False)
-    edges_data.to_csv(outfile_edges, index=False)
+    node_data.to_csv(outfile_nodes, index=False)
+    node_level_data.to_csv(outfile_nodes_level, index=False)
+    edge_directional_data.to_csv(outfile_edges_directional, index=False)
+    edge_data.to_csv(outfile_edges, index=False)
+    edge_level_data.to_csv(outfile_edges_level, index=False)
