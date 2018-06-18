@@ -46,7 +46,7 @@ class quantitative_matrix:
 class quantitative_test:
     def __init__(self, outfile):
         self.outfile = outfile
-        self.levels = ['intensity','intensity_fraction','score']
+        self.levels = ['intensity','intensity_fraction']
         self.comparisons = self.contrast()
 
         self.complex, self.monomer = self.read()
@@ -90,7 +90,7 @@ class quantitative_test:
                     df = self.test(state, level, comparison[0], comparison[1])
 
                     # Multiple testing correction via q-value
-                    # df['qvalue'] = qvalue(df['pvalue'].values, pi0est(df['pvalue'].values)['pi0'])
+                    df['qvalue'] = qvalue(df['pvalue'].values, pi0est(df['pvalue'].values)['pi0'])
                     dfs.append(df)
 
         return pd.concat(dfs).sort_values(by='pvalue', ascending=True, na_position='last')
@@ -99,7 +99,7 @@ class quantitative_test:
         def stat(x, experimental_design):
             x.set_index('condition_id')
             if condition_1 in x['condition_id'].values and condition_2 in x['condition_id'].values:
-                if x['condition_id'].value_counts()[condition_1] > 1 and x['condition_id'].value_counts()[condition_2] > 1:
+                if x['condition_id'].value_counts()[condition_1] > 0 and x['condition_id'].value_counts()[condition_2] > 0:
                     qm = pd.merge(experimental_design, x, how='left')
 
                     if level == 'score':
@@ -108,7 +108,7 @@ class quantitative_test:
                     qmt = qm.transpose()
                     qmt.columns = "quantitative" + "_" + experimental_design["condition_id"] + "_" + experimental_design["replicate_id"]
                     # qmt['pvalue'] = mannwhitneyu(qm[qm['condition_id'] == condition_1][level].values, qm[qm['condition_id'] == condition_2][level].values)[1]
-                    qmt['pvalue'] = ttest_ind(qm[qm['condition_id'] == condition_1][level].values, qm[qm['condition_id'] == condition_2][level].values, equal_var=False)[1]
+                    qmt['pvalue'] = ttest_ind(qm[qm['condition_id'] == condition_1][level].dropna().values, qm[qm['condition_id'] == condition_2][level].dropna().values, equal_var=False)[1]
 
 
                     return qmt.loc[level]
@@ -116,7 +116,7 @@ class quantitative_test:
         # compute number of replicates
         experimental_design = df[['condition_id','replicate_id']].drop_duplicates()
 
-        df_test = df.groupby(['bait_id','prey_id','interaction_id']).apply(lambda x: stat(x, experimental_design)).reset_index().dropna()
+        df_test = df.groupby(['bait_id','prey_id','interaction_id']).apply(lambda x: stat(x, experimental_design)).reset_index()#.dropna()
         df_test['condition_1'] = condition_1
         df_test['condition_2'] = condition_2
         df_test['level'] = level
