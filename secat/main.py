@@ -145,6 +145,8 @@ def detect(infile, outfile, min_peptides, max_peptides, det_peptides, peak_metho
 
     con = sqlite3.connect(outfile)
     con.execute('DROP TABLE IF EXISTS FEATURE;')
+    con.execute('DROP TABLE IF EXISTS FEATURE_META;')
+    con.execute('DROP TABLE IF EXISTS FEATURE_SUPER;')
     con.close()
 
     # Prepare SEC experiments, e.g. individual conditions + replicates
@@ -166,8 +168,10 @@ def detect(infile, outfile, min_peptides, max_peptides, det_peptides, peak_metho
         con.execute('ATTACH DATABASE "%s" AS tmp;' % exp['tmpoutfile'])
         con.execute('CREATE TABLE IF NOT EXISTS FEATURE AS SELECT * FROM tmp.FEATURE WHERE 0;')
         con.execute('CREATE TABLE IF NOT EXISTS FEATURE_META AS SELECT * FROM tmp.FEATURE_META WHERE 0;')
+        con.execute('CREATE TABLE IF NOT EXISTS FEATURE_SUPER AS SELECT * FROM tmp.FEATURE_SUPER WHERE 0;')
         con.execute('INSERT INTO FEATURE SELECT * FROM tmp.FEATURE;')
         con.execute('INSERT INTO FEATURE_META SELECT * FROM tmp.FEATURE_META;')
+        con.execute('INSERT INTO FEATURE_SUPER SELECT * FROM tmp.FEATURE_SUPER;')
         con.execute('DETACH DATABASE "tmp";')
         os.remove(exp['tmpoutfile'])
     con.execute('CREATE INDEX IF NOT EXISTS idx_feature_bait_id ON FEATURE (bait_id);')
@@ -176,6 +180,8 @@ def detect(infile, outfile, min_peptides, max_peptides, det_peptides, peak_metho
     con.execute('CREATE INDEX IF NOT EXISTS idx_feature_feature_id_prey_id ON FEATURE (feature_id, prey_id);')
     con.execute('CREATE INDEX IF NOT EXISTS idx_feature_meta_condition_id ON FEATURE_META (condition_id);')
     con.execute('CREATE INDEX IF NOT EXISTS idx_feature_meta_replicate_id ON FEATURE_META (replicate_id);')
+    con.execute('CREATE INDEX IF NOT EXISTS idx_feature_super_feature_id ON FEATURE_SUPER (feature_id);')
+    con.execute('CREATE INDEX IF NOT EXISTS idx_feature_super_feature_id_prey_id ON FEATURE_SUPER (feature_id, prey_id);')
     con.close()
   
 # SECAT score features
@@ -214,7 +220,7 @@ def score(infile, outfile, complex_threshold_factor, xeval_fraction, xeval_num_i
     else:
         n_cpus = threads
 
-    # p = Pool(processes=n_cpus)
+    p = Pool(processes=n_cpus)
 
     # Define outfile
     if outfile is None:
@@ -223,36 +229,37 @@ def score(infile, outfile, complex_threshold_factor, xeval_fraction, xeval_num_i
         copyfile(infile, outfile)
         outfile = outfile
 
-    # # Prepare SEC experiments, e.g. individual conditions + replicates
-    # exps = prepare_filter(outfile, complex_threshold_factor)
+    # Prepare SEC experiments, e.g. individual conditions + replicates
+    exps = prepare_filter(outfile, complex_threshold_factor)
 
-    # # Assess molecular weight
-    # click.echo("Info: Filtering based on molecular weight.")
-    # mw_data = p.map(filter_mw, exps)
+    # Assess molecular weight
+    click.echo("Info: Filtering based on molecular weight.")
+    mw_data = p.map(filter_mw, exps)
 
-    # con = sqlite3.connect(outfile)
-    # pd.concat(mw_data).to_sql('FEATURE_MW', con, index=False, if_exists='replace')
-    # con.execute("CREATE INDEX IF NOT EXISTS idx_feature_mw_feature_id_prey_id ON FEATURE_MW (feature_id, prey_id);")
-    # con.close()
+    con = sqlite3.connect(outfile)
+    pd.concat(mw_data).to_sql('FEATURE_MW', con, index=False, if_exists='replace')
+    con.execute("CREATE INDEX IF NOT EXISTS idx_feature_mw_feature_id_prey_id ON FEATURE_MW (feature_id, prey_id);")
+    con.close()
 
-    # # Filter training data
-    # click.echo("Info: Filtering based on elution profile scores.")
-    # training_data = p.map(filter_training, exps)
+    # Filter training data
+    click.echo("Info: Filtering based on elution profile scores.")
+    training_data = p.map(filter_training, exps)
 
-    # con = sqlite3.connect(outfile)
-    # pd.concat(training_data).to_sql('FEATURE_TRAINING', con, index=False, if_exists='replace')
-    # con.execute("CREATE INDEX IF NOT EXISTS idx_feature_training_feature_id ON FEATURE_TRAINING (feature_id);")
-    # con.close()
+    con = sqlite3.connect(outfile)
+    pd.concat(training_data).to_sql('FEATURE_TRAINING', con, index=False, if_exists='replace')
+    con.execute("CREATE INDEX IF NOT EXISTS idx_feature_training_feature_id ON FEATURE_TRAINING (feature_id);")
+    con.close()
 
-    # # Close parallel execution
-    # p.close()
+    # Close parallel execution
+    p.close()
 
     # Run PyProphet training
     click.echo("Info: Running PyProphet.")
-    scored_data = pyprophet(outfile, xeval_fraction, xeval_num_iter, ss_initial_fdr, ss_iteration_fdr, ss_num_iter, parametric, pfdr, pi0_lambda, pi0_method, pi0_smooth_df, pi0_smooth_log_pi0, lfdr_truncate, lfdr_monotone, lfdr_transformation, lfdr_adj, lfdr_eps, n_cpus, test)
+    scored_data = pyprophet(outfile, xeval_fraction, xeval_num_iter, ss_initial_fdr, ss_iteration_fdr, ss_num_iter, parametric, pfdr, pi0_lambda, pi0_method, pi0_smooth_df, pi0_smooth_log_pi0, lfdr_truncate, lfdr_monotone, lfdr_transformation, lfdr_adj, lfdr_eps, 1, test)
 
     con = sqlite3.connect(outfile)
     scored_data.df.to_sql('FEATURE_SCORED', con, index=False, if_exists='replace')
+    con.execute("CREATE INDEX IF NOT EXISTS idx_feature_scored_feature_id_prey_id ON FEATURE_SCORED (feature_id, prey_id);")
     con.close()
 
     # Infer proteins
@@ -260,8 +267,9 @@ def score(infile, outfile, complex_threshold_factor, xeval_fraction, xeval_num_i
     infer_data = infer(outfile, 'FEATURE_SCORED')
 
     con = sqlite3.connect(outfile)
-    infer_data.interactions.to_sql('COMPLEX', con, index=False, if_exists='replace')
-    infer_data.proteins.to_sql('MONOMER', con, index=False, if_exists='replace')
+    infer_data.features.to_sql('FEATURE_COMPLEX', con, index=False, if_exists='replace')
+    infer_data.interactions.to_sql('FEATURE_INTERACTION', con, index=False, if_exists='replace')
+    infer_data.proteins.to_sql('FEATURE_PROTEIN', con, index=False, if_exists='replace')
     con.close()
 
 # SECAT quantify features

@@ -202,6 +202,27 @@ class signalprocess:
 
         return pd.DataFrame(metafeatures), pd.DataFrame(subfeatures)
 
+    def convert_superfeature(self, subfeatures):
+        def quantile_scores(df):
+            res = []
+            for col in df.columns:
+                maincol = col
+                if col.startswith("main_var_"):
+                    col = col[5:]
+                res.append(pd.DataFrame({col+'_q1': df[maincol].quantile([0.25]).reset_index(drop=True)}))
+                res.append(pd.DataFrame({maincol+'_q2': df[maincol].quantile([0.50]).reset_index(drop=True)}))
+                res.append(pd.DataFrame({col+'_q3': df[maincol].quantile([0.75]).reset_index(drop=True)}))
+
+            df_res = pd.concat(res, axis=1)
+            return df_res
+
+        if subfeatures.shape[0] > 0:
+            score_columns = [c for c in subfeatures.columns if c.startswith("main_var_")] + [c for c in subfeatures.columns if c.startswith("var_")]
+
+            superfeatures = subfeatures.groupby(['feature_id','bait_id','prey_id','decoy'])[score_columns].apply(quantile_scores).reset_index()
+
+            return superfeatures
+
     def score(self,queries):
         baits = set()
         pepprot = {}
@@ -284,6 +305,7 @@ class signalprocess:
         peakpicker_params.setValue("signal_to_noise", float(self.signal_to_noise), 'Signal-to-noise threshold at which a peak will not be extended any more. Note that setting this too high (e.g. 1.0) can lead to peaks whose flanks are not fully captured.')
         peakpicker_params.setValue("sn_win_len", float(self.sn_win_len), 'Signal to noise window length.')
         peakpicker_params.setValue("sn_bin_count", int(self.sn_bin_count), 'Signal to noise bin count.')
+        peakpicker_params.setValue("remove_overlapping_peaks", "true", 'Try to remove overlapping peaks during peak picking.')
 
         tgpicker_params.insert("PeakPickerMRM:",peakpicker_params)
         tgpicker.setParameters(tgpicker_params)
@@ -305,16 +327,24 @@ class signalprocess:
         tgpicker.pickTransitionGroup(tg);
         metaresults = []
         subresults = []
+        superresults = []
         if len(tg.getFeatures()) > 0 and len(tg.getTransitions()) > 0 and len(tg.getChromatograms()) > 0:
             featurefinder.scorePeakgroups(tg, trafo, swath_maps_dummy, features, False)
 
             for feature in features:
                 metafeatures, subfeatures = self.convert_feature(feature, pepprot)
-                metaresults.append(metafeatures)
-                subresults.append(subfeatures)
+                if subfeatures.shape[0] > 0:
+                    metaresults.append(metafeatures)
+                    subresults.append(subfeatures)
+                    superfeatures = self.convert_superfeature(subfeatures)
+                    superresults.append(superfeatures)
 
-            pd.concat(metaresults).to_sql('FEATURE_META', self.con, index=False, if_exists='append')
-            pd.concat(subresults).to_sql('FEATURE', self.con, index=False, if_exists='append')
+            if len(metaresults) > 0:
+                pd.concat(metaresults).to_sql('FEATURE_META', self.con, index=False, if_exists='append')
+            if len(subresults) > 0:
+                pd.concat(subresults).to_sql('FEATURE', self.con, index=False, if_exists='append')
+            if len(superresults) > 0:
+                pd.concat(superresults).to_sql('FEATURE_SUPER', self.con, index=False, if_exists='append')
 
     def read(self):
         con = sqlite3.connect(self.outfile)
