@@ -13,10 +13,12 @@ from scipy.stats import mannwhitneyu, ttest_ind
 from pyprophet.stats import pi0est, qvalue
 
 class align:
-    def __init__(self, outfile, feature_pep, interaction_pep):
+    def __init__(self, outfile, feature_pep, interaction_pep, apex_delta, tail_delta):
         self.outfile = outfile
         self.feature_pep = feature_pep
         self.interaction_pep = interaction_pep
+        self.apex_delta = apex_delta
+        self.tail_delta = tail_delta
 
         self.df = self.read()
 
@@ -38,20 +40,20 @@ INNER JOIN
                    FEATURE_META.rightWidth
    FROM FEATURE_SUPER
    INNER JOIN FEATURE_META ON FEATURE_SUPER.feature_id = FEATURE_META.feature_id
-   INNER JOIN FEATURE_SCORED ON FEATURE_SUPER.feature_id = FEATURE_SCORED.feature_id
-   AND FEATURE_SUPER.prey_id = FEATURE_SCORED.prey_id
+   INNER JOIN FEATURE_DIRECTIONAL ON FEATURE_SUPER.feature_id = FEATURE_DIRECTIONAL.feature_id
+   AND FEATURE_SUPER.prey_id = FEATURE_DIRECTIONAL.prey_id
    INNER JOIN
      (SELECT interaction_id,
              min(pep) AS pep
       FROM FEATURE_INTERACTION
-      GROUP BY interaction_id) AS FEATURE_INTERACTION ON FEATURE_SCORED.interaction_id = FEATURE_INTERACTION.interaction_id
-   WHERE FEATURE_SCORED.pep < %s
+      GROUP BY interaction_id) AS FEATURE_INTERACTION ON FEATURE_DIRECTIONAL.interaction_id = FEATURE_INTERACTION.interaction_id
+   WHERE FEATURE_DIRECTIONAL.pep < %s
      AND FEATURE_INTERACTION.pep < %s) AS FEATURE_DETECTED ON FEATURE_SUPER.bait_id = FEATURE_DETECTED.bait_id
 AND FEATURE_SUPER.prey_id = FEATURE_DETECTED.prey_id
-WHERE ABS(FEATURE_META.RT - FEATURE_DETECTED.RT) < 5
-  AND ABS(FEATURE_META.leftWidth - FEATURE_DETECTED.leftWidth) < 7
-  AND ABS(FEATURE_META.rightWidth - FEATURE_DETECTED.rightWidth) < 7;
-''' % (self.feature_pep, self.interaction_pep), con)
+WHERE ABS(FEATURE_META.RT - FEATURE_DETECTED.RT) < %s
+  AND ABS(FEATURE_META.leftWidth - FEATURE_DETECTED.leftWidth) < %s
+  AND ABS(FEATURE_META.rightWidth - FEATURE_DETECTED.rightWidth) < %s;
+''' % (self.feature_pep, self.interaction_pep, self.apex_delta, self.tail_delta, self.tail_delta), con)
 
         df_interaction_bait = pd.read_sql('''
 SELECT DISTINCT FEATURE_SUPER.feature_id,
@@ -73,12 +75,12 @@ INNER JOIN
    AND FEATURE_SUPER.prey_id = FEATURE_SCORED.prey_id
    WHERE FEATURE_SCORED.pep < %s) AS FEATURE_DETECTED ON FEATURE_SUPER.bait_id = FEATURE_DETECTED.bait_id
 AND FEATURE_SUPER.prey_id = FEATURE_DETECTED.prey_id
-WHERE ABS(FEATURE_META.RT - FEATURE_DETECTED.RT) < 5
-  AND ABS(FEATURE_META.leftWidth - FEATURE_DETECTED.leftWidth) < 7
-  AND ABS(FEATURE_META.rightWidth - FEATURE_DETECTED.rightWidth) < 7
+WHERE ABS(FEATURE_META.RT - FEATURE_DETECTED.RT) < %s
+  AND ABS(FEATURE_META.leftWidth - FEATURE_DETECTED.leftWidth) < %s
+  AND ABS(FEATURE_META.rightWidth - FEATURE_DETECTED.rightWidth) < %s
   AND FEATURE_SUPER.bait_id == FEATURE_SUPER.prey_id
   AND complex == 1;
-''' % (self.feature_pep), con)
+''' % (self.feature_pep, self.apex_delta, self.tail_delta, self.tail_delta), con)
 
         df_monomer = pd.read_sql('''
 SELECT DISTINCT FEATURE_SUPER.feature_id,
@@ -100,12 +102,12 @@ INNER JOIN
    AND FEATURE_SUPER.prey_id = FEATURE_SCORED.prey_id
    WHERE FEATURE_SCORED.pep < %s) AS FEATURE_DETECTED ON FEATURE_SUPER.bait_id = FEATURE_DETECTED.bait_id
 AND FEATURE_SUPER.prey_id = FEATURE_DETECTED.prey_id
-WHERE ABS(FEATURE_META.RT - FEATURE_DETECTED.RT) < 5
-  AND ABS(FEATURE_META.leftWidth - FEATURE_DETECTED.leftWidth) < 7
-  AND ABS(FEATURE_META.rightWidth - FEATURE_DETECTED.rightWidth) < 7
+WHERE ABS(FEATURE_META.RT - FEATURE_DETECTED.RT) < %s
+  AND ABS(FEATURE_META.leftWidth - FEATURE_DETECTED.leftWidth) < %s
+  AND ABS(FEATURE_META.rightWidth - FEATURE_DETECTED.rightWidth) < %s
   AND FEATURE_SUPER.bait_id == FEATURE_SUPER.prey_id
   AND monomer == 1;
-''' % (self.feature_pep), con)
+''' % (self.feature_pep, self.apex_delta, self.tail_delta, self.tail_delta), con)
 
         con.close()
 
@@ -137,7 +139,7 @@ class quantitative_matrix:
         monomer_data['prey_peptide_intensity_fraction'] = monomer_data['prey_peptide_intensity'] / monomer_data['prey_peptide_total_intensity']
 
         # Summarize peptides
-        monomer_data = monomer_data.groupby(['condition_id','replicate_id','interaction_id','bait_id','prey_id']).apply(lambda x: pd.Series({'prey_intensity': np.log(np.median(x['prey_peptide_intensity'])), 'prey_intensity_fraction': np.median(x['prey_peptide_intensity_fraction'])})).reset_index(level=['condition_id','replicate_id','interaction_id','bait_id','prey_id'])
+        monomer_data = monomer_data.groupby(['condition_id','replicate_id','interaction_id','bait_id','prey_id']).apply(lambda x: pd.Series({'monomer_intensity': np.log(np.median(x['prey_peptide_intensity'])), 'monomer_fraction': np.median(x['prey_peptide_intensity_fraction'])})).reset_index(level=['condition_id','replicate_id','interaction_id','bait_id','prey_id'])
 
         ## Prey
         # Summarize individual features for preys
@@ -145,7 +147,7 @@ class quantitative_matrix:
         prey_complex_data['prey_peptide_intensity_fraction'] = prey_complex_data['prey_peptide_intensity'] / prey_complex_data['prey_peptide_total_intensity']
 
         # Summarize peptides
-        prey_complex_data = prey_complex_data.groupby(['condition_id','replicate_id','interaction_id','bait_id','prey_id']).apply(lambda x: pd.Series({'prey_intensity': np.log(np.median(x['prey_peptide_intensity'])), 'prey_intensity_fraction': np.median(x['prey_peptide_intensity_fraction'])})).reset_index(level=['condition_id','replicate_id','interaction_id','bait_id','prey_id'])
+        prey_complex_data = prey_complex_data.groupby(['condition_id','replicate_id','interaction_id','bait_id','prey_id']).apply(lambda x: pd.Series({'prey_intensity': np.log(np.median(x['prey_peptide_intensity'])), 'prey_fraction': np.median(x['prey_peptide_intensity_fraction'])})).reset_index(level=['condition_id','replicate_id','interaction_id','bait_id','prey_id'])
 
         ## Bait
         # Prepare individual features for baits and keep relationship to preys
@@ -159,20 +161,20 @@ class quantitative_matrix:
         bait_complex_data['prey_peptide_intensity_fraction'] = bait_complex_data['prey_peptide_intensity'] / bait_complex_data['prey_peptide_total_intensity']
 
         # Summarize peptides
-        bait_complex_data = bait_complex_data.groupby(['condition_id','replicate_id','bait_id','prey_id']).apply(lambda x: pd.Series({'bait_intensity': np.log(np.median(x['prey_peptide_intensity'])), 'bait_intensity_fraction': np.median(x['prey_peptide_intensity_fraction'])})).reset_index(level=['condition_id','replicate_id','bait_id','prey_id'])
+        bait_complex_data = bait_complex_data.groupby(['condition_id','replicate_id','bait_id','prey_id']).apply(lambda x: pd.Series({'bait_intensity': np.log(np.median(x['prey_peptide_intensity'])), 'bait_fraction': np.median(x['prey_peptide_intensity_fraction'])})).reset_index(level=['condition_id','replicate_id','bait_id','prey_id'])
 
         ## Bait-Prey
         # Merge bait and prey complex_data
         merged_complex_data = pd.merge(bait_complex_data, prey_complex_data, on=['condition_id','replicate_id','bait_id','prey_id'])
-        merged_complex_data['intensity_fraction'] = merged_complex_data['prey_intensity'] / merged_complex_data['bait_intensity']
-        merged_complex_data['relative_intensity_fraction'] = merged_complex_data['prey_intensity_fraction'] / merged_complex_data['bait_intensity_fraction']
+        merged_complex_data['complex_intensity_ratio'] = merged_complex_data['prey_intensity'] / merged_complex_data['bait_intensity']
+        merged_complex_data['complex_fraction_ratio'] = merged_complex_data['prey_fraction'] / merged_complex_data['bait_fraction']
 
         return merged_complex_data, monomer_data
 
 class quantitative_test:
     def __init__(self, outfile):
         self.outfile = outfile
-        self.levels = ['prey_intensity','prey_intensity_fraction','intensity_fraction','relative_intensity_fraction']
+        self.levels = ['monomer_intensity','monomer_fraction','prey_intensity','prey_fraction','complex_intensity_ratio','complex_fraction_ratio']
         self.comparisons = self.contrast()
 
         self.complex, self.monomer = self.read()

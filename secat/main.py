@@ -275,9 +275,11 @@ def score(infile, outfile, complex_threshold_factor, xeval_fraction, xeval_num_i
 @cli.command()
 @click.option('--in', 'infile', required=True, type=click.Path(exists=True), help='Input SECAT file.')
 @click.option('--out', 'outfile', required=False, type=click.Path(exists=False), help='Output SECAT file.')
-@click.option('--feature_pep', default=0.5, show_default=True, type=float, help='Maximum q-value for feature seeding.')
+@click.option('--feature_pep', default=0.2, show_default=True, type=float, help='Maximum q-value for feature seeding.')
 @click.option('--interaction_pep', default=0.1, show_default=True, type=float, help='Maximum q-value for interaction seeding.')
-def quantify(infile, outfile, feature_pep, interaction_pep):
+@click.option('--apex_delta', default=20.0, show_default=True, type=float, help='Maximum number of SEC fractions for peak apex delta.')
+@click.option('--tail_delta', default=20.0, show_default=True, type=float, help='Maximum number of SEC fractions for peak tail delta.')
+def quantify(infile, outfile, feature_pep, interaction_pep, apex_delta, tail_delta):
     """
     Quantify protein and interaction features in SEC data.
     """
@@ -291,7 +293,7 @@ def quantify(infile, outfile, feature_pep, interaction_pep):
 
     # Align features
     click.echo("Info: Align features.")
-    aligned_data = align(outfile, feature_pep, interaction_pep)
+    aligned_data = align(outfile, feature_pep, interaction_pep, apex_delta, tail_delta)
 
     con = sqlite3.connect(outfile)
     aligned_data.df.to_sql('FEATURE_ALIGNED', con, index=False, if_exists='replace')

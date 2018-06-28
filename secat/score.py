@@ -121,7 +121,6 @@ class pyprophet:
     def read_detecting(self):
         con = sqlite3.connect(self.outfile)
         df = pd.read_sql('SELECT FEATURE_SUPER.*, FEATURE_SUPER.feature_id || "_" || FEATURE_SUPER.prey_id || "_" || FEATURE_SUPER.bait_id AS pyprophet_feature_id, ROUND(FEATURE_META.RT) AS sec_group FROM FEATURE_SUPER INNER JOIN FEATURE_TRAINING ON FEATURE_SUPER.feature_id = FEATURE_TRAINING.feature_id AND FEATURE_SUPER.prey_id = FEATURE_TRAINING.prey_id INNER JOIN FEATURE_META ON FEATURE_SUPER.FEATURE_ID = FEATURE_META.FEATURE_ID;', con)
-        # df = pd.read_sql('SELECT FEATURE_SUPER.*, FEATURE_SUPER.feature_id || "_" || FEATURE_SUPER.prey_id || "_" || FEATURE_SUPER.bait_id AS pyprophet_feature_id, ROUND(FEATURE_META.RT) AS sec_group FROM FEATURE_SUPER INNER JOIN FEATURE_TRAINING ON FEATURE_SUPER.feature_id = FEATURE_TRAINING.feature_id AND FEATURE_SUPER.prey_id = FEATURE_TRAINING.prey_id INNER JOIN FEATURE_META ON FEATURE_SUPER.FEATURE_ID = FEATURE_META.FEATURE_ID LEFT OUTER JOIN NETWORK ON FEATURE_SUPER.bait_id = NETWORK.bait_id AND FEATURE_SUPER.prey_id = NETWORK.prey_id WHERE interaction_confidence > 0.5 OR FEATURE_SUPER.decoy == 1;', con)
         con.close()
 
         df['interaction_id'] = df.apply(lambda x: "_".join(sorted([x['bait_id'], x['prey_id']])), axis=1)
