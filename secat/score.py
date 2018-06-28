@@ -73,7 +73,7 @@ def filter_training(exp):
     df = pd.read_sql('SELECT FEATURE_SUPER.feature_id AS feature_id, FEATURE_SUPER.prey_id AS prey_id, complex, monomer, bait_elution_model_fit, bait_log_sn, bait_xcorr_shape, bait_xcorr_coelution, main_var_xcorr_shape_score_q2, var_xcorr_coelution_score_q2, var_log_sn_score_q2, var_stoichiometry_score_q2 FROM FEATURE_SUPER INNER JOIN FEATURE_META ON FEATURE_SUPER.feature_id = FEATURE_META.feature_id INNER JOIN FEATURE_MW ON FEATURE_SUPER.feature_id = FEATURE_MW.feature_id AND FEATURE_SUPER.prey_id = FEATURE_MW.prey_id WHERE condition_id = "%s" AND replicate_id = "%s";' % (exp['condition_id'], exp['replicate_id']), con)
     con.close()
 
-    return df[((df['complex'] == True) | (df['monomer'] == True)) & (df['bait_xcorr_coelution'] < 2.0) & (df['bait_xcorr_shape'] > 0.8) & (df['bait_elution_model_fit'] > 0.9) & (df['bait_log_sn'] > 1.0) & (df['var_xcorr_coelution_score_q2'] < 2.0) & (df['var_log_sn_score_q2'] > 0.0) & (df['var_stoichiometry_score_q2'] > 0.1)][['feature_id','prey_id']]
+    return df[((df['complex'] == True) | (df['monomer'] == True)) & (df['bait_xcorr_coelution'] < 2.0) & (df['bait_xcorr_shape'] > 0.8) & (df['bait_elution_model_fit'] > 0.9) & (df['bait_log_sn'] > 1.0) & (df['main_var_xcorr_shape_score_q2'] > 0.8) & (df['var_xcorr_coelution_score_q2'] < 2.0) & (df['var_log_sn_score_q2'] > 0.0) & (df['var_stoichiometry_score_q2'] > 0.2)][['feature_id','prey_id']]
 
 class pyprophet:
     def __init__(self, outfile, xeval_fraction, xeval_num_iter, ss_initial_fdr, ss_iteration_fdr, ss_num_iter, parametric, pfdr, pi0_lambda, pi0_method, pi0_smooth_df, pi0_smooth_log_pi0, lfdr_truncate, lfdr_monotone, lfdr_transformation, lfdr_adj, lfdr_eps, threads, test):
@@ -108,22 +108,11 @@ class pyprophet:
         # apply to detecting data
         detecting_data = self.read_detecting()
 
-        detected_data = detecting_data.groupby('sec_group').apply(self.apply)
-
-        # conduct preliminary inference
-        con = sqlite3.connect(self.outfile)
-        detected_data[['feature_id', 'bait_id', 'prey_id', 'pep', 'q_value']].to_sql('FEATURE_TRAINING_SCORED', con, index=False, if_exists='replace')
-        con.close()
-
-        # Select subset with at least one condfident detection
-        aligning_data = self.read_aligning()
-
-        # Apply scoring model to data
-        self.df = self.apply(aligning_data)[['feature_id','bait_id','prey_id','d_score','p_value','q_value','pep']]
+        self.df = detecting_data.groupby('sec_group').apply(self.apply)
 
     def read_learning(self):
         con = sqlite3.connect(self.outfile)
-        df = pd.read_sql('SELECT FEATURE_SUPER.*, FEATURE_SUPER.feature_id || "_" || FEATURE_SUPER.prey_id || "_" || FEATURE_SUPER.bait_id AS pyprophet_feature_id FROM FEATURE_SUPER INNER JOIN FEATURE_TRAINING ON FEATURE_SUPER.feature_id = FEATURE_TRAINING.feature_id AND FEATURE_SUPER.prey_id = FEATURE_TRAINING.prey_id;', con)
+        df = pd.read_sql('SELECT FEATURE_SUPER.*, FEATURE_SUPER.feature_id || "_" || FEATURE_SUPER.prey_id || "_" || FEATURE_SUPER.bait_id AS pyprophet_feature_id FROM FEATURE_SUPER INNER JOIN FEATURE_TRAINING ON FEATURE_SUPER.feature_id = FEATURE_TRAINING.feature_id AND FEATURE_SUPER.prey_id = FEATURE_TRAINING.prey_id LEFT OUTER JOIN NETWORK ON FEATURE_SUPER.bait_id = NETWORK.bait_id AND FEATURE_SUPER.prey_id = NETWORK.prey_id WHERE interaction_confidence > 0.9 OR decoy == 1;', con)
 
         con.close()
 
@@ -132,17 +121,13 @@ class pyprophet:
     def read_detecting(self):
         con = sqlite3.connect(self.outfile)
         df = pd.read_sql('SELECT FEATURE_SUPER.*, FEATURE_SUPER.feature_id || "_" || FEATURE_SUPER.prey_id || "_" || FEATURE_SUPER.bait_id AS pyprophet_feature_id, ROUND(FEATURE_META.RT) AS sec_group FROM FEATURE_SUPER INNER JOIN FEATURE_TRAINING ON FEATURE_SUPER.feature_id = FEATURE_TRAINING.feature_id AND FEATURE_SUPER.prey_id = FEATURE_TRAINING.prey_id INNER JOIN FEATURE_META ON FEATURE_SUPER.FEATURE_ID = FEATURE_META.FEATURE_ID;', con)
+        # df = pd.read_sql('SELECT FEATURE_SUPER.*, FEATURE_SUPER.feature_id || "_" || FEATURE_SUPER.prey_id || "_" || FEATURE_SUPER.bait_id AS pyprophet_feature_id, ROUND(FEATURE_META.RT) AS sec_group FROM FEATURE_SUPER INNER JOIN FEATURE_TRAINING ON FEATURE_SUPER.feature_id = FEATURE_TRAINING.feature_id AND FEATURE_SUPER.prey_id = FEATURE_TRAINING.prey_id INNER JOIN FEATURE_META ON FEATURE_SUPER.FEATURE_ID = FEATURE_META.FEATURE_ID LEFT OUTER JOIN NETWORK ON FEATURE_SUPER.bait_id = NETWORK.bait_id AND FEATURE_SUPER.prey_id = NETWORK.prey_id WHERE interaction_confidence > 0.5 OR FEATURE_SUPER.decoy == 1;', con)
         con.close()
+
+        df['interaction_id'] = df.apply(lambda x: "_".join(sorted([x['bait_id'], x['prey_id']])), axis=1)
 
         df.loc[df['sec_group'] >= 40,'sec_group'] = 40
         df['sec_group'] = np.round(df['sec_group'] / 5.0)
-
-        return df
-
-    def read_aligning(self):
-        con = sqlite3.connect(self.outfile)
-        df = pd.read_sql('SELECT DISTINCT FEATURE_SUPER.*, FEATURE_SUPER.feature_id || "_" || FEATURE_SUPER.prey_id || "_" || FEATURE_SUPER.bait_id AS pyprophet_feature_id, 0 AS sec_group FROM FEATURE_SUPER INNER JOIN FEATURE_META ON FEATURE_SUPER.feature_id = FEATURE_META.feature_id INNER JOIN (SELECT DISTINCT FEATURE_SUPER.bait_id, FEATURE_SUPER.prey_id, FEATURE_META.RT, FEATURE_META.leftWidth, FEATURE_META.rightWidth FROM FEATURE_SUPER INNER JOIN FEATURE_META ON FEATURE_SUPER.feature_id = FEATURE_META.feature_id INNER JOIN FEATURE_TRAINING_SCORED ON FEATURE_SUPER.feature_id = FEATURE_TRAINING_SCORED.feature_id AND FEATURE_SUPER.prey_id = FEATURE_TRAINING_SCORED.prey_id WHERE pep < 0.5) AS FEATURE_TRAINING_DET ON FEATURE_SUPER.bait_id = FEATURE_TRAINING_DET.bait_id AND FEATURE_SUPER.prey_id = FEATURE_TRAINING_DET.prey_id WHERE ABS(FEATURE_META.RT - FEATURE_TRAINING_DET.RT) < 5 AND ABS(FEATURE_META.leftWidth - FEATURE_TRAINING_DET.leftWidth) < 7 AND ABS(FEATURE_META.rightWidth - FEATURE_TRAINING_DET.rightWidth) < 7;', con)
-        con.close()
 
         return df
 
@@ -156,7 +141,10 @@ class pyprophet:
     def apply(self, detecting_data):
         (result, scorer, weights) = PyProphet(self.xeval_fraction, self.xeval_num_iter, self.ss_initial_fdr, self.ss_iteration_fdr, self.ss_num_iter, self.group_id, self.parametric, self.pfdr, self.pi0_lambda, self.pi0_method, self.pi0_smooth_df, self.pi0_smooth_log_pi0, self.lfdr_truncate, self.lfdr_monotone, self.lfdr_transformation, self.lfdr_adj, self.lfdr_eps, False, self.threads, self.test).apply_weights(detecting_data, self.weights)
         self.plot(result, scorer.pi0, str(int(detecting_data['sec_group'].values[0])))
-        return result.scored_tables
+
+        df = result.scored_tables[['feature_id', 'bait_id', 'prey_id', 'interaction_id', 'decoy', 'pep', 'q_value']]
+        df.columns = ['feature_id', 'bait_id', 'prey_id', 'interaction_id', 'decoy', 'pep', 'qvalue']
+        return df
 
     def plot(self, result, pi0, tag):
         cutoffs = result.final_statistics["cutoff"].values
@@ -215,20 +203,17 @@ class pyprophet:
                     plt.close()
 
 class infer:
-    def __init__(self, outfile, feature_table):
+    def __init__(self, outfile):
         self.outfile = outfile
-        self.feature_table = feature_table
 
         peptide_data = self.read()
 
-        self.features, self.interactions, self.proteins = self.infer_features(peptide_data)
+        self.directional, self.interactions = self.infer_features(peptide_data)
 
     def read(self):
         con = sqlite3.connect(self.outfile)
-        df = pd.read_sql('SELECT DISTINCT condition_id, replicate_id, FEATURE_SUPER.bait_id AS bait_id, FEATURE_SUPER.prey_id AS prey_id, FEATURE_SUPER.feature_id AS feature_id, monomer, complex, interaction_confidence AS prior, FEATURE_SCORED.pep, FEATURE_SUPER.decoy AS decoy FROM FEATURE_SUPER INNER JOIN FEATURE_META ON FEATURE_SUPER.feature_id = FEATURE_META.feature_id INNER JOIN FEATURE_SCORED ON FEATURE_SUPER.feature_id = FEATURE_SCORED.feature_id AND FEATURE_SUPER.prey_id = FEATURE_SCORED.prey_id INNER JOIN FEATURE_MW ON FEATURE_SUPER.feature_id = FEATURE_MW.feature_id AND FEATURE_SUPER.prey_id = FEATURE_MW.prey_id LEFT JOIN (SELECT DISTINCT * FROM NETWORK) AS NETWORK ON FEATURE_SUPER.bait_id = NETWORK.bait_id AND FEATURE_SUPER.prey_id = NETWORK.prey_id;', con)
+        df = pd.read_sql('SELECT DISTINCT condition_id, replicate_id, FEATURE_SUPER.bait_id AS bait_id, FEATURE_SUPER.prey_id AS prey_id, FEATURE_SCORED.interaction_id AS interaction_id, FEATURE_SUPER.feature_id AS feature_id, interaction_confidence AS prior, FEATURE_SCORED.pep FROM FEATURE_SUPER INNER JOIN FEATURE_META ON FEATURE_SUPER.feature_id = FEATURE_META.feature_id INNER JOIN FEATURE_SCORED ON FEATURE_SUPER.feature_id = FEATURE_SCORED.feature_id AND FEATURE_SUPER.prey_id = FEATURE_SCORED.prey_id INNER JOIN FEATURE_MW ON FEATURE_SUPER.feature_id = FEATURE_MW.feature_id AND FEATURE_SUPER.prey_id = FEATURE_MW.prey_id INNER JOIN (SELECT DISTINCT * FROM NETWORK) AS NETWORK ON FEATURE_SUPER.bait_id = NETWORK.bait_id AND FEATURE_SUPER.prey_id = NETWORK.prey_id WHERE FEATURE_SUPER.decoy == 0 AND FEATURE_MW.complex == 1;', con)
         con.close()
-
-        df['interaction_id'] = df.apply(lambda x: "_".join(sorted([x['bait_id'], x['prey_id']])), axis=1)
 
         return df
 
@@ -254,23 +239,19 @@ class infer:
 
 
     def infer_features(self, protein_data):
-        # protein level
-        protein_data.loc[protein_data.decoy==1,'prior'] = 0.5
-
         # merge baits and preys
-        bait_proteins = protein_data.ix[(protein_data.bait_id == protein_data.prey_id) & (protein_data.decoy==0)][["feature_id","bait_id","pep"]]
+        bait_proteins = protein_data.ix[(protein_data.bait_id == protein_data.prey_id)][["feature_id","bait_id","pep"]]
         bait_proteins.columns = ["feature_id","bait_id","bait_pep"]
         protein_bait_data = pd.merge(protein_data.ix[(protein_data.bait_id != protein_data.prey_id)], bait_proteins, on=["feature_id","bait_id"])
 
         # feature level
-        feature_data = protein_bait_data.groupby(["condition_id", "replicate_id", "feature_id", "interaction_id", "bait_id", "prey_id", "decoy"]).apply(self.interaction_inference).reset_index()
+        feature_data = protein_bait_data.groupby(["condition_id", "replicate_id", "feature_id", "interaction_id", "bait_id", "prey_id"]).apply(self.interaction_inference).reset_index()
 
         # interaction level
-        interaction_data = protein_bait_data.groupby(["condition_id", "interaction_id", "decoy"]).apply(self.interaction_inference).reset_index()
+        interaction_data = protein_bait_data.groupby(["condition_id", "interaction_id"]).apply(self.interaction_inference).reset_index()
 
         # add q-value
-        feature_data['q_value'] = self.compute_model_fdr(feature_data['pep'])
-        interaction_data['q_value'] = self.compute_model_fdr(interaction_data['pep'])
-        protein_data['q_value'] = self.compute_model_fdr(protein_data['pep'])
+        feature_data['qvalue'] = self.compute_model_fdr(feature_data['pep'])
+        interaction_data['qvalue'] = self.compute_model_fdr(interaction_data['pep'])
 
-        return feature_data, interaction_data, protein_data
+        return feature_data, interaction_data

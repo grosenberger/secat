@@ -12,7 +12,7 @@ import numpy as np
 from preprocess import uniprot, net, sec, quantification, meta, query
 from detect import prepare, process
 from score import prepare_filter, filter_mw, filter_training, pyprophet, infer
-from quantify import quantitative_matrix, quantitative_test
+from quantify import align, quantitative_matrix, quantitative_test
 
 from pyprophet.data_handling import transform_pi0_lambda
 
@@ -220,7 +220,7 @@ def score(infile, outfile, complex_threshold_factor, xeval_fraction, xeval_num_i
     else:
         n_cpus = threads
 
-    p = Pool(processes=n_cpus)
+    # p = Pool(processes=n_cpus)
 
     # Define outfile
     if outfile is None:
@@ -229,29 +229,29 @@ def score(infile, outfile, complex_threshold_factor, xeval_fraction, xeval_num_i
         copyfile(infile, outfile)
         outfile = outfile
 
-    # Prepare SEC experiments, e.g. individual conditions + replicates
-    exps = prepare_filter(outfile, complex_threshold_factor)
+    # # Prepare SEC experiments, e.g. individual conditions + replicates
+    # exps = prepare_filter(outfile, complex_threshold_factor)
 
-    # Assess molecular weight
-    click.echo("Info: Filtering based on molecular weight.")
-    mw_data = p.map(filter_mw, exps)
+    # # Assess molecular weight
+    # click.echo("Info: Filtering based on molecular weight.")
+    # mw_data = p.map(filter_mw, exps)
 
-    con = sqlite3.connect(outfile)
-    pd.concat(mw_data).to_sql('FEATURE_MW', con, index=False, if_exists='replace')
-    con.execute("CREATE INDEX IF NOT EXISTS idx_feature_mw_feature_id_prey_id ON FEATURE_MW (feature_id, prey_id);")
-    con.close()
+    # con = sqlite3.connect(outfile)
+    # pd.concat(mw_data).to_sql('FEATURE_MW', con, index=False, if_exists='replace')
+    # con.execute("CREATE INDEX IF NOT EXISTS idx_feature_mw_feature_id_prey_id ON FEATURE_MW (feature_id, prey_id);")
+    # con.close()
 
-    # Filter training data
-    click.echo("Info: Filtering based on elution profile scores.")
-    training_data = p.map(filter_training, exps)
+    # # Filter training data
+    # click.echo("Info: Filtering based on elution profile scores.")
+    # training_data = p.map(filter_training, exps)
 
-    con = sqlite3.connect(outfile)
-    pd.concat(training_data).to_sql('FEATURE_TRAINING', con, index=False, if_exists='replace')
-    con.execute("CREATE INDEX IF NOT EXISTS idx_feature_training_feature_id ON FEATURE_TRAINING (feature_id);")
-    con.close()
+    # con = sqlite3.connect(outfile)
+    # pd.concat(training_data).to_sql('FEATURE_TRAINING', con, index=False, if_exists='replace')
+    # con.execute("CREATE INDEX IF NOT EXISTS idx_feature_training_feature_id ON FEATURE_TRAINING (feature_id);")
+    # con.close()
 
-    # Close parallel execution
-    p.close()
+    # # Close parallel execution
+    # p.close()
 
     # Run PyProphet training
     click.echo("Info: Running PyProphet.")
@@ -264,19 +264,20 @@ def score(infile, outfile, complex_threshold_factor, xeval_fraction, xeval_num_i
 
     # Infer proteins
     click.echo("Info: Infering complexes and monomers.")
-    infer_data = infer(outfile, 'FEATURE_SCORED')
+    infer_data = infer(outfile)
 
     con = sqlite3.connect(outfile)
-    infer_data.features.to_sql('FEATURE_COMPLEX', con, index=False, if_exists='replace')
+    infer_data.directional.to_sql('FEATURE_DIRECTIONAL', con, index=False, if_exists='replace')
     infer_data.interactions.to_sql('FEATURE_INTERACTION', con, index=False, if_exists='replace')
-    infer_data.proteins.to_sql('FEATURE_PROTEIN', con, index=False, if_exists='replace')
     con.close()
 
 # SECAT quantify features
 @cli.command()
 @click.option('--in', 'infile', required=True, type=click.Path(exists=True), help='Input SECAT file.')
 @click.option('--out', 'outfile', required=False, type=click.Path(exists=False), help='Output SECAT file.')
-def quantify(infile, outfile):
+@click.option('--feature_pep', default=0.5, show_default=True, type=float, help='Maximum q-value for feature seeding.')
+@click.option('--interaction_pep', default=0.1, show_default=True, type=float, help='Maximum q-value for interaction seeding.')
+def quantify(infile, outfile, feature_pep, interaction_pep):
     """
     Quantify protein and interaction features in SEC data.
     """
@@ -287,6 +288,15 @@ def quantify(infile, outfile):
     else:
         copyfile(infile, outfile)
         outfile = outfile
+
+    # Align features
+    click.echo("Info: Align features.")
+    aligned_data = align(outfile, feature_pep, interaction_pep)
+
+    con = sqlite3.connect(outfile)
+    aligned_data.df.to_sql('FEATURE_ALIGNED', con, index=False, if_exists='replace')
+    con.execute("CREATE INDEX IF NOT EXISTS idx_feature_aligned_feature_id_prey_id ON FEATURE_ALIGNED (feature_id, prey_id);")
+    con.close()
 
     click.echo("Info: Prepare quantitative matrix")
     qm = quantitative_matrix(outfile)

@@ -10,7 +10,7 @@ import sqlite3
 import multiprocessing as mp
 from tqdm import tqdm
 
-import pyopenms as po
+# import pyopenms as po
 
 def prepare(outfile, min_peptides, max_peptides, det_peptides, peak_method, peak_width, signal_to_noise, gauss_width, sgolay_frame_length, sgolay_polynomial_order, sn_win_len, sn_bin_count, max_xcorr_coelution):
 
