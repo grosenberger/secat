@@ -13,6 +13,7 @@ from preprocess import uniprot, net, sec, quantification, meta, query
 from detect import prepare, process
 from score import prepare_filter, filter_mw, filter_training, pyprophet, infer
 from quantify import align, quantitative_matrix, quantitative_test
+from plot import plot_features
 
 from pyprophet.data_handling import transform_pi0_lambda
 
@@ -324,7 +325,7 @@ def quantify(infile, outfile, feature_pep, interaction_pep, apex_delta, tail_del
 @click.option('--in', 'infile', required=True, type=click.Path(exists=True), help='Input SECAT file.')
 def export(infile):
     """
-    Quantify protein and interaction features in SEC data.
+    Export SECAT results.
     """
 
     outfile_nodes = infile.split(".secat")[0] + "_nodes.csv"
@@ -346,3 +347,18 @@ def export(infile):
     edge_directional_data.to_csv(outfile_edges_directional, index=False)
     edge_data.to_csv(outfile_edges, index=False)
     edge_level_data.to_csv(outfile_edges_level, index=False)
+
+# SECAT plot chromatograms
+@cli.command()
+@click.option('--in', 'infile', required=True, type=click.Path(exists=True), help='Input SECAT file.')
+@click.option('--interaction_id', required=False, type=str, help='Plot features for specified interaction_id.')
+@click.option('--interaction_qvalue', default=None, show_default=True, type=float, help='Maximum q-value to plot interactions.')
+@click.option('--bait_id', required=False, type=str, help='Plot features for specified bait_id.')
+@click.option('--bait_qvalue', default=None, show_default=True, type=float, help='Maximum q-value to plot baits.')
+@click.option('--peptide_rank', default=6, show_default=True, type=int, help='Number of most intense peptides to plot.')
+def plot(infile, interaction_id, interaction_qvalue, bait_id, bait_qvalue, peptide_rank):
+    """
+    Plot SECAT results
+    """
+
+    pf = plot_features(infile, interaction_id, interaction_qvalue, bait_id, bait_qvalue, peptide_rank)
