@@ -113,7 +113,7 @@ WHERE peptide_rank <= %s;
     def read_interactions(self):
         con = sqlite3.connect(self.infile)
         df = pd.read_sql('''
-SELECT DISTINCT interaction_id FROM EDGE WHERE qvalue <= %s;
+SELECT DISTINCT interaction_id FROM EDGE WHERE qvalue < %s;
 ''' % (self.interaction_qvalue), con)
         con.close()
 
@@ -122,7 +122,7 @@ SELECT DISTINCT interaction_id FROM EDGE WHERE qvalue <= %s;
     def read_baits(self):
         con = sqlite3.connect(self.infile)
         df = pd.read_sql('''
-SELECT DISTINCT bait_id FROM EDGE NODE qvalue <= %s;
+SELECT DISTINCT bait_id FROM NODE WHERE qvalue < %s;
 ''' % (self.bait_qvalue), con)
         con.close()
 
