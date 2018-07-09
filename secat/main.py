@@ -221,7 +221,7 @@ def score(infile, outfile, complex_threshold_factor, xeval_fraction, xeval_num_i
     else:
         n_cpus = threads
 
-    # p = Pool(processes=n_cpus)
+    p = Pool(processes=n_cpus)
 
     # Define outfile
     if outfile is None:
@@ -230,29 +230,29 @@ def score(infile, outfile, complex_threshold_factor, xeval_fraction, xeval_num_i
         copyfile(infile, outfile)
         outfile = outfile
 
-    # # Prepare SEC experiments, e.g. individual conditions + replicates
-    # exps = prepare_filter(outfile, complex_threshold_factor)
+    # Prepare SEC experiments, e.g. individual conditions + replicates
+    exps = prepare_filter(outfile, complex_threshold_factor)
 
-    # # Assess molecular weight
-    # click.echo("Info: Filtering based on molecular weight.")
-    # mw_data = p.map(filter_mw, exps)
+    # Assess molecular weight
+    click.echo("Info: Filtering based on molecular weight.")
+    mw_data = p.map(filter_mw, exps)
 
-    # con = sqlite3.connect(outfile)
-    # pd.concat(mw_data).to_sql('FEATURE_MW', con, index=False, if_exists='replace')
-    # con.execute("CREATE INDEX IF NOT EXISTS idx_feature_mw_feature_id_prey_id ON FEATURE_MW (feature_id, prey_id);")
-    # con.close()
+    con = sqlite3.connect(outfile)
+    pd.concat(mw_data).to_sql('FEATURE_MW', con, index=False, if_exists='replace')
+    con.execute("CREATE INDEX IF NOT EXISTS idx_feature_mw_feature_id_prey_id ON FEATURE_MW (feature_id, prey_id);")
+    con.close()
 
-    # # Filter training data
-    # click.echo("Info: Filtering based on elution profile scores.")
-    # training_data = p.map(filter_training, exps)
+    # Filter training data
+    click.echo("Info: Filtering based on elution profile scores.")
+    training_data = p.map(filter_training, exps)
 
-    # con = sqlite3.connect(outfile)
-    # pd.concat(training_data).to_sql('FEATURE_TRAINING', con, index=False, if_exists='replace')
-    # con.execute("CREATE INDEX IF NOT EXISTS idx_feature_training_feature_id ON FEATURE_TRAINING (feature_id);")
-    # con.close()
+    con = sqlite3.connect(outfile)
+    pd.concat(training_data).to_sql('FEATURE_TRAINING', con, index=False, if_exists='replace')
+    con.execute("CREATE INDEX IF NOT EXISTS idx_feature_training_feature_id ON FEATURE_TRAINING (feature_id);")
+    con.close()
 
-    # # Close parallel execution
-    # p.close()
+    # Close parallel execution
+    p.close()
 
     # Run PyProphet training
     click.echo("Info: Running PyProphet.")

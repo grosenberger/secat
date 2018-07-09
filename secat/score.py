@@ -70,10 +70,10 @@ def filter_mw(exp):
 
 def filter_training(exp):
     con = sqlite3.connect(exp['outfile'])
-    df = pd.read_sql('SELECT FEATURE_SUPER.feature_id AS feature_id, FEATURE_SUPER.prey_id AS prey_id, complex, monomer, bait_elution_model_fit, bait_log_sn, bait_xcorr_shape, bait_xcorr_coelution, main_var_xcorr_shape_score_q2, var_xcorr_coelution_score_q2, var_log_sn_score_q2, var_stoichiometry_score_q2 FROM FEATURE_SUPER INNER JOIN FEATURE_META ON FEATURE_SUPER.feature_id = FEATURE_META.feature_id INNER JOIN FEATURE_MW ON FEATURE_SUPER.feature_id = FEATURE_MW.feature_id AND FEATURE_SUPER.prey_id = FEATURE_MW.prey_id WHERE condition_id = "%s" AND replicate_id = "%s";' % (exp['condition_id'], exp['replicate_id']), con)
+    df = pd.read_sql('SELECT FEATURE_SUPER.feature_id AS feature_id, FEATURE_SUPER.prey_id AS prey_id, complex, monomer, bait_elution_model_fit, bait_log_sn, bait_xcorr_shape, bait_xcorr_coelution, main_var_xcorr_shape_score_q2, var_xcorr_coelution_score_q3, var_log_sn_score_q1, var_stoichiometry_score_q2 FROM FEATURE_SUPER INNER JOIN FEATURE_META ON FEATURE_SUPER.feature_id = FEATURE_META.feature_id INNER JOIN FEATURE_MW ON FEATURE_SUPER.feature_id = FEATURE_MW.feature_id AND FEATURE_SUPER.prey_id = FEATURE_MW.prey_id WHERE condition_id = "%s" AND replicate_id = "%s";' % (exp['condition_id'], exp['replicate_id']), con)
     con.close()
 
-    return df[((df['complex'] == True) | (df['monomer'] == True)) & (df['bait_xcorr_coelution'] < 2.0) & (df['bait_xcorr_shape'] > 0.8) & (df['bait_elution_model_fit'] > 0.9) & (df['bait_log_sn'] > 1.0) & (df['main_var_xcorr_shape_score_q2'] > 0.8) & (df['var_xcorr_coelution_score_q2'] < 2.0) & (df['var_log_sn_score_q2'] > 0.0) & (df['var_stoichiometry_score_q2'] > 0.2)][['feature_id','prey_id']]
+    return df[((df['complex'] == True) | (df['monomer'] == True)) & (df['bait_xcorr_coelution'] < 1.0) & (df['bait_xcorr_shape'] > 0.8) & (df['bait_elution_model_fit'] > 0.9) & (df['bait_log_sn'] > 1.0) & (df['main_var_xcorr_shape_score_q2'] > 0.8) & (df['var_xcorr_coelution_score_q3'] < 1.0) & (df['var_log_sn_score_q1'] > 0.0) & (df['var_stoichiometry_score_q2'] > 0.2)][['feature_id','prey_id']]
 
 class pyprophet:
     def __init__(self, outfile, xeval_fraction, xeval_num_iter, ss_initial_fdr, ss_iteration_fdr, ss_num_iter, parametric, pfdr, pi0_lambda, pi0_method, pi0_smooth_df, pi0_smooth_log_pi0, lfdr_truncate, lfdr_monotone, lfdr_transformation, lfdr_adj, lfdr_eps, threads, test):
