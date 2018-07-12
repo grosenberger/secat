@@ -1,7 +1,5 @@
 import click
-from tqdm import tqdm
 
-from multiprocessing import Pool, freeze_support, RLock, cpu_count
 import sqlite3
 import os
 from shutil import copyfile
