@@ -3,6 +3,7 @@ import pandas as pd
 import click
 from sklearn import preprocessing
 import sys
+import os
 
 from lxml import etree
 
@@ -122,8 +123,13 @@ class net:
         elif self.format == 'mitab':
             network = mitab(netfile).df
 
-        df = self.expand(network, uniprot)
+        # Ensure that interactions are unique
+        df = self.unique_interactions(network)
+        # Filter for minimum interaction confidence
         df = df[df['interaction_confidence'] >= min_interaction_confidence]
+        # Remove interactions between same baits and preys
+        df = df[df['bait_id'] != df['prey_id']]
+
         self.df = df
 
     def identify(self, netfile):
@@ -140,17 +146,15 @@ class net:
         else:
             sys.exit("Error: Reference network file format is not supported.")
 
-    def expand(self, network, uniprot):
-        network_rev = network.copy()
+    def unique_interactions(self, network):
+        def get_interaction_id(x):
+            return '_'.join(sorted([x['bait_id'], x['prey_id']]))
 
-        network_rev = network_rev[['prey_id','bait_id','interaction_confidence']]
-        network_rev.columns = ["bait_id","prey_id","interaction_confidence"]
+        network['interaction_id'] = network.apply(get_interaction_id, axis=1)
 
-        proteins = uniprot.to_df()[['protein_id','protein_id']]
-        proteins.columns = ["bait_id","prey_id"]
-        proteins['interaction_confidence'] = 1.0
-
-        return pd.concat([proteins, network, network_rev])
+        network = network.groupby('interaction_id')['interaction_confidence'].max().reset_index()
+        network['bait_id'], network['prey_id'] = network['interaction_id'].str.split('_', 1).str
+        return network[['bait_id','prey_id','interaction_confidence']]
 
     def to_df(self):
         return self.df
@@ -204,10 +208,10 @@ class sec:
 
 class quantification:
     def __init__(self, infile, columns, run_ids):
-        self.run_id_col = columns[0]
-        self.protein_id_col = columns[5]
-        self.peptide_id_col = columns[6]
-        self.intensity_id_col = columns[7]
+        self.run_id_col = columns[5]
+        self.protein_id_col = columns[6]
+        self.peptide_id_col = columns[7]
+        self.intensity_id_col = columns[8]
         self.formats = ['matrix','long']
         self.format, self.header = self.identify(infile)
         self.run_ids = run_ids
@@ -244,12 +248,19 @@ class quantification:
         df.columns = ['run_id', 'protein_id', 'peptide_id', 'peptide_intensity']
 
         # run_id, condition_id and replicate_id are categorial values, peptide_intensity must be float
-        df['run_id'] = df['run_id'].apply(str)
+        df['run_id'] = df['run_id'].apply(lambda x: os.path.basename(str(x)))
         df['protein_id'] = df['protein_id'].apply(str)
         df['peptide_id'] = df['peptide_id'].apply(str)
         df['peptide_intensity'] = df['peptide_intensity'].apply(float)
 
         df = df.sort_values(by=['protein_id','peptide_id','run_id'])
+
+        # Proteotypic peptides only
+        if "/" in df['protein_id'][0]:
+            df = df.loc[df['protein_id'].str.startswith("1/")]
+            df.protein_id = df.protein_id.str[2:]
+        else:
+            df = df.loc[df['protein_id'].str.find(';')==-1]
 
         # Simple validation
         if len(run_id_columns) < 10:
@@ -264,17 +275,28 @@ class quantification:
         # Read data
         df = pd.read_csv(infile, sep=None, engine='python')
 
+        # Exclude decoys if present
+        if 'decoy' in df.columns:
+            df = df.loc[df['decoy'] == 0]
+
         # Organize and rename columns
         df = df[[self.run_id_col, self.protein_id_col, self.peptide_id_col, self.intensity_id_col]]
         df.columns = ['run_id', 'protein_id', 'peptide_id', 'peptide_intensity']
 
         # run_id, condition_id and replicate_id are categorial values, peptide_intensity must be float
-        df['run_id'] = df['run_id'].apply(str)
+        df['run_id'] = df['run_id'].apply(lambda x: os.path.basename(str(x)))
         df['protein_id'] = df['protein_id'].apply(str)
         df['peptide_id'] = df['peptide_id'].apply(str)
         df['peptide_intensity'] = df['peptide_intensity'].apply(float)
 
         df = df.sort_values(by=['protein_id','peptide_id','run_id'])
+
+        # Proteotypic peptides only
+        if "/" in df['protein_id'][0]:
+            df = df.loc[df['protein_id'].str.startswith("1/")]
+            df.protein_id = df.protein_id.str[2:]
+        else:
+            df = df.loc[df['protein_id'].str.find(';')==-1]
 
         # Simple validation
         run_id_columns = set(self.run_ids).intersection(set(df['run_id'].unique()))

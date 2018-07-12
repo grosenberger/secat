@@ -54,6 +54,7 @@ class plot_features:
         with PdfPages(out) as pdf:
             f = self.generate_plot(peptide_data, feature_data)
             pdf.savefig()
+            plt.close()
 
     def plot_bait(self, bait_id):
         feature_data = self.feature_data
@@ -66,26 +67,12 @@ class plot_features:
             for prey_id in feature_data['prey_id'].drop_duplicates().values:
                 f = self.generate_plot(peptide_data[(peptide_data['protein_id'] == bait_id) | (peptide_data['protein_id'] == prey_id)], feature_data[feature_data['prey_id'] == prey_id])
                 pdf.savefig()
+                plt.close()
 
     def read_features(self):
         con = sqlite3.connect(self.infile)
         df = pd.read_sql('''
-SELECT DISTINCT feature_meta.condition_id || '_' || feature_meta.replicate_id AS tag,
-                feature_super.feature_id,
-                feature_super.bait_id,
-                feature_super.prey_id,
-                FEATURE_ALIGNED.interaction_id,
-                feature_meta.rt,
-                feature_meta.leftWidth,
-                feature_meta.rightWidth,
-                feature_scored.pep
-FROM FEATURE_SUPER
-INNER JOIN FEATURE_META ON FEATURE_SUPER.FEATURE_ID = FEATURE_META.FEATURE_ID
-INNER JOIN FEATURE_ALIGNED ON FEATURE_SUPER.feature_id = FEATURE_ALIGNED.feature_id
-AND FEATURE_SUPER.prey_id = FEATURE_ALIGNED.prey_id
-INNER JOIN EDGE_LEVEL ON FEATURE_ALIGNED.interaction_id = EDGE_LEVEL.interaction_id
-LEFT JOIN feature_scored ON feature_super.feature_id = feature_scored.feature_id
-AND feature_super.prey_id = feature_scored.prey_id;
+SELECT FEATURE_SCORED.*, FEATURE_SCORED.bait_id || "_" || FEATURE_SCORED.prey_id AS interaction_id, FEATURE_SCORED.condition_id || "_" || FEATURE_SCORED.replicate_id AS tag, bait_monomer_sec_id, prey_monomer_sec_id FROM FEATURE_SCORED INNER JOIN (SELECT condition_id, replicate_id, protein_id AS bait_id, sec_id AS bait_monomer_sec_id FROM MONOMER) AS BAIT_MONOMER ON FEATURE_SCORED.condition_id = BAIT_MONOMER.condition_id AND FEATURE_SCORED.replicate_id = BAIT_MONOMER.replicate_id AND FEATURE_SCORED.bait_id = BAIT_MONOMER.bait_id INNER JOIN (SELECT condition_id, replicate_id, protein_id AS prey_id, sec_id AS prey_monomer_sec_id FROM MONOMER) AS PREY_MONOMER ON FEATURE_SCORED.condition_id = PREY_MONOMER.condition_id AND FEATURE_SCORED.replicate_id = PREY_MONOMER.replicate_id AND FEATURE_SCORED.prey_id = PREY_MONOMER.prey_id;
 ''', con)
         con.close()
 
@@ -113,7 +100,7 @@ WHERE peptide_rank <= %s;
     def read_interactions(self):
         con = sqlite3.connect(self.infile)
         df = pd.read_sql('''
-SELECT DISTINCT interaction_id FROM EDGE WHERE qvalue < %s;
+SELECT DISTINCT bait_id || "_" || prey_id AS interaction_id FROM FEATURE_SCORED WHERE bait_id != prey_id AND qvalue < %s;
 ''' % (self.interaction_qvalue), con)
         con.close()
 
@@ -134,7 +121,8 @@ SELECT DISTINCT bait_id FROM NODE WHERE qvalue < %s;
 
         tags = peptide_data.sort_values(by=['tag'])['tag'].drop_duplicates().values.tolist()
 
-        f, axarr = plt.subplots(len(tags), 2, sharex=True, sharey=True, figsize=(15,15))
+        # f, axarr = plt.subplots(len(tags), 2, sharex=True, sharey=True, figsize=(15,15))
+        f, axarr = plt.subplots(1, 1, sharex=True, sharey=True, figsize=(15,15))
         f.suptitle(interaction_id)
 
         xmin = 0 # peptide_data['sec_id'].min()
@@ -144,8 +132,9 @@ SELECT DISTINCT bait_id FROM NODE WHERE qvalue < %s;
 
         for bp_index, bp_pair in bp_pairs.iterrows():
             for tag in tags:
-                axarr[tags.index(tag), bp_index].set_xlim(xmin, xmax)
-                axarr[tags.index(tag), bp_index].set_ylim(ymin, ymax)
+                axarr.set_xlim(xmin, xmax)
+                axarr.set_ylim(ymin, ymax)
+                feature = feature_data[(feature_data['bait_id'] == bp_pair['bait_id']) & (feature_data['prey_id'] == bp_pair['prey_id']) & (feature_data['tag'] == tag)]
                 proteins = peptide_data['protein_id'].drop_duplicates().values
                 for protein in proteins:
                         if protein == bp_pair['bait_id']:
@@ -156,18 +145,21 @@ SELECT DISTINCT bait_id FROM NODE WHERE qvalue < %s;
                         for peptide in peptides:
                             points = peptide_data[(peptide_data['peptide_id'] == peptide) & (peptide_data['tag'] == tag)].sort_values(by=['sec_id'])
 
-                            axarr[tags.index(tag), bp_index].plot(points['sec_id'], points['peptide_intensity'], color=protein_color)
-                            axarr[tags.index(tag), bp_index].legend([Line2D([0], [0], color='red'), Line2D([0], [0], color='black')], [bp_pair['bait_id'], bp_pair['prey_id']])
-                            axarr[tags.index(tag), bp_index].set_title(tag, loc = 'center', pad = -15)
-                features = feature_data[(feature_data['bait_id'] == bp_pair['bait_id']) & (feature_data['prey_id'] == bp_pair['prey_id']) & (feature_data['tag'] == tag)]
-                for feature_index, feature in features.iterrows():
-                    if np.isfinite(feature['pep']):
-                        boxalpha = 0.1 + 0.2 * (1-feature['pep'])
-                        axarr[tags.index(tag), bp_index].text(feature['RT'], ymax*0.9, np.around(feature['pep'], 2), fontsize=6, horizontalalignment='center', bbox=dict(facecolor='white', alpha=1.0))
-                    else:
-                        boxalpha = 0.1
-                    axarr[tags.index(tag), bp_index].axvspan(feature['leftWidth'], feature['rightWidth'], color='red', alpha=boxalpha)
-                    axarr[tags.index(tag), bp_index].axvline(x=feature['RT'], color='orange', alpha=0.5)
+                            axarr.plot(points['sec_id'], points['peptide_intensity'], color=protein_color)
+                axarr.legend([Line2D([0], [0], color='red'), Line2D([0], [0], color='black')], [bp_pair['bait_id'], bp_pair['prey_id']])
+                axarr.set_title(tag + ": " + str(np.around(feature['decoy'].values[0], 5)) + ": " + str(np.around(feature['qvalue'].values[0], 5)) + ": " + str(np.around(feature['sec_lag'].values[0], 5)), loc = 'center', pad = -15)
+                axarr.axvline(x=feature['bait_monomer_sec_id'].values, color='red', alpha=0.5)
+                axarr.axvline(x=feature['prey_monomer_sec_id'].values, color='black', alpha=0.5)
+
+                # features = feature_data[(feature_data['bait_id'] == bp_pair['bait_id']) & (feature_data['prey_id'] == bp_pair['prey_id']) & (feature_data['tag'] == tag)]
+                # for feature_index, feature in features.iterrows():
+                #     if np.isfinite(feature['pep']):
+                #         boxalpha = 0.1 + 0.2 * (1-feature['pep'])
+                #         axarr[tags.index(tag), bp_index].text(feature['RT'], ymax*0.9, np.around(feature['pep'], 2), fontsize=6, horizontalalignment='center', bbox=dict(facecolor='white', alpha=1.0))
+                #     else:
+                #         boxalpha = 0.1
+                #     axarr[tags.index(tag), bp_index].axvspan(feature['leftWidth'], feature['rightWidth'], color='red', alpha=boxalpha)
+                #     axarr[tags.index(tag), bp_index].axvline(x=feature['RT'], color='orange', alpha=0.5)
 
         return f
 

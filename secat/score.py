@@ -1,17 +1,18 @@
 import pandas as pd
 import numpy as np
+import scipy as sp
 import click
 import sqlite3
 import os
 import sys
 
-from sklearn import linear_model
+from joblib import Parallel, delayed
+import multiprocessing
 
-from pyprophet.pyprophet import PyProphet
-from pyprophet.report import save_report
-
-from scipy.stats import rankdata
-
+from minepy import cstats
+from pyitlib import discrete_random_variable as drv
+from sets import Set
+from pyprophet.stats import pemp, pi0est, qvalue
 
 try:
     import matplotlib
@@ -22,148 +23,235 @@ except ImportError:
     plt = None
 
 from scipy.stats import gaussian_kde
+from scipy.signal import correlate
 from numpy import linspace, concatenate, around
 
-def prepare_filter(outfile, complex_threshold_factor):
+def split(dfm, chunk_size):
+    def index_marks(nrows, chunk_size):
+        return range(1 * chunk_size, (nrows // chunk_size + 1) * chunk_size, chunk_size)
 
-    con = sqlite3.connect(outfile)
-    df = pd.read_sql('SELECT DISTINCT condition_id, replicate_id FROM SEC;', con)
-    con.close()
+    indices = index_marks(dfm.shape[0], chunk_size)
+    return np.split(dfm, indices)
 
-    experiments = []
-    for idx, exp in enumerate(df.to_dict('records')):
-        experiments.append({'idx': idx, 'tmpoutfile': outfile + "_tmp" + str(idx), 'outfile': outfile, 'condition_id': exp['condition_id'], 'replicate_id': exp['replicate_id'], 'complex_threshold_factor': complex_threshold_factor})
+def applyParallel(dfGrouped, func):
+    retLst = Parallel(n_jobs=multiprocessing.cpu_count(), verbose=3)(delayed(func)(group) for name, group in dfGrouped)
+    return pd.concat(retLst)
 
-    return experiments
-
-def filter_mw(exp):
-    def model(df):
-        y = df[['log_sec_mw']].values
-        X = df[['sec_id']].values
-        lm = linear_model.LinearRegression()
-        lm.fit(X, y)
-        return pd.Series({'coef_': lm.coef_[0][0], 'intercept_': lm.intercept_[0]})
-
-    def lm(df, val):
-        return np.exp(df['intercept_'] + df['coef_']*df[val])
-
-    con = sqlite3.connect(exp['outfile'])
-    df = pd.read_sql('SELECT DISTINCT condition_id, replicate_id, FEATURE.bait_id AS bait_id, FEATURE.prey_id AS prey_id, FEATURE.feature_id AS feature_id, RT, leftWidth, rightWidth, bait_mw, prey_mw FROM FEATURE INNER JOIN FEATURE_META ON FEATURE.feature_id = FEATURE_META.feature_id INNER JOIN (SELECT protein_id AS bait_id, protein_mw AS bait_mw FROM PROTEIN) AS BAIT_MW ON FEATURE.bait_id = BAIT_MW.bait_id INNER JOIN (SELECT protein_id AS prey_id, protein_mw AS prey_mw FROM PROTEIN) AS PREY_MW ON FEATURE.prey_id = PREY_MW.prey_id WHERE condition_id = "%s" AND replicate_id = "%s";' % (exp['condition_id'], exp['replicate_id']), con)
-    sec_mw = pd.read_sql('SELECT DISTINCT condition_id, replicate_id, sec_id, sec_mw FROM SEC WHERE condition_id = "%s" AND replicate_id = "%s";' % (exp['condition_id'], exp['replicate_id']), con)
-    con.close()
-
-    # fit model
-    sec_mw['log_sec_mw'] = np.log(sec_mw['sec_mw'])
-    sec_mw_model = sec_mw.groupby(['condition_id','replicate_id']).apply(model)
-
-    df = pd.merge(df, sec_mw_model.reset_index(), on=['condition_id','replicate_id'])
-
-    df['sec_mw'] = df.apply(lambda x: lm(x,'RT'), 1)
-    df['left_sec_mw'] = df.apply(lambda x: lm(x,'leftWidth'), 1)
-    df['right_sec_mw'] = df.apply(lambda x: lm(x,'rightWidth'), 1)
-
-    # decide whether the feature is a complex or monomer feature
-    df['complex'] = pd.Series((df['sec_mw'].astype(float) > exp['complex_threshold_factor']*df['bait_mw'].astype(float)) & (df['sec_mw'].astype(float) > exp['complex_threshold_factor']*df['prey_mw'].astype(float)))
-    df['monomer'] = pd.Series((df['bait_id'] == df['prey_id']) & (df['left_sec_mw'].astype(float) > df['bait_mw'].astype(float)) & (df['right_sec_mw'].astype(float) < df['bait_mw'].astype(float)) & (df['sec_mw'].astype(float) <= exp['complex_threshold_factor']*df['bait_mw'].astype(float)))
-
-    return df[['feature_id','prey_id','sec_mw','left_sec_mw','right_sec_mw','complex','monomer']]
-
-def filter_training(exp):
-    con = sqlite3.connect(exp['outfile'])
-    df = pd.read_sql('SELECT FEATURE_SUPER.feature_id AS feature_id, FEATURE_SUPER.prey_id AS prey_id, complex, monomer, bait_elution_model_fit, bait_log_sn, bait_xcorr_shape, bait_xcorr_coelution, main_var_xcorr_shape_score_q2, var_xcorr_coelution_score_q3, var_log_sn_score_q1, var_stoichiometry_score_q2 FROM FEATURE_SUPER INNER JOIN FEATURE_META ON FEATURE_SUPER.feature_id = FEATURE_META.feature_id INNER JOIN FEATURE_MW ON FEATURE_SUPER.feature_id = FEATURE_MW.feature_id AND FEATURE_SUPER.prey_id = FEATURE_MW.prey_id WHERE condition_id = "%s" AND replicate_id = "%s";' % (exp['condition_id'], exp['replicate_id']), con)
-    con.close()
-
-    return df[((df['complex'] == True) | (df['monomer'] == True)) & (df['bait_xcorr_coelution'] < 1.0) & (df['bait_xcorr_shape'] > 0.8) & (df['bait_elution_model_fit'] > 0.9) & (df['bait_log_sn'] > 1.0) & (df['main_var_xcorr_shape_score_q2'] > 0.8) & (df['var_xcorr_coelution_score_q3'] < 1.0) & (df['var_log_sn_score_q1'] > 0.0) & (df['var_stoichiometry_score_q2'] > 0.2)][['feature_id','prey_id']]
-
-class pyprophet:
-    def __init__(self, outfile, xeval_fraction, xeval_num_iter, ss_initial_fdr, ss_iteration_fdr, ss_num_iter, parametric, pfdr, pi0_lambda, pi0_method, pi0_smooth_df, pi0_smooth_log_pi0, lfdr_truncate, lfdr_monotone, lfdr_transformation, lfdr_adj, lfdr_eps, threads, test):
-
+class monomer:
+    def __init__(self, outfile, complex_threshold_factor):
         self.outfile = outfile
-        self.xeval_fraction = xeval_fraction
-        self.xeval_num_iter = xeval_num_iter
-        self.ss_initial_fdr = ss_initial_fdr
-        self.ss_iteration_fdr = ss_iteration_fdr
-        self.ss_num_iter = ss_num_iter
-        self.ss_main_score = 'main_var_xcorr_shape_score'
-        self.group_id = 'pyprophet_feature_id'
-        self.parametric = parametric
-        self.pfdr = pfdr
-        self.pi0_lambda = pi0_lambda
-        self.pi0_method = pi0_method
-        self.pi0_smooth_df = pi0_smooth_df
-        self.pi0_smooth_log_pi0 = pi0_smooth_log_pi0
-        self.lfdr_truncate = lfdr_truncate
-        self.lfdr_monotone = lfdr_monotone
-        self.lfdr_transformation = lfdr_transformation
-        self.lfdr_adj = lfdr_adj
-        self.lfdr_eps = lfdr_eps
-        self.threads = threads
-        self.test = test
+        self.complex_threshold_factor = complex_threshold_factor
+        self.df = self.protein_thresholds()
 
-        # learn from high confidence data
-        learning_data = self.read_learning()
-        learned_data, self.weights = self.learn(learning_data)
-        print self.weights
+    def protein_thresholds(self):
+        def get_sec_ids(protein_meta, sec_meta):
+            return sec_meta.groupby(['condition_id','replicate_id']).apply(lambda x: x.ix[(x['sec_mw']-self.complex_threshold_factor*protein_meta['protein_mw'].values).abs().argsort()[:1]][['sec_id']]).reset_index(level=['condition_id','replicate_id'])
 
-        # apply to detecting data
-        detecting_data = self.read_detecting()
-
-        self.df = detecting_data.groupby('sec_group').apply(self.apply)
-
-    def read_learning(self):
         con = sqlite3.connect(self.outfile)
-        df = pd.read_sql('SELECT FEATURE_SUPER.*, FEATURE_SUPER.feature_id || "_" || FEATURE_SUPER.prey_id || "_" || FEATURE_SUPER.bait_id AS pyprophet_feature_id FROM FEATURE_SUPER INNER JOIN FEATURE_TRAINING ON FEATURE_SUPER.feature_id = FEATURE_TRAINING.feature_id AND FEATURE_SUPER.prey_id = FEATURE_TRAINING.prey_id LEFT OUTER JOIN NETWORK ON FEATURE_SUPER.bait_id = NETWORK.bait_id AND FEATURE_SUPER.prey_id = NETWORK.prey_id WHERE interaction_confidence > 0.9 OR decoy == 1;', con)
+        protein_mw = pd.read_sql('SELECT protein_id, protein_mw FROM PROTEIN;', con)
+        sec_meta = pd.read_sql('SELECT DISTINCT condition_id, replicate_id, sec_id, sec_mw FROM SEC;', con)
+        con.close()
+
+        protein_sec_thresholds = protein_mw.groupby(['protein_id','protein_mw']).apply(lambda x: get_sec_ids(x, sec_meta=sec_meta)).reset_index(level=['protein_id','protein_mw'])
+
+        return protein_sec_thresholds[['condition_id','replicate_id','protein_id','sec_id']]
+
+def information(df):
+    def longest_stretch(arr):
+        n = len(arr)
+        s = Set()
+        ans=0
+        for ele in arr:
+            s.add(ele)
+        for i in range(n):
+            if (arr[i]-1) not in s:
+                j=arr[i]
+                while(j in s):
+                    j+=1
+                ans=max(ans, j-arr[i])
+        return ans
+
+    def xcorr_lag(bait_peptides, prey_peptides, intersection):
+        bait_peptides = bait_peptides[intersection]
+        prey_peptides = prey_peptides[intersection]
+
+        bait_xcorr = correlate(np.repeat(np.nan_to_num(bait_peptides.values), bait_peptides.shape[0], axis=0), np.repeat(np.nan_to_num(bait_peptides.values), bait_peptides.shape[0], axis=0), mode='same')
+        prey_xcorr = correlate(np.repeat(np.nan_to_num(prey_peptides.values), prey_peptides.shape[0], axis=0), np.repeat(np.nan_to_num(prey_peptides.values), prey_peptides.shape[0], axis=0), mode='same')
+        bait_prey_xcorr = correlate(np.repeat(np.nan_to_num(bait_peptides.values), prey_peptides.shape[0], axis=0), np.repeat(np.nan_to_num(prey_peptides.values), bait_peptides.shape[0], axis=0), mode='same')
+
+        bait_peak = np.median(np.array(intersection)[np.apply_along_axis(np.argmax, 1, bait_xcorr)])
+        prey_peak = np.median(np.array(intersection)[np.apply_along_axis(np.argmax, 1, prey_xcorr)])
+        bait_prey_peak = np.median(np.array(intersection)[np.apply_along_axis(np.argmax, 1, bait_prey_xcorr)])
+
+        return max([abs(bait_prey_peak-bait_peak), abs(bait_prey_peak-prey_peak)])
+
+    # Workaround for parallelization
+    minimum_overlap = df['minimum_overlap'].min()
+    sec_boundaries = pd.DataFrame({'sec_id': range(df['lower_sec_boundaries'].min(), df['upper_sec_boundaries'].max()+1)})
+
+    # Require minimum overlap
+    intersection = list(set(df[df['is_bait']]['sec_id'].unique()) & set(df[~df['is_bait']]['sec_id'].unique()))
+    sec_overlap = longest_stretch(intersection)
+
+    # Require minimum mass similarity
+    df_bait_mass_peptide = df[df['sec_id'].isin(intersection) & df['is_bait']].groupby('peptide_id')['peptide_intensity'].sum().reset_index(level='peptide_id')
+    df_prey_mass_peptide = df[df['sec_id'].isin(intersection) & ~df['is_bait']].groupby('peptide_id')['peptide_intensity'].sum().reset_index(level='peptide_id')
+
+    mass_ratio = df_bait_mass_peptide['peptide_intensity'].median() / df_prey_mass_peptide['peptide_intensity'].median()
+
+    if mass_ratio > 1:
+        mass_ratio = 1 / mass_ratio
+
+    if sec_overlap >= minimum_overlap:
+        bait_sec_boundaries = sec_boundaries
+        bait_sec_boundaries['peptide_id'] = df[df['is_bait']]['peptide_id'].unique()[0]
+        bait_peptides = pd.merge(df[df['is_bait']], bait_sec_boundaries, on=['peptide_id','sec_id'], how='outer').sort_values(['sec_id']).pivot(index='peptide_id', columns='sec_id', values='peptide_intensity')
+
+        prey_sec_boundaries = sec_boundaries
+        prey_sec_boundaries['peptide_id'] = df[~df['is_bait']]['peptide_id'].unique()[0]
+        prey_peptides = pd.merge(df[~df['is_bait']], prey_sec_boundaries, on=['peptide_id','sec_id'], how='outer').sort_values(['sec_id']).pivot(index='peptide_id', columns='sec_id', values='peptide_intensity')
+
+        # MIC
+        stat = cstats(bait_peptides[intersection].values, prey_peptides[intersection].values, est="mic_e")
+
+        mic = stat[0].mean(axis=0).mean() # Axis 0: summary for prey peptides / Axis 1: summary for bait peptides
+        tic = stat[1].mean(axis=0).mean() # Axis 0: summary for prey peptides / Axis 1: summary for bait peptides
+
+        # MI
+        mi = np.nanmean(drv.information_mutual(bait_peptides[intersection], prey_peptides[intersection], cartesian_product=True))
+
+        res = df[['condition_id','replicate_id','bait_id','prey_id','decoy']].drop_duplicates()
+        res['mic'] = mic
+        res['tic'] = tic
+        res['mi'] = mi
+        res['longest_stretch'] = longest_stretch(intersection)
+        res['sec_lag'] = xcorr_lag(bait_peptides, prey_peptides, intersection)
+        res['mass_ratio'] = mass_ratio
+    else:
+        res = df[['condition_id','replicate_id','bait_id','prey_id','decoy']].drop_duplicates()
+        res['mic'] = np.nan
+        res['tic'] = np.nan
+        res['mi'] = np.nan
+        res['longest_stretch'] = np.nan
+        res['sec_lag'] = np.nan
+        res['mass_ratio'] = np.nan
+
+    return(res)
+
+class scoring:
+    def __init__(self, outfile, chunck_size, minimum_peptides, maximum_peptides, minimum_overlap):
+        self.outfile = outfile
+        self.chunck_size = chunck_size
+        self.minimum_peptides = minimum_peptides
+        self.maximum_peptides = maximum_peptides
+        self.minimum_overlap = minimum_overlap
+
+        self.chromatograms = self.read_chromatograms()
+        self.queries = self.read_queries()
+        self.sec_boundaries = self.read_sec_boundaries()
+
+        self.df = self.compare()
+
+    def read_chromatograms(self):
+        # Read data
+        con = sqlite3.connect(self.outfile)
+        df = pd.read_sql('SELECT SEC.condition_id, SEC.replicate_id, SEC.sec_id, QUANTIFICATION.protein_id, QUANTIFICATION.peptide_id, peptide_intensity FROM QUANTIFICATION INNER JOIN PROTEIN_META ON QUANTIFICATION.protein_id = PROTEIN_META.protein_id INNER JOIN PEPTIDE_META ON QUANTIFICATION.peptide_id = PEPTIDE_META.peptide_id INNER JOIN SEC ON QUANTIFICATION.RUN_ID = SEC.RUN_ID INNER JOIN MONOMER ON QUANTIFICATION.protein_id = MONOMER.protein_id and SEC.condition_id = MONOMER.condition_id AND SEC.replicate_id = MONOMER.replicate_id WHERE SEC.sec_id < MONOMER.sec_id AND peptide_count >= %s AND peptide_rank <= %s;' % (self.minimum_peptides, self.maximum_peptides), con)
+        # df = pd.read_sql('SELECT SEC.condition_id, SEC.replicate_id, SEC.sec_id, QUANTIFICATION.protein_id, QUANTIFICATION.peptide_id, peptide_intensity FROM QUANTIFICATION INNER JOIN PROTEIN_META ON QUANTIFICATION.protein_id = PROTEIN_META.protein_id INNER JOIN PEPTIDE_META ON QUANTIFICATION.peptide_id = PEPTIDE_META.peptide_id INNER JOIN SEC ON QUANTIFICATION.RUN_ID = SEC.RUN_ID WHERE peptide_count >= %s AND peptide_rank <= %s;' % (self.minimum_peptides, self.maximum_peptides), con)
 
         con.close()
 
         return df
 
-    def read_detecting(self):
+    def read_queries(self):
+        # Read data
         con = sqlite3.connect(self.outfile)
-        df = pd.read_sql('SELECT FEATURE_SUPER.*, FEATURE_SUPER.feature_id || "_" || FEATURE_SUPER.prey_id || "_" || FEATURE_SUPER.bait_id AS pyprophet_feature_id, ROUND(FEATURE_META.RT) AS sec_group FROM FEATURE_SUPER INNER JOIN FEATURE_TRAINING ON FEATURE_SUPER.feature_id = FEATURE_TRAINING.feature_id AND FEATURE_SUPER.prey_id = FEATURE_TRAINING.prey_id INNER JOIN FEATURE_META ON FEATURE_SUPER.FEATURE_ID = FEATURE_META.FEATURE_ID;', con)
+        df = pd.read_sql('SELECT * FROM QUERY;', con)
         con.close()
 
-        df['interaction_id'] = df.apply(lambda x: "_".join(sorted([x['bait_id'], x['prey_id']])), axis=1)
+        return df
 
-        df.loc[df['sec_group'] >= 40,'sec_group'] = 40
-        df['sec_group'] = np.round(df['sec_group'] / 5.0)
+    def read_sec_boundaries(self):
+        # Read data
+        con = sqlite3.connect(self.outfile)
+        df = pd.read_sql('SELECT min(sec_id) AS min_sec_id, max(sec_id) AS max_sec_id FROM SEC;', con)
+        con.close()
+
+        return pd.DataFrame({'sec_id': range(df['min_sec_id'].values[0], df['max_sec_id'].values[0]+1)})
+
+    def compare(self):
+        # Obtain experimental design
+        exp_design = self.chromatograms[['condition_id','replicate_id','protein_id']].drop_duplicates().sort_values(['condition_id','replicate_id','protein_id'])
+        comparisons = pd.merge(pd.merge(self.queries, exp_design, left_on='bait_id', right_on='protein_id')[['bait_id','prey_id','decoy']], exp_design, left_on='prey_id', right_on='protein_id')[['condition_id','replicate_id','bait_id','prey_id','decoy']]
+
+
+        comparisons_chunks = split(comparisons, self.chunck_size)
+        click.echo("Info: Total number of queries: %s. Split into %s chuncks." % (comparisons.shape[0], len(comparisons_chunks)))
+
+        chunck_data = []
+        for chunck_it, comparison_chunk in enumerate(comparisons_chunks):
+            click.echo("Info: Processing chunck %s out of %s chuncks." % (chunck_it+1, len(comparisons_chunks)))
+            # Generate long list
+            baits = pd.merge(comparison_chunk, self.chromatograms, left_on=['condition_id','replicate_id','bait_id'], right_on=['condition_id','replicate_id','protein_id']).drop(columns=['protein_id'])
+            baits['is_bait'] = True
+
+            preys = pd.merge(comparison_chunk, self.chromatograms, left_on=['condition_id','replicate_id','prey_id'], right_on=['condition_id','replicate_id','protein_id']).drop(columns=['protein_id'])
+            preys['is_bait'] = False
+
+            data_pd = pd.concat([baits, preys]).reset_index()
+
+            # Workaround for parallelization
+            data_pd['minimum_overlap'] = self.minimum_overlap
+            data_pd['lower_sec_boundaries'] = self.sec_boundaries['sec_id'].min()
+            data_pd['upper_sec_boundaries'] = self.sec_boundaries['sec_id'].max()
+
+            # Single threaded implementation
+            # data = data_pd.groupby(['condition_id','replicate_id','bait_id','prey_id','decoy']).apply(information)
+            # Multi threaded implementation
+            data = applyParallel(data_pd.groupby(['condition_id','replicate_id','bait_id','prey_id','decoy']), information)
+
+            # Require passing of mass ratio and SEC lag thresholds
+            data = data.dropna()
+            chunck_data.append(data)
+
+        return pd.concat(chunck_data)
+
+class significance:
+    def __init__(self, outfile, minimum_mass_ratio, maximum_sec_lag):
+        self.outfile = outfile
+        self.minimum_mass_ratio = minimum_mass_ratio
+        self.maximum_sec_lag = maximum_sec_lag
+
+        self.features = self.read_features()
+        self.plot_distributions()
+        self.df = self.test_pvalue()
+
+    def read_features(self):
+        # Read data
+        con = sqlite3.connect(self.outfile)
+        df = pd.read_sql('SELECT * FROM FEATURE WHERE mass_ratio >= %s AND sec_lag <= %s;' % (self.minimum_mass_ratio, self.maximum_sec_lag), con)
+        con.close()
 
         return df
 
-    def learn(self, learning_data):
-        (result, scorer, weights) = PyProphet(self.xeval_fraction, self.xeval_num_iter, self.ss_initial_fdr, self.ss_iteration_fdr, self.ss_num_iter, self.group_id, self.parametric, self.pfdr, self.pi0_lambda, self.pi0_method, self.pi0_smooth_df, self.pi0_smooth_log_pi0, self.lfdr_truncate, self.lfdr_monotone, self.lfdr_transformation, self.lfdr_adj, self.lfdr_eps, False, self.threads, self.test).learn_and_apply(learning_data)
-        self.plot(result, scorer.pi0, "learn")
-        self.plot_scores(result.scored_tables, "learn")
+    def test_pvalue(self):
+        def find_closest(x, df):
+            return df.iloc[(df['mi']-x).abs().argsort()[:1]][['pvalue','qvalue']]
 
-        return result, weights
+        target_features = self.features[self.features['decoy'] == False]
+        decoy_features = self.features[self.features['decoy'] == True]
+        self.features['pvalue'] = pemp(self.features['mi'].values, decoy_features['mi'].values)
+        self.features['qvalue'] = qvalue(self.features['pvalue'].values, pi0est(self.features['pvalue'].values)['pi0'])
 
-    def apply(self, detecting_data):
-        (result, scorer, weights) = PyProphet(self.xeval_fraction, self.xeval_num_iter, self.ss_initial_fdr, self.ss_iteration_fdr, self.ss_num_iter, self.group_id, self.parametric, self.pfdr, self.pi0_lambda, self.pi0_method, self.pi0_smooth_df, self.pi0_smooth_log_pi0, self.lfdr_truncate, self.lfdr_monotone, self.lfdr_transformation, self.lfdr_adj, self.lfdr_eps, False, self.threads, self.test).apply_weights(detecting_data, self.weights)
-        self.plot(result, scorer.pi0, str(int(detecting_data['sec_group'].values[0])))
+        return self.features
 
-        df = result.scored_tables[['feature_id', 'bait_id', 'prey_id', 'interaction_id', 'decoy', 'pep', 'q_value']]
-        df.columns = ['feature_id', 'bait_id', 'prey_id', 'interaction_id', 'decoy', 'pep', 'qvalue']
-        return df
-
-    def plot(self, result, pi0, tag):
-        cutoffs = result.final_statistics["cutoff"].values
-        svalues = result.final_statistics["svalue"].values
-        qvalues = result.final_statistics["qvalue"].values
-
-        pvalues = result.scored_tables.loc[(result.scored_tables.peak_group_rank == 1) & (result.scored_tables.decoy == 0)]["p_value"].values
-        top_targets = result.scored_tables.loc[(result.scored_tables.peak_group_rank == 1) & (result.scored_tables.decoy == 0)]["d_score"].values
-        top_decoys = result.scored_tables.loc[(result.scored_tables.peak_group_rank == 1) & (result.scored_tables.decoy == 1)]["d_score"].values
-
-        save_report(os.path.splitext(os.path.basename(self.outfile))[0]+"_"+tag+".pdf", tag, top_decoys, top_targets, cutoffs, svalues, qvalues, pvalues, pi0)
-
-    def plot_scores(self, df, tag):
-
+    def plot_distributions(self):
         if plt is None:
             raise ImportError("Error: The matplotlib package is required to create a report.")
 
-        out = os.path.splitext(os.path.basename(self.outfile))[0]+"_"+tag+"_scores.pdf"
+        out = os.path.splitext(os.path.basename(self.outfile))[0]+"_statistics.pdf"
 
-        score_columns = ["d_score"] + [c for c in df.columns if c.startswith("main_var_")] + [c for c in df.columns if c.startswith("var_")]
+        df = self.features
+        score_columns = ["mic","tic","mi","sec_lag","mass_ratio"]
 
         with PdfPages(out) as pdf:
             for idx in score_columns:
@@ -186,7 +274,7 @@ class pyprophet:
                     plt.subplot(211)
                     plt.title(idx)
                     plt.xlabel(idx)
-                    plt.ylabel("# of groups")
+                    plt.ylabel("# of interactions")
                     plt.hist(
                         [top_targets, top_decoys], 20, color=['g', 'r'], label=['target', 'decoy'], histtype='bar')
                     plt.legend(loc=2)
@@ -200,57 +288,3 @@ class pyprophet:
 
                     pdf.savefig()
                     plt.close()
-
-class infer:
-    def __init__(self, outfile):
-        self.outfile = outfile
-
-        peptide_data = self.read()
-
-        self.directional, self.interactions = self.infer_features(peptide_data)
-
-    def read(self):
-        con = sqlite3.connect(self.outfile)
-        df = pd.read_sql('SELECT DISTINCT condition_id, replicate_id, FEATURE_SUPER.bait_id AS bait_id, FEATURE_SUPER.prey_id AS prey_id, FEATURE_SCORED.interaction_id AS interaction_id, FEATURE_SUPER.feature_id AS feature_id, interaction_confidence AS prior, FEATURE_SCORED.pep FROM FEATURE_SUPER INNER JOIN FEATURE_META ON FEATURE_SUPER.feature_id = FEATURE_META.feature_id INNER JOIN FEATURE_SCORED ON FEATURE_SUPER.feature_id = FEATURE_SCORED.feature_id AND FEATURE_SUPER.prey_id = FEATURE_SCORED.prey_id INNER JOIN FEATURE_MW ON FEATURE_SUPER.feature_id = FEATURE_MW.feature_id AND FEATURE_SUPER.prey_id = FEATURE_MW.prey_id INNER JOIN (SELECT DISTINCT * FROM NETWORK) AS NETWORK ON FEATURE_SUPER.bait_id = NETWORK.bait_id AND FEATURE_SUPER.prey_id = NETWORK.prey_id WHERE FEATURE_SUPER.decoy == 0 AND FEATURE_MW.complex == 1;', con)
-        con.close()
-
-        return df
-
-    def compute_model_fdr(self, data):
-        # compute model based FDR estimates from posterior error probabilities
-        order = np.argsort(data)
-
-        ranks = np.zeros(data.shape[0], dtype=np.int)
-        fdr = np.zeros(data.shape[0])
-
-        # rank data with with maximum ranks for ties
-        ranks[order] = rankdata(data[order], method='max')
-
-        # compute FDR/q-value by using cumulative sum of maximum rank for ties
-        fdr[order] = data[order].cumsum()[ranks[order]-1] / ranks[order]
-
-        return fdr
-
-    def interaction_inference(self, protein_data):
-        pf_score = ((1.0-protein_data['pep']).prod()*(1.0-protein_data['bait_pep']).prod()*protein_data['prior'].mean()) / ((1.0-protein_data['pep']).prod()*(1.0-protein_data['bait_pep']).prod()*protein_data['prior'].mean() + protein_data['pep'].prod()*protein_data['bait_pep'].prod()*((1-protein_data['prior'].mean())/3) + (1.0-protein_data['pep']).prod()*protein_data['bait_pep'].prod()*((1-protein_data['prior'].mean())/3) + protein_data['pep'].prod()*(1.0-protein_data['bait_pep']).prod()*((1-protein_data['prior'].mean())/3))
-
-        return(pd.Series({'pep': 1.0-pf_score}))
-
-
-    def infer_features(self, protein_data):
-        # merge baits and preys
-        bait_proteins = protein_data.ix[(protein_data.bait_id == protein_data.prey_id)][["feature_id","bait_id","pep"]]
-        bait_proteins.columns = ["feature_id","bait_id","bait_pep"]
-        protein_bait_data = pd.merge(protein_data.ix[(protein_data.bait_id != protein_data.prey_id)], bait_proteins, on=["feature_id","bait_id"])
-
-        # feature level
-        feature_data = protein_bait_data.groupby(["condition_id", "replicate_id", "feature_id", "interaction_id", "bait_id", "prey_id"]).apply(self.interaction_inference).reset_index()
-
-        # interaction level
-        interaction_data = protein_bait_data.groupby(["condition_id", "interaction_id"]).apply(self.interaction_inference).reset_index()
-
-        # add q-value
-        feature_data['qvalue'] = self.compute_model_fdr(feature_data['pep'])
-        interaction_data['qvalue'] = self.compute_model_fdr(interaction_data['pep'])
-
-        return feature_data, interaction_data

@@ -12,172 +12,84 @@ from scipy.stats import mannwhitneyu, ttest_ind
 
 from pyprophet.stats import pi0est, qvalue
 
-class align:
-    def __init__(self, outfile, feature_pep, interaction_pep, apex_delta, tail_delta):
-        self.outfile = outfile
-        self.feature_pep = feature_pep
-        self.interaction_pep = interaction_pep
-        self.apex_delta = apex_delta
-        self.tail_delta = tail_delta
-
-        self.df = self.read()
-
-    def read(self):
-        con = sqlite3.connect(self.outfile)
-
-        df_interaction_prey = pd.read_sql('''
-SELECT DISTINCT FEATURE_SUPER.feature_id,
-                FEATURE_SUPER.prey_id,
-                FEATURE_DETECTED.interaction_id
-FROM FEATURE_SUPER
-INNER JOIN FEATURE_META ON FEATURE_SUPER.feature_id = FEATURE_META.feature_id
-INNER JOIN
-  (SELECT DISTINCT FEATURE_SUPER.bait_id,
-                   FEATURE_SUPER.prey_id,
-                   FEATURE_INTERACTION.interaction_id,
-                   FEATURE_META.RT,
-                   FEATURE_META.leftWidth,
-                   FEATURE_META.rightWidth
-   FROM FEATURE_SUPER
-   INNER JOIN FEATURE_META ON FEATURE_SUPER.feature_id = FEATURE_META.feature_id
-   INNER JOIN FEATURE_DIRECTIONAL ON FEATURE_SUPER.feature_id = FEATURE_DIRECTIONAL.feature_id
-   AND FEATURE_SUPER.prey_id = FEATURE_DIRECTIONAL.prey_id
-   INNER JOIN
-     (SELECT interaction_id,
-             min(pep) AS pep
-      FROM FEATURE_INTERACTION
-      GROUP BY interaction_id) AS FEATURE_INTERACTION ON FEATURE_DIRECTIONAL.interaction_id = FEATURE_INTERACTION.interaction_id
-   WHERE FEATURE_DIRECTIONAL.pep < %s
-     AND FEATURE_INTERACTION.pep < %s) AS FEATURE_DETECTED ON FEATURE_SUPER.bait_id = FEATURE_DETECTED.bait_id
-AND FEATURE_SUPER.prey_id = FEATURE_DETECTED.prey_id
-WHERE ABS(FEATURE_META.RT - FEATURE_DETECTED.RT) < %s
-  AND ABS(FEATURE_META.leftWidth - FEATURE_DETECTED.leftWidth) < %s
-  AND ABS(FEATURE_META.rightWidth - FEATURE_DETECTED.rightWidth) < %s;
-''' % (self.feature_pep, self.interaction_pep, self.apex_delta, self.tail_delta, self.tail_delta), con)
-
-        df_interaction_bait = pd.read_sql('''
-SELECT DISTINCT FEATURE_SUPER.feature_id,
-                FEATURE_SUPER.prey_id,
-                FEATURE_SUPER.bait_id || "_" || FEATURE_SUPER.prey_id AS interaction_id
-FROM FEATURE_SUPER
-INNER JOIN FEATURE_META ON FEATURE_SUPER.feature_id = FEATURE_META.feature_id
-INNER JOIN FEATURE_MW ON FEATURE_SUPER.feature_id = FEATURE_MW.feature_id
-AND FEATURE_SUPER.prey_id = FEATURE_MW.prey_id
-INNER JOIN
-  (SELECT DISTINCT FEATURE_SUPER.bait_id,
-                   FEATURE_SUPER.prey_id,
-                   FEATURE_META.RT,
-                   FEATURE_META.leftWidth,
-                   FEATURE_META.rightWidth
-   FROM FEATURE_SUPER
-   INNER JOIN FEATURE_META ON FEATURE_SUPER.feature_id = FEATURE_META.feature_id
-   INNER JOIN FEATURE_SCORED ON FEATURE_SUPER.feature_id = FEATURE_SCORED.feature_id
-   AND FEATURE_SUPER.prey_id = FEATURE_SCORED.prey_id
-   WHERE FEATURE_SCORED.pep < %s) AS FEATURE_DETECTED ON FEATURE_SUPER.bait_id = FEATURE_DETECTED.bait_id
-AND FEATURE_SUPER.prey_id = FEATURE_DETECTED.prey_id
-WHERE ABS(FEATURE_META.RT - FEATURE_DETECTED.RT) < %s
-  AND ABS(FEATURE_META.leftWidth - FEATURE_DETECTED.leftWidth) < %s
-  AND ABS(FEATURE_META.rightWidth - FEATURE_DETECTED.rightWidth) < %s
-  AND FEATURE_SUPER.bait_id == FEATURE_SUPER.prey_id
-  AND complex == 1;
-''' % (self.feature_pep, self.apex_delta, self.tail_delta, self.tail_delta), con)
-
-        df_monomer = pd.read_sql('''
-SELECT DISTINCT FEATURE_SUPER.feature_id,
-                FEATURE_SUPER.prey_id,
-                FEATURE_SUPER.bait_id || "_" || FEATURE_SUPER.prey_id AS interaction_id
-FROM FEATURE_SUPER
-INNER JOIN FEATURE_META ON FEATURE_SUPER.feature_id = FEATURE_META.feature_id
-INNER JOIN FEATURE_MW ON FEATURE_SUPER.feature_id = FEATURE_MW.feature_id
-AND FEATURE_SUPER.prey_id = FEATURE_MW.prey_id
-INNER JOIN
-  (SELECT DISTINCT FEATURE_SUPER.bait_id,
-                   FEATURE_SUPER.prey_id,
-                   FEATURE_META.RT,
-                   FEATURE_META.leftWidth,
-                   FEATURE_META.rightWidth
-   FROM FEATURE_SUPER
-   INNER JOIN FEATURE_META ON FEATURE_SUPER.feature_id = FEATURE_META.feature_id
-   INNER JOIN FEATURE_SCORED ON FEATURE_SUPER.feature_id = FEATURE_SCORED.feature_id
-   AND FEATURE_SUPER.prey_id = FEATURE_SCORED.prey_id
-   WHERE FEATURE_SCORED.pep < %s) AS FEATURE_DETECTED ON FEATURE_SUPER.bait_id = FEATURE_DETECTED.bait_id
-AND FEATURE_SUPER.prey_id = FEATURE_DETECTED.prey_id
-WHERE ABS(FEATURE_META.RT - FEATURE_DETECTED.RT) < %s
-  AND ABS(FEATURE_META.leftWidth - FEATURE_DETECTED.leftWidth) < %s
-  AND ABS(FEATURE_META.rightWidth - FEATURE_DETECTED.rightWidth) < %s
-  AND FEATURE_SUPER.bait_id == FEATURE_SUPER.prey_id
-  AND monomer == 1;
-''' % (self.feature_pep, self.apex_delta, self.tail_delta, self.tail_delta), con)
-
-        con.close()
-
-        df = pd.concat([df_monomer, df_interaction_bait, df_interaction_prey])
-
-        return df
 
 class quantitative_matrix:
     def __init__(self, outfile):
         self.outfile = outfile
 
-        self.complex, self.monomer = self.read()
+        self.interactions, self.chromatograms = self.read()
+        self.complex = self.quantify()
 
     def read(self):
         con = sqlite3.connect(self.outfile)
 
-        monomer_data = pd.read_sql('SELECT feature_meta.condition_id, feature_meta.replicate_id, feature.feature_id, feature.bait_id, feature.prey_id, feature.prey_peptide_id, feature.prey_peptide_intensity, feature.prey_peptide_total_intensity FROM FEATURE INNER JOIN FEATURE_META ON FEATURE.FEATURE_ID = FEATURE_META.FEATURE_ID INNER JOIN FEATURE_MW ON FEATURE.FEATURE_ID = FEATURE_MW.FEATURE_ID AND FEATURE.PREY_ID = FEATURE_MW.PREY_ID INNER JOIN FEATURE_ALIGNED ON FEATURE.FEATURE_ID = FEATURE_ALIGNED.FEATURE_ID AND FEATURE.PREY_ID = FEATURE_ALIGNED.PREY_ID WHERE FEATURE_MW.monomer == 1 AND feature.bait_id == feature.prey_id AND FEATURE.decoy == 0;' , con)
-        monomer_data['interaction_id'] = monomer_data.apply(lambda x: "_".join(sorted([x['bait_id'], x['prey_id']])), axis=1)
+        interactions = pd.read_sql('SELECT * FROM FEATURE_SCORED WHERE pvalue < 0.01 AND bait_id != prey_id;' , con)
 
-
-        complex_data = pd.read_sql('SELECT feature_meta.condition_id, feature_meta.replicate_id, feature.feature_id, feature.bait_id, feature.prey_id, feature.prey_peptide_id, feature.prey_peptide_intensity, feature.prey_peptide_total_intensity FROM FEATURE INNER JOIN FEATURE_META ON FEATURE.FEATURE_ID = FEATURE_META.FEATURE_ID INNER JOIN FEATURE_MW ON FEATURE.FEATURE_ID = FEATURE_MW.FEATURE_ID AND FEATURE.PREY_ID = FEATURE_MW.PREY_ID INNER JOIN FEATURE_ALIGNED ON FEATURE.FEATURE_ID = FEATURE_ALIGNED.FEATURE_ID AND FEATURE.PREY_ID = FEATURE_ALIGNED.PREY_ID WHERE FEATURE_MW.complex == 1 AND FEATURE.decoy == 0;' , con)
-        complex_data['interaction_id'] = complex_data.apply(lambda x: "_".join(sorted([x['bait_id'], x['prey_id']])), axis=1)
+        chromatograms = pd.read_sql('SELECT condition_id, replicate_id, sec_id, QUANTIFICATION.protein_id, QUANTIFICATION.peptide_id, peptide_intensity FROM QUANTIFICATION INNER JOIN PROTEIN_META ON QUANTIFICATION.protein_id = PROTEIN_META.protein_id INNER JOIN PEPTIDE_META ON QUANTIFICATION.peptide_id = PEPTIDE_META.peptide_id INNER JOIN SEC ON QUANTIFICATION.RUN_ID = SEC.RUN_ID WHERE peptide_rank <= 6;', con)
 
         con.close()
 
-        ## Monomer
-        # Summarize individual features for monomers
-        monomer_data = monomer_data.groupby(['condition_id','replicate_id','interaction_id','bait_id','prey_id','prey_peptide_id']).apply(lambda x: pd.Series({'prey_peptide_intensity': np.sum(x['prey_peptide_intensity']), 'prey_peptide_total_intensity': np.mean(x['prey_peptide_total_intensity'])})).reset_index(level=['condition_id','replicate_id','interaction_id','bait_id','prey_id', 'prey_peptide_id'])
-        monomer_data['prey_peptide_intensity_fraction'] = monomer_data['prey_peptide_intensity'] / monomer_data['prey_peptide_total_intensity']
+        return interactions, chromatograms
 
-        # Summarize peptides
-        monomer_data = monomer_data.groupby(['condition_id','replicate_id','interaction_id','bait_id','prey_id']).apply(lambda x: pd.Series({'monomer_intensity': np.log(np.median(x['prey_peptide_intensity'])), 'monomer_fraction': np.median(x['prey_peptide_intensity_fraction'])})).reset_index(level=['condition_id','replicate_id','interaction_id','bait_id','prey_id'])
+    def quantify(self):
+        def summarize(df):
+            def aggregate(x):
+                peptide_ix = (x['peptide_intensity']-x['peptide_intensity'].median()).abs().argsort()[:1]
+                return pd.DataFrame({'peptide_intensity': x.iloc[peptide_ix]['peptide_intensity'], 'total_peptide_intensity': x.iloc[peptide_ix]['total_peptide_intensity']})
 
-        ## Prey
-        # Summarize individual features for preys
-        prey_complex_data = complex_data[complex_data['bait_id'] != complex_data['prey_id']].groupby(['condition_id','replicate_id','interaction_id','bait_id','prey_id','prey_peptide_id']).apply(lambda x: pd.Series({'prey_peptide_intensity': np.sum(x['prey_peptide_intensity']), 'prey_peptide_total_intensity': np.mean(x['prey_peptide_total_intensity'])})).reset_index(level=['condition_id','replicate_id','interaction_id','bait_id','prey_id', 'prey_peptide_id'])
-        prey_complex_data['prey_peptide_intensity_fraction'] = prey_complex_data['prey_peptide_intensity'] / prey_complex_data['prey_peptide_total_intensity']
+            # Summarize total peptide intensities
+            peptide_total = df.groupby(['is_bait','peptide_id'])['peptide_intensity'].sum().reset_index()
+            peptide_total.columns = ['is_bait','peptide_id','total_peptide_intensity']
 
-        # Summarize peptides
-        prey_complex_data = prey_complex_data.groupby(['condition_id','replicate_id','interaction_id','bait_id','prey_id']).apply(lambda x: pd.Series({'prey_intensity': np.log(np.median(x['prey_peptide_intensity'])), 'prey_fraction': np.median(x['prey_peptide_intensity_fraction'])})).reset_index(level=['condition_id','replicate_id','interaction_id','bait_id','prey_id'])
+            # Find SEC intersections
+            bait_sec = df[df['is_bait']]['sec_id'].unique()
+            prey_sec = df[~df['is_bait']]['sec_id'].unique()
+            intersection = pd.DataFrame({'sec_id': list(set(bait_sec) & set(prey_sec))})
+            
+            # There needs to be at least one fraction where peptides from both proteins are measured.
+            if intersection.shape[0] > 0:
+                # Summarize intersection peptide intensities
+                df_is = pd.merge(df, intersection, on='sec_id')
+                peptide_is = df_is.groupby(['peptide_id'])['peptide_intensity'].sum().reset_index()
+                peptide_is.columns = ['peptide_id','peptide_intensity']
 
-        ## Bait
-        # Prepare individual features for baits and keep relationship to preys
-        bait_complex_data = complex_data[complex_data['bait_id'] == complex_data['prey_id']].drop(['prey_id','interaction_id'], axis=1)
+                peptide = pd.merge(peptide_is, peptide_total, on='peptide_id')
 
-        bait_prey_association = complex_data[complex_data['bait_id'] != complex_data['prey_id']][['feature_id','prey_id']].drop_duplicates()
-        bait_complex_data = pd.merge(bait_complex_data, bait_prey_association, on='feature_id')
+                # At least three peptides are required for both interactors for quantification.
+                if peptide[peptide['is_bait']].shape[0] >= 3 and peptide[~peptide['is_bait']].shape[0] >= 3:
+                    # Select representative closest to median and aggregate
+                    peptide = peptide.groupby(['is_bait']).apply(aggregate).reset_index(level=['is_bait'])
 
-        # Summarize individual features for baits and keep relationship to preys
-        bait_complex_data = bait_complex_data.groupby(['condition_id','replicate_id','bait_id','prey_id','prey_peptide_id']).apply(lambda x: pd.Series({'prey_peptide_intensity': np.sum(x['prey_peptide_intensity']), 'prey_peptide_total_intensity': np.mean(x['prey_peptide_total_intensity'])})).reset_index(level=['condition_id','replicate_id','bait_id','prey_id', 'prey_peptide_id'])
-        bait_complex_data['prey_peptide_intensity_fraction'] = bait_complex_data['prey_peptide_intensity'] / bait_complex_data['prey_peptide_total_intensity']
+                    # Aggregate to protein level
+                    protein = pd.DataFrame({'bait_intensity': peptide[peptide['is_bait']]['peptide_intensity'].values, 'total_bait_intensity': peptide[peptide['is_bait']]['total_peptide_intensity'].values, 'fractional_bait_intensity': peptide[peptide['is_bait']]['peptide_intensity'].values / peptide[peptide['is_bait']]['total_peptide_intensity'].values, 'prey_intensity': peptide[~peptide['is_bait']]['peptide_intensity'].values, 'total_prey_intensity': peptide[~peptide['is_bait']]['total_peptide_intensity'].values, 'fractional_prey_intensity': peptide[~peptide['is_bait']]['peptide_intensity'].values / peptide[~peptide['is_bait']]['total_peptide_intensity'].values})
 
-        # Summarize peptides
-        bait_complex_data = bait_complex_data.groupby(['condition_id','replicate_id','bait_id','prey_id']).apply(lambda x: pd.Series({'bait_intensity': np.log(np.median(x['prey_peptide_intensity'])), 'bait_fraction': np.median(x['prey_peptide_intensity_fraction'])})).reset_index(level=['condition_id','replicate_id','bait_id','prey_id'])
+                    protein['complex_intensity_ratio'] = protein['prey_intensity'] / protein['bait_intensity']
+                    protein['complex_fraction_ratio'] = protein['fractional_prey_intensity'] / protein['fractional_bait_intensity']
 
-        ## Bait-Prey
-        # Merge bait and prey complex_data
-        merged_complex_data = pd.merge(bait_complex_data, prey_complex_data, on=['condition_id','replicate_id','bait_id','prey_id'])
-        merged_complex_data['complex_intensity_ratio'] = merged_complex_data['prey_intensity'] / merged_complex_data['bait_intensity']
-        merged_complex_data['complex_fraction_ratio'] = merged_complex_data['prey_fraction'] / merged_complex_data['bait_fraction']
+                    return protein
 
-        return merged_complex_data, monomer_data
+        interactions = self.interactions
+
+        # Generate long list
+        baits = pd.merge(interactions, self.chromatograms, left_on=['condition_id','replicate_id','bait_id'], right_on=['condition_id','replicate_id','protein_id']).drop(columns=['protein_id'])
+        baits['is_bait'] = True
+
+        preys = pd.merge(interactions, self.chromatograms, left_on=['condition_id','replicate_id','prey_id'], right_on=['condition_id','replicate_id','protein_id']).drop(columns=['protein_id'])
+        preys['is_bait'] = False
+
+        data = pd.concat([baits, preys]).reset_index()
+
+        data_agg = data.groupby(['condition_id','replicate_id','bait_id','prey_id']).apply(summarize).reset_index(level=['condition_id','replicate_id','bait_id','prey_id'])
+
+        return data_agg
 
 class quantitative_test:
     def __init__(self, outfile):
         self.outfile = outfile
-        self.levels = ['monomer_intensity','monomer_fraction','prey_intensity','prey_fraction','complex_intensity_ratio','complex_fraction_ratio']
+        self.levels = ['bait_intensity','total_bait_intensity','fractional_bait_intensity','prey_intensity','total_prey_intensity','fractional_prey_intensity','complex_intensity_ratio','complex_fraction_ratio']
         self.comparisons = self.contrast()
 
-        self.complex, self.monomer = self.read()
+        self.complex_qm = self.read()
 
         self.edge_directional = self.compare()
         self.edge_level, self.edge, self.node_level, self.node = self.integrate()
@@ -186,6 +98,9 @@ class quantitative_test:
         con = sqlite3.connect(self.outfile)
         conditions = pd.read_sql('SELECT DISTINCT condition_id FROM SEC;' , con)['condition_id'].values.tolist()
         con.close()
+
+        if len(conditions) < 2:
+            sys.exit("Error: Your experimental design is not appropriate. At least two conditions are necessary for quantification.")
 
         comparisons = []
         # prepare single-sample comparisons
@@ -202,19 +117,17 @@ class quantitative_test:
     def read(self):
         con = sqlite3.connect(self.outfile)
 
-        complex_data = pd.read_sql('SELECT * FROM COMPLEX_QM;' , con)
-
-        monomer_data = pd.read_sql('SELECT * FROM MONOMER_QM;' , con)
+        complex_qm = pd.read_sql('SELECT * FROM COMPLEX_QM;' , con)
 
         con.close()
 
-        return complex_data, monomer_data
+        return complex_qm
 
     def compare(self):
         dfs = []
         for level in self.levels:
             for comparison in self.comparisons:
-                for state in [self.complex, self.monomer]:
+                for state in [self.complex_qm]:
                     if level in state.columns:
                         df = self.test(state, level, comparison[0], comparison[1])
 
@@ -245,12 +158,12 @@ class quantitative_test:
         # compute number of replicates
         experimental_design = df[['condition_id','replicate_id']].drop_duplicates()
 
-        df_test = df.groupby(['bait_id','prey_id','interaction_id']).apply(lambda x: stat(x, experimental_design)).reset_index()#.dropna()
+        df_test = df.groupby(['bait_id','prey_id']).apply(lambda x: stat(x, experimental_design)).reset_index()#.dropna()
         df_test['condition_1'] = condition_1
         df_test['condition_2'] = condition_2
         df_test['level'] = level
 
-        return df_test[['condition_1','condition_2','level','bait_id','prey_id','interaction_id']+[c for c in df_test.columns if c.startswith("quantitative_")]+['pvalue']]
+        return df_test[['condition_1','condition_2','level','bait_id','prey_id']+[c for c in df_test.columns if c.startswith("quantitative_")]+['pvalue']]
 
     def integrate(self):
         def collapse(x):
@@ -261,8 +174,8 @@ class quantitative_test:
 
         df = self.edge_directional
 
-        df_edge_level = df.groupby(['condition_1', 'condition_2','interaction_id','level']).apply(collapse).reset_index()
-        df_edge = df.groupby(['condition_1', 'condition_2','interaction_id']).apply(collapse).reset_index()
+        df_edge_level = df.groupby(['condition_1', 'condition_2','level']).apply(collapse).reset_index()
+        df_edge = df.groupby(['condition_1', 'condition_2']).apply(collapse).reset_index()
 
         df_node_level = df.groupby(['condition_1', 'condition_2','level','bait_id']).apply(collapse).reset_index()
         df_node = df.groupby(['condition_1', 'condition_2','bait_id']).apply(collapse).reset_index()
