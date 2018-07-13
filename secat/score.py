@@ -9,22 +9,8 @@ import sys
 from joblib import Parallel, delayed
 import multiprocessing
 
-from minepy import cstats
 from pyitlib import discrete_random_variable as drv
 from sets import Set
-from pyprophet.stats import pemp, pi0est, qvalue
-
-try:
-    import matplotlib
-    matplotlib.use('Agg')
-    from matplotlib.backends.backend_pdf import PdfPages
-    import matplotlib.pyplot as plt
-except ImportError:
-    plt = None
-
-from scipy.stats import gaussian_kde
-from scipy.signal import correlate
-from numpy import linspace, concatenate, around
 
 def split(dfm, chunk_size):
     def index_marks(nrows, chunk_size):
@@ -38,26 +24,32 @@ def applyParallel(dfGrouped, func):
     return pd.concat(retLst)
 
 class monomer:
-    def __init__(self, outfile, complex_threshold_factor):
+    def __init__(self, outfile, monomer_threshold_factor, monomer_elution_width):
         self.outfile = outfile
-        self.complex_threshold_factor = complex_threshold_factor
+        self.monomer_threshold_factor = monomer_threshold_factor
+        self.monomer_elution_width = monomer_elution_width
         self.df = self.protein_thresholds()
 
     def protein_thresholds(self):
         def get_sec_ids(protein_meta, sec_meta):
-            return sec_meta.groupby(['condition_id','replicate_id']).apply(lambda x: x.ix[(x['sec_mw']-self.complex_threshold_factor*protein_meta['protein_mw'].values).abs().argsort()[:1]][['sec_id']]).reset_index(level=['condition_id','replicate_id'])
+            return sec_meta.groupby(['condition_id','replicate_id']).apply(lambda x: x.ix[(x['sec_mw']-self.monomer_threshold_factor*protein_meta['protein_mw'].values).abs().argsort()[:1]][['sec_id']]).reset_index(level=['condition_id','replicate_id'])
 
         con = sqlite3.connect(self.outfile)
         protein_mw = pd.read_sql('SELECT protein_id, protein_mw FROM PROTEIN;', con)
         sec_meta = pd.read_sql('SELECT DISTINCT condition_id, replicate_id, sec_id, sec_mw FROM SEC;', con)
         con.close()
 
+        # Compute expected SEC fraction
         protein_sec_thresholds = protein_mw.groupby(['protein_id','protein_mw']).apply(lambda x: get_sec_ids(x, sec_meta=sec_meta)).reset_index(level=['protein_id','protein_mw'])
+
+        # Correct for expected elution width of peak
+        protein_sec_thresholds['sec_id'] - np.round(self.monomer_elution_width / 2)
 
         return protein_sec_thresholds[['condition_id','replicate_id','protein_id','sec_id']]
 
-def information(df):
-    def longest_stretch(arr):
+def interaction(df):
+    def longest_intersection(arr):
+        # Compute longest continuous stretch
         n = len(arr)
         s = Set()
         ans=0
@@ -71,80 +63,137 @@ def information(df):
                 ans=max(ans, j-arr[i])
         return ans
 
-    def xcorr_lag(bait_peptides, prey_peptides, intersection):
-        bait_peptides = bait_peptides[intersection]
-        prey_peptides = prey_peptides[intersection]
+    def normalized_xcorr(a, b):
+        # Normalize matrices
+        a = (a - np.mean(a, axis=1, keepdims=True)) / (np.std(a, axis=1, keepdims=True))
+        b = (b - np.mean(b, axis=1, keepdims=True)) / (np.std(b, axis=1, keepdims=True))
 
-        bait_xcorr = correlate(np.repeat(np.nan_to_num(bait_peptides.values), bait_peptides.shape[0], axis=0), np.repeat(np.nan_to_num(bait_peptides.values), bait_peptides.shape[0], axis=0), mode='same')
-        prey_xcorr = correlate(np.repeat(np.nan_to_num(prey_peptides.values), prey_peptides.shape[0], axis=0), np.repeat(np.nan_to_num(prey_peptides.values), prey_peptides.shape[0], axis=0), mode='same')
-        bait_prey_xcorr = correlate(np.repeat(np.nan_to_num(bait_peptides.values), prey_peptides.shape[0], axis=0), np.repeat(np.nan_to_num(prey_peptides.values), bait_peptides.shape[0], axis=0), mode='same')
+        nxcorr = [] # normalized cross-correlation
+        lxcorr = [] # cross-correlation lag
 
-        bait_peak = np.median(np.array(intersection)[np.apply_along_axis(np.argmax, 1, bait_xcorr)])
-        prey_peak = np.median(np.array(intersection)[np.apply_along_axis(np.argmax, 1, prey_xcorr)])
-        bait_prey_peak = np.median(np.array(intersection)[np.apply_along_axis(np.argmax, 1, bait_prey_xcorr)])
+        if np.array_equal(a,b):
+            # Compare all rows of a against other rows of a but not against themselves
+            for i in range(0, len(a)):
+                for j in range(i+1, len(a)):
+                    nxcorr.append(np.correlate(a[i], a[j], 'valid')[0] / len(a[i])) # Normalize by length
+                    lxcorr.append(np.argmax(np.correlate(a[i], a[j], 'same'))) # Peak
+        else:
+            # Compare all rows of a against all rows of b
+            for i in range(0, len(a)):
+                for j in range(0, len(b)):
+                    nxcorr.append(np.correlate(a[i], b[j], 'valid')[0] / len(a[i])) # Normalize by length
+                    lxcorr.append(np.argmax(np.correlate(a[i], b[j], 'same'))) # Peak
 
-        return max([abs(bait_prey_peak-bait_peak), abs(bait_prey_peak-prey_peak)])
+        return np.array(nxcorr), np.array(lxcorr)        
+
+    def sec_xcorr(bm, pm):
+        # Compute SEC xcorr scores
+        bnx, blx = normalized_xcorr(bm, bm)
+        pnx, plx = normalized_xcorr(pm, pm)
+        bpnx, bplx = normalized_xcorr(bm, pm)
+
+        xcorr_shape = np.mean(bpnx)
+        xcorr_shift = max([abs(np.mean(bplx) - np.mean(blx)), abs(np.mean(bplx) - np.mean(plx))])
+
+        return xcorr_shape, xcorr_shift
+
+    def mass_similarity(bm, pm):
+        # Sum bait and prey peptides
+        bpmass = np.sum(bm, axis=1, keepdims=True)
+        ppmass = np.sum(pm, axis=1, keepdims=True)
+
+        # Compute mass ratio of bait and prey protein
+        mass_ratio = np.mean(bpmass) / np.mean(ppmass)
+        if mass_ratio > 1:
+            mass_ratio = 1 / mass_ratio
+
+        return mass_ratio
+
+    def snr(bm, pm):
+        # Compute SNR for bait, prey and bait-prey peptides
+        bpsnr = np.mean(bm, axis=1, keepdims=True) / np.std(bm, axis=1, keepdims=True)
+        ppsnr = np.mean(pm, axis=1, keepdims=True) / np.std(pm, axis=1, keepdims=True)
+
+        snr = np.mean(np.append(bpsnr, ppsnr)) / np.std(np.append(bpsnr, ppsnr))
+
+        return np.mean(bpsnr), np.mean(ppsnr), snr
+
+    def filter_snr(x):
+        return np.mean(x) / np.std(x)
 
     # Workaround for parallelization
     minimum_overlap = df['minimum_overlap'].min()
+    minimum_peptides = df['minimum_peptides'].min()
+    minimum_peptide_snr = df['minimum_peptide_snr'].min()
     sec_boundaries = pd.DataFrame({'sec_id': range(df['lower_sec_boundaries'].min(), df['upper_sec_boundaries'].max()+1)})
+
+    # Remove peptides below SNR threshold
+    df_snrt = df.groupby(['peptide_id'])['peptide_intensity'].apply(filter_snr).reset_index()
+    df_snrt.columns = ['peptide_id','peptide_snr']
+    df = pd.merge(df, df_snrt[df_snrt['peptide_snr'] >= minimum_peptide_snr], on='peptide_id')
 
     # Require minimum overlap
     intersection = list(set(df[df['is_bait']]['sec_id'].unique()) & set(df[~df['is_bait']]['sec_id'].unique()))
-    sec_overlap = longest_stretch(intersection)
+    longest_overlap = longest_intersection(intersection)
 
-    # Require minimum mass similarity
-    df_bait_mass_peptide = df[df['sec_id'].isin(intersection) & df['is_bait']].groupby('peptide_id')['peptide_intensity'].sum().reset_index(level='peptide_id')
-    df_prey_mass_peptide = df[df['sec_id'].isin(intersection) & ~df['is_bait']].groupby('peptide_id')['peptide_intensity'].sum().reset_index(level='peptide_id')
+    # Requre minimum peptides
+    num_bait_peptides = len(df[df['sec_id'].isin(intersection) & df['is_bait']]['peptide_id'].unique())
+    num_prey_peptides = len(df[df['sec_id'].isin(intersection) & ~df['is_bait']]['peptide_id'].unique())
 
-    mass_ratio = df_bait_mass_peptide['peptide_intensity'].median() / df_prey_mass_peptide['peptide_intensity'].median()
-
-    if mass_ratio > 1:
-        mass_ratio = 1 / mass_ratio
-
-    if sec_overlap >= minimum_overlap:
+    if longest_overlap >= minimum_overlap and num_bait_peptides >= minimum_peptides and num_prey_peptides >= minimum_peptides:
+        # Compute bait peptide matrix over intersection
         bait_sec_boundaries = sec_boundaries
         bait_sec_boundaries['peptide_id'] = df[df['is_bait']]['peptide_id'].unique()[0]
-        bait_peptides = pd.merge(df[df['is_bait']], bait_sec_boundaries, on=['peptide_id','sec_id'], how='outer').sort_values(['sec_id']).pivot(index='peptide_id', columns='sec_id', values='peptide_intensity')
+        bait_peptides = pd.merge(df[df['sec_id'].isin(intersection) & df['is_bait']], bait_sec_boundaries, on=['peptide_id','sec_id'], how='outer').sort_values(['sec_id']).pivot(index='peptide_id', columns='sec_id', values='peptide_intensity')
+        bm = np.nan_to_num(bait_peptides.values) # Replace missing values with zeros
 
+        # Compute prey peptide matrix over intersection
         prey_sec_boundaries = sec_boundaries
         prey_sec_boundaries['peptide_id'] = df[~df['is_bait']]['peptide_id'].unique()[0]
-        prey_peptides = pd.merge(df[~df['is_bait']], prey_sec_boundaries, on=['peptide_id','sec_id'], how='outer').sort_values(['sec_id']).pivot(index='peptide_id', columns='sec_id', values='peptide_intensity')
+        prey_peptides = pd.merge(df[df['sec_id'].isin(intersection) & ~df['is_bait']], prey_sec_boundaries, on=['peptide_id','sec_id'], how='outer').sort_values(['sec_id']).pivot(index='peptide_id', columns='sec_id', values='peptide_intensity')
+        pm = np.nan_to_num(prey_peptides.values) # Replace missing values with zeros
 
-        # MIC
-        stat = cstats(bait_peptides[intersection].values, prey_peptides[intersection].values, est="mic_e")
+        # Cross-correlation
+        xcorr_shape, xcorr_shift = sec_xcorr(bm, pm)
 
-        mic = stat[0].mean(axis=0).mean() # Axis 0: summary for prey peptides / Axis 1: summary for bait peptides
-        tic = stat[1].mean(axis=0).mean() # Axis 0: summary for prey peptides / Axis 1: summary for bait peptides
+        # Mutual information
+        mi = np.nanmean(drv.information_mutual(bm, pm, cartesian_product=True))
 
-        # MI
-        mi = np.nanmean(drv.information_mutual(bait_peptides[intersection], prey_peptides[intersection], cartesian_product=True))
+        # Mass similarity
+        mass_ratio = mass_similarity(bm, pm)
+
+        # SNR
+        bait_snr, prey_snr, bp_snr = snr(bm, pm)
 
         res = df[['condition_id','replicate_id','bait_id','prey_id','decoy']].drop_duplicates()
-        res['mic'] = mic
-        res['tic'] = tic
-        res['mi'] = mi
-        res['longest_stretch'] = longest_stretch(intersection)
-        res['sec_lag'] = xcorr_lag(bait_peptides, prey_peptides, intersection)
-        res['mass_ratio'] = mass_ratio
+        res['total_intersection'] = len(intersection)
+        res['longest_intersection'] = longest_overlap
+        res['main_var_xcorr_shape'] = xcorr_shape
+        res['var_xcorr_shift'] = xcorr_shift
+        res['var_mi'] = mi
+        res['var_mass_ratio'] = mass_ratio
+        res['var_snr'] = bp_snr
+
     else:
         res = df[['condition_id','replicate_id','bait_id','prey_id','decoy']].drop_duplicates()
-        res['mic'] = np.nan
-        res['tic'] = np.nan
-        res['mi'] = np.nan
-        res['longest_stretch'] = np.nan
-        res['sec_lag'] = np.nan
-        res['mass_ratio'] = np.nan
+        res['total_intersection'] = np.nan
+        res['longest_intersection'] = np.nan
+        res['main_var_xcorr_shape'] = np.nan
+        res['var_xcorr_shift'] = np.nan
+        res['var_mi'] = np.nan
+        res['var_mass_ratio'] = np.nan
+        res['var_snr'] = np.nan
 
     return(res)
 
 class scoring:
-    def __init__(self, outfile, chunck_size, minimum_peptides, maximum_peptides, minimum_overlap):
+    def __init__(self, outfile, chunck_size, minimum_peptides, maximum_peptides, minimum_overlap, minimum_peptide_snr):
         self.outfile = outfile
         self.chunck_size = chunck_size
         self.minimum_peptides = minimum_peptides
         self.maximum_peptides = maximum_peptides
         self.minimum_overlap = minimum_overlap
+        self.minimum_peptide_snr = minimum_peptide_snr
 
         self.chromatograms = self.read_chromatograms()
         self.queries = self.read_queries()
@@ -156,7 +205,6 @@ class scoring:
         # Read data
         con = sqlite3.connect(self.outfile)
         df = pd.read_sql('SELECT SEC.condition_id, SEC.replicate_id, SEC.sec_id, QUANTIFICATION.protein_id, QUANTIFICATION.peptide_id, peptide_intensity FROM QUANTIFICATION INNER JOIN PROTEIN_META ON QUANTIFICATION.protein_id = PROTEIN_META.protein_id INNER JOIN PEPTIDE_META ON QUANTIFICATION.peptide_id = PEPTIDE_META.peptide_id INNER JOIN SEC ON QUANTIFICATION.RUN_ID = SEC.RUN_ID INNER JOIN MONOMER ON QUANTIFICATION.protein_id = MONOMER.protein_id and SEC.condition_id = MONOMER.condition_id AND SEC.replicate_id = MONOMER.replicate_id WHERE SEC.sec_id < MONOMER.sec_id AND peptide_count >= %s AND peptide_rank <= %s;' % (self.minimum_peptides, self.maximum_peptides), con)
-        # df = pd.read_sql('SELECT SEC.condition_id, SEC.replicate_id, SEC.sec_id, QUANTIFICATION.protein_id, QUANTIFICATION.peptide_id, peptide_intensity FROM QUANTIFICATION INNER JOIN PROTEIN_META ON QUANTIFICATION.protein_id = PROTEIN_META.protein_id INNER JOIN PEPTIDE_META ON QUANTIFICATION.peptide_id = PEPTIDE_META.peptide_id INNER JOIN SEC ON QUANTIFICATION.RUN_ID = SEC.RUN_ID WHERE peptide_count >= %s AND peptide_rank <= %s;' % (self.minimum_peptides, self.maximum_peptides), con)
 
         con.close()
 
@@ -183,7 +231,7 @@ class scoring:
         exp_design = self.chromatograms[['condition_id','replicate_id','protein_id']].drop_duplicates().sort_values(['condition_id','replicate_id','protein_id'])
         comparisons = pd.merge(pd.merge(self.queries, exp_design, left_on='bait_id', right_on='protein_id')[['bait_id','prey_id','decoy']], exp_design, left_on='prey_id', right_on='protein_id')[['condition_id','replicate_id','bait_id','prey_id','decoy']]
 
-
+        # Split data into chunks for parallel processing
         comparisons_chunks = split(comparisons, self.chunck_size)
         click.echo("Info: Total number of queries: %s. Split into %s chuncks." % (comparisons.shape[0], len(comparisons_chunks)))
 
@@ -201,90 +249,18 @@ class scoring:
 
             # Workaround for parallelization
             data_pd['minimum_overlap'] = self.minimum_overlap
+            data_pd['minimum_peptides'] = self.minimum_peptides
+            data_pd['minimum_peptide_snr'] = self.minimum_peptide_snr
             data_pd['lower_sec_boundaries'] = self.sec_boundaries['sec_id'].min()
             data_pd['upper_sec_boundaries'] = self.sec_boundaries['sec_id'].max()
 
             # Single threaded implementation
-            # data = data_pd.groupby(['condition_id','replicate_id','bait_id','prey_id','decoy']).apply(information)
+            # data = data_pd.groupby(['condition_id','replicate_id','bait_id','prey_id','decoy']).apply(interaction)
             # Multi threaded implementation
-            data = applyParallel(data_pd.groupby(['condition_id','replicate_id','bait_id','prey_id','decoy']), information)
+            data = applyParallel(data_pd.groupby(['condition_id','replicate_id','bait_id','prey_id','decoy']), interaction)
 
             # Require passing of mass ratio and SEC lag thresholds
             data = data.dropna()
             chunck_data.append(data)
 
         return pd.concat(chunck_data)
-
-class significance:
-    def __init__(self, outfile, minimum_mass_ratio, maximum_sec_lag):
-        self.outfile = outfile
-        self.minimum_mass_ratio = minimum_mass_ratio
-        self.maximum_sec_lag = maximum_sec_lag
-
-        self.features = self.read_features()
-        self.plot_distributions()
-        self.df = self.test_pvalue()
-
-    def read_features(self):
-        # Read data
-        con = sqlite3.connect(self.outfile)
-        df = pd.read_sql('SELECT * FROM FEATURE WHERE mass_ratio >= %s AND sec_lag <= %s;' % (self.minimum_mass_ratio, self.maximum_sec_lag), con)
-        con.close()
-
-        return df
-
-    def test_pvalue(self):
-        def find_closest(x, df):
-            return df.iloc[(df['mi']-x).abs().argsort()[:1]][['pvalue','qvalue']]
-
-        target_features = self.features[self.features['decoy'] == False]
-        decoy_features = self.features[self.features['decoy'] == True]
-        self.features['pvalue'] = pemp(self.features['mi'].values, decoy_features['mi'].values)
-        self.features['qvalue'] = qvalue(self.features['pvalue'].values, pi0est(self.features['pvalue'].values)['pi0'])
-
-        return self.features
-
-    def plot_distributions(self):
-        if plt is None:
-            raise ImportError("Error: The matplotlib package is required to create a report.")
-
-        out = os.path.splitext(os.path.basename(self.outfile))[0]+"_statistics.pdf"
-
-        df = self.features
-        score_columns = ["mic","tic","mi","sec_lag","mass_ratio"]
-
-        with PdfPages(out) as pdf:
-            for idx in score_columns:
-                top_targets = df[df["decoy"] == 0][idx]
-                top_decoys = df[df["decoy"] == 1][idx]
-
-                if not (top_targets.isnull().values.any() or top_decoys.isnull().values.any()):
-                    tdensity = gaussian_kde(top_targets)
-                    tdensity.covariance_factor = lambda: .25
-                    tdensity._compute_covariance()
-                    ddensity = gaussian_kde(top_decoys)
-                    ddensity.covariance_factor = lambda: .25
-                    ddensity._compute_covariance()
-                    xs = linspace(min(concatenate((top_targets, top_decoys))), max(
-                        concatenate((top_targets, top_decoys))), 200)
-
-                    plt.figure(figsize=(10, 10))
-                    plt.subplots_adjust(hspace=.5)
-
-                    plt.subplot(211)
-                    plt.title(idx)
-                    plt.xlabel(idx)
-                    plt.ylabel("# of interactions")
-                    plt.hist(
-                        [top_targets, top_decoys], 20, color=['g', 'r'], label=['target', 'decoy'], histtype='bar')
-                    plt.legend(loc=2)
-
-                    plt.subplot(212)
-                    plt.xlabel(idx)
-                    plt.ylabel("density")
-                    plt.plot(xs, tdensity(xs), color='g', label='target')
-                    plt.plot(xs, ddensity(xs), color='r', label='decoy')
-                    plt.legend(loc=2)
-
-                    pdf.savefig()
-                    plt.close()

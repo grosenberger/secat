@@ -100,7 +100,7 @@ WHERE peptide_rank <= %s;
     def read_interactions(self):
         con = sqlite3.connect(self.infile)
         df = pd.read_sql('''
-SELECT DISTINCT bait_id || "_" || prey_id AS interaction_id FROM FEATURE_SCORED WHERE bait_id != prey_id AND qvalue < %s;
+SELECT DISTINCT bait_id || "_" || prey_id AS interaction_id FROM FEATURE_SCORED WHERE bait_id != prey_id AND decoy=1 AND qvalue < %s;
 ''' % (self.interaction_qvalue), con)
         con.close()
 
@@ -147,7 +147,7 @@ SELECT DISTINCT bait_id FROM NODE WHERE qvalue < %s;
 
                             axarr.plot(points['sec_id'], points['peptide_intensity'], color=protein_color)
                 axarr.legend([Line2D([0], [0], color='red'), Line2D([0], [0], color='black')], [bp_pair['bait_id'], bp_pair['prey_id']])
-                axarr.set_title(tag + ": " + str(np.around(feature['decoy'].values[0], 5)) + ": " + str(np.around(feature['qvalue'].values[0], 5)) + ": " + str(np.around(feature['sec_lag'].values[0], 5)), loc = 'center', pad = -15)
+                axarr.set_title(tag + ": " + str(np.around(feature['decoy'].values[0], 5)) + ": " + str(np.around(feature['qvalue'].values[0], 5)), loc = 'center', pad = -15)
                 axarr.axvline(x=feature['bait_monomer_sec_id'].values, color='red', alpha=0.5)
                 axarr.axvline(x=feature['prey_monomer_sec_id'].values, color='black', alpha=0.5)
 

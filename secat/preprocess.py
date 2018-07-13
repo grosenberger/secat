@@ -113,10 +113,9 @@ class stringdb:
         return df
 
 class net:
-    def __init__(self, netfile, uniprot, min_interaction_confidence):
+    def __init__(self, netfile, uniprot):
         self.formats = ['stringdb','mitab']
         self.format = self.identify(netfile)
-        self.min_interaction_confidence = min_interaction_confidence
 
         if self.format == 'stringdb':
             network = stringdb(netfile, uniprot).df
@@ -125,8 +124,7 @@ class net:
 
         # Ensure that interactions are unique
         df = self.unique_interactions(network)
-        # Filter for minimum interaction confidence
-        df = df[df['interaction_confidence'] >= min_interaction_confidence]
+
         # Remove interactions between same baits and preys
         df = df[df['bait_id'] != df['prey_id']]
 
@@ -374,7 +372,8 @@ class meta:
         return peptide_meta, protein_meta
 
 class query:
-    def __init__(self, net_data, protein_meta_data):
+    def __init__(self, net_data, protein_meta_data, min_interaction_confidence):
+        self.min_interaction_confidence = min_interaction_confidence
         self.df = self.generate_query(net_data, protein_meta_data)
 
     def generate_query(self, net_data, protein_meta_data):
@@ -401,6 +400,10 @@ class query:
         decoy_queries = pd.merge(decoy_queries.drop(['decoy'], axis=1), queries[['bait_id','prey_id','decoy']], on=['bait_id','prey_id'], how='left')
         decoy_queries = decoy_queries.fillna(True)
         decoy_queries = decoy_queries[decoy_queries['decoy'] == True]
+
+        # Filter for minimum interaction confidence
+        queries = queries[queries['interaction_confidence'] >= self.min_interaction_confidence]
+        decoy_queries = decoy_queries[decoy_queries['bait_id'] != decoy_queries['prey_id']].sample(queries.shape[0]) # Same number of decoys as targets
 
         return pd.concat([queries, decoy_queries], sort=True)[['bait_id','prey_id','decoy']].drop_duplicates()
 

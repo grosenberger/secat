@@ -8,7 +8,8 @@ import pandas as pd
 import numpy as np
 
 from preprocess import uniprot, net, sec, quantification, meta, query
-from score import monomer, scoring, significance
+from score import monomer, scoring
+from learn import pyprophet
 from quantify import quantitative_matrix, quantitative_test
 from plot import plot_features
 
@@ -57,7 +58,7 @@ def preprocess(infiles, outfile, secfile, netfile, uniprotfile, columns, decoy_i
 
     # Generate Network table
     click.echo("Info: Parsing network file %s." % netfile)
-    net_data = net(netfile, uniprot_data, min_interaction_confidence)
+    net_data = net(netfile, uniprot_data)
     net_data.to_df().to_sql('NETWORK', con, index=False)
 
     # Generate SEC definition table
@@ -81,7 +82,7 @@ def preprocess(infiles, outfile, secfile, netfile, uniprotfile, columns, decoy_i
 
     # Generate interaction query data
     click.echo("Info: Generating interaction query data.")
-    query_data = query(net_data, meta_data.protein_meta)
+    query_data = query(net_data, meta_data.protein_meta, min_interaction_confidence)
     query_data.to_df().to_sql('QUERY', con, index=False)
 
     # Remove any entries that are not necessary (proteins not covered by LC-MS/MS data)
@@ -114,16 +115,16 @@ def preprocess(infiles, outfile, secfile, netfile, uniprotfile, columns, decoy_i
 @cli.command()
 @click.option('--in', 'infile', required=True, type=click.Path(exists=True), help='Input SECAT file.')
 @click.option('--out', 'outfile', required=False, type=click.Path(exists=False), help='Output SECAT file.')
-@click.option('--complex_threshold_factor', 'complex_threshold_factor', default=2.0, show_default=True, type=float, help='Factor threshold to consider a feature a complex rather than a monomer.')
-@click.option('--minimum_peptides', 'minimum_peptides', default=4, show_default=True, type=int, help='Minimum number of peptides required to score an interaction.')
-@click.option('--maximum_peptides', 'maximum_peptides', default=4, show_default=True, type=int, help='Maximum number of peptides used to score an interaction.')
+@click.option('--monomer_threshold_factor', 'monomer_threshold_factor', default=4.0, show_default=True, type=float, help='Factor threshold to consider a feature a complex rather than a monomer.')
+@click.option('--monomer_elution_width', 'monomer_elution_width', default=10.0, show_default=True, type=float, help='Expected monomer peak width in SEC units. Used to adjust left monomer threshold padding.')
+@click.option('--minimum_peptides', 'minimum_peptides', default=3, show_default=True, type=int, help='Minimum number of peptides required to score an interaction.')
+@click.option('--maximum_peptides', 'maximum_peptides', default=6, show_default=True, type=int, help='Maximum number of peptides used to score an interaction.')
 @click.option('--minimum_overlap', 'minimum_overlap', default=5, show_default=True, type=int, help='Minimum number of fractions required to score an interaction.')
-@click.option('--minimum_mass_ratio', 'minimum_mass_ratio', default=0.2, show_default=True, type=float, help='Minimum number of fractions required to score an interaction.')
-@click.option('--maximum_sec_lag', 'maximum_sec_lag', default=2.0, show_default=True, type=float, help='Maximum lag in SEC units between interactions and subunits.')
+@click.option('--minimum_peptide_snr', 'minimum_peptide_snr', default=1.0, show_default=True, type=float, help='Minimum signal-to-noise ratio per peptide.')
 @click.option('--chunck_size', 'chunck_size', default=50000, show_default=True, type=int, help='Chunck size for processing.')
-def score(infile, outfile, complex_threshold_factor, minimum_peptides, maximum_peptides, minimum_overlap, minimum_mass_ratio, maximum_sec_lag, chunck_size):
+def score(infile, outfile, monomer_threshold_factor, monomer_elution_width, minimum_peptides, maximum_peptides, minimum_overlap, minimum_peptide_snr, chunck_size):
     """
-    Score protein and interaction features in SEC data.
+    Score interaction features in SEC data.
     """
 
     # Define outfile
@@ -133,25 +134,71 @@ def score(infile, outfile, complex_threshold_factor, minimum_peptides, maximum_p
         copyfile(infile, outfile)
         outfile = outfile
 
-    # Find monomer thresholds
-    click.echo("Info: Detect monomers.")
-    monomer_data = monomer(outfile, complex_threshold_factor)
+    # # Find monomer thresholds
+    # click.echo("Info: Detect monomers.")
+    # monomer_data = monomer(outfile, monomer_threshold_factor, monomer_elution_width)
 
-    con = sqlite3.connect(outfile)
-    monomer_data.df.to_sql('MONOMER', con, index=False, if_exists='replace')
-    con.close()
+    # con = sqlite3.connect(outfile)
+    # monomer_data.df.to_sql('MONOMER', con, index=False, if_exists='replace')
+    # con.close()
 
-    # Score peptides pairwise
-    click.echo("Info: MIC/TIC scoring.")
-    feature_data = scoring(outfile, chunck_size, minimum_peptides, maximum_peptides, minimum_overlap)
+    # Signal processing
+    click.echo("Info: Signal processing.")
+    feature_data = scoring(outfile, chunck_size, minimum_peptides, maximum_peptides, minimum_overlap, minimum_peptide_snr)
 
     con = sqlite3.connect(outfile)
     feature_data.df.to_sql('FEATURE', con, index=False, if_exists='replace')
     con.close()
 
-    # Score peptides pairwise
-    click.echo("Info: Assess significance.")
-    scored_data = significance(outfile, minimum_mass_ratio, maximum_sec_lag)
+# SECAT learn features
+@cli.command()
+@click.option('--in', 'infile', required=True, type=click.Path(exists=True), help='Input SECAT file.')
+@click.option('--out', 'outfile', required=False, type=click.Path(exists=False), help='Output SECAT file.')
+# Prefiltering
+@click.option('--minimum_snr', 'minimum_snr', default=0.0, show_default=True, type=int, help='Minimum signal-to-noise ratio per peptide.')
+@click.option('--minimum_mass_ratio', 'minimum_mass_ratio', default=0.3, show_default=True, type=float, help='Minimum number of fractions required to score an interaction.')
+@click.option('--maximum_sec_shift', 'maximum_sec_shift', default=5.0, show_default=True, type=float, help='Maximum lag in SEC units between interactions and subunits.')
+# Semi-supervised learning
+@click.option('--xeval_fraction', default=0.5, show_default=True, type=float, help='Data fraction used for cross-validation of semi-supervised learning step.')
+@click.option('--xeval_num_iter', default=10, show_default=True, type=int, help='Number of iterations for cross-validation of semi-supervised learning step.')
+@click.option('--ss_initial_fdr', default=0.05, show_default=True, type=float, help='Initial FDR cutoff for best scoring targets.')
+@click.option('--ss_iteration_fdr', default=0.05, show_default=True, type=float, help='Iteration FDR cutoff for best scoring targets.')
+@click.option('--ss_num_iter', default=10, show_default=True, type=int, help='Number of iterations for semi-supervised learning step.')
+# Statistics
+@click.option('--parametric/--no-parametric', default=False, show_default=True, help='Do parametric estimation of p-values.')
+@click.option('--pfdr/--no-pfdr', default=False, show_default=True, help='Compute positive false discovery rate (pFDR) instead of FDR.')
+@click.option('--pi0_lambda', default=[0.1,0.5,0.05], show_default=True, type=(float, float, float), help='Use non-parametric estimation of p-values. Either use <START END STEPS>, e.g. 0.1, 1.0, 0.1 or set to fixed value, e.g. 0.4, 0, 0.', callback=transform_pi0_lambda)
+@click.option('--pi0_method', default='bootstrap', show_default=True, type=click.Choice(['smoother', 'bootstrap']), help='Either "smoother" or "bootstrap"; the method for automatically choosing tuning parameter in the estimation of pi_0, the proportion of true null hypotheses.')
+@click.option('--pi0_smooth_df', default=3, show_default=True, type=int, help='Number of degrees-of-freedom to use when estimating pi_0 with a smoother.')
+@click.option('--pi0_smooth_log_pi0/--no-pi0_smooth_log_pi0', default=False, show_default=True, help='If True and pi0_method = "smoother", pi0 will be estimated by applying a smoother to a scatterplot of log(pi0) estimates against the tuning parameter lambda.')
+@click.option('--lfdr_truncate/--no-lfdr_truncate', show_default=True, default=True, help='If True, local FDR values >1 are set to 1.')
+@click.option('--lfdr_monotone/--no-lfdr_monotone', show_default=True, default=True, help='If True, local FDR values are non-decreasing with increasing p-values.')
+@click.option('--lfdr_transformation', default='probit', show_default=True, type=click.Choice(['probit', 'logit']), help='Either a "probit" or "logit" transformation is applied to the p-values so that a local FDR estimate can be formed that does not involve edge effects of the [0,1] interval in which the p-values lie.')
+@click.option('--lfdr_adj', default=1.5, show_default=True, type=float, help='Numeric value that is applied as a multiple of the smoothing bandwidth used in the density estimation.')
+@click.option('--lfdr_eps', default=np.power(10.0,-8), show_default=True, type=float, help='Numeric value that is threshold for the tails of the empirical p-value distribution.')
+@click.option('--threads', 'threads', default=1, show_default=True, type=int, help='Number of threads used for parallel processing of SEC runs. -1 means all available CPUs.')
+@click.option('--test/--no-test', default=False, show_default=True, help='Run in test mode with fixed seed.')
+def learn(infile, outfile, minimum_snr, minimum_mass_ratio, maximum_sec_shift, xeval_fraction, xeval_num_iter, ss_initial_fdr, ss_iteration_fdr, ss_num_iter, parametric, pfdr, pi0_lambda, pi0_method, pi0_smooth_df, pi0_smooth_log_pi0, lfdr_truncate, lfdr_monotone, lfdr_transformation, lfdr_adj, lfdr_eps, threads, test):
+    """
+    Learn true/false interaction features in SEC data.
+    """
+
+    # Define outfile
+    if outfile is None:
+        outfile = infile
+    else:
+        copyfile(infile, outfile)
+        outfile = outfile
+
+    # Run PyProphet training
+    click.echo("Info: Running PyProphet.")
+
+    # Read data
+    con = sqlite3.connect(outfile)
+    learning_data = pd.read_sql('SELECT *, condition_id || "_" || replicate_id || "_" || bait_id || "_" || prey_id AS pyprophet_feature_id, var_xcorr_shape AS main_var_xcorr_shape FROM FEATURE WHERE var_snr >= %s AND var_mass_ratio >= %s AND var_xcorr_shift <= %s;' % (minimum_snr, minimum_mass_ratio, maximum_sec_shift), con)
+    con.close()
+
+    scored_data = pyprophet(outfile, learning_data, xeval_fraction, xeval_num_iter, ss_initial_fdr, ss_iteration_fdr, ss_num_iter, parametric, pfdr, pi0_lambda, pi0_method, pi0_smooth_df, pi0_smooth_log_pi0, lfdr_truncate, lfdr_monotone, lfdr_transformation, lfdr_adj, lfdr_eps, threads, test)
 
     con = sqlite3.connect(outfile)
     scored_data.df.to_sql('FEATURE_SCORED', con, index=False, if_exists='replace')
