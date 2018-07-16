@@ -127,10 +127,10 @@ def interaction(df):
     minimum_peptide_snr = df['minimum_peptide_snr'].min()
     sec_boundaries = pd.DataFrame({'sec_id': range(df['lower_sec_boundaries'].min(), df['upper_sec_boundaries'].max()+1)})
 
-    # Remove peptides below SNR threshold
-    df_snrt = df.groupby(['peptide_id'])['peptide_intensity'].apply(filter_snr).reset_index()
-    df_snrt.columns = ['peptide_id','peptide_snr']
-    df = pd.merge(df, df_snrt[df_snrt['peptide_snr'] >= minimum_peptide_snr], on='peptide_id')
+    # # Remove peptides below SNR threshold
+    # df_snrt = df.groupby(['peptide_id'])['peptide_intensity'].apply(filter_snr).reset_index()
+    # df_snrt.columns = ['peptide_id','peptide_snr']
+    # df = pd.merge(df, df_snrt[df_snrt['peptide_snr'] >= minimum_peptide_snr], on='peptide_id')
 
     # Require minimum overlap
     intersection = list(set(df[df['is_bait']]['sec_id'].unique()) & set(df[~df['is_bait']]['sec_id'].unique()))
@@ -166,23 +166,23 @@ def interaction(df):
         bait_snr, prey_snr, bp_snr = snr(bm, pm)
 
         res = df[['condition_id','replicate_id','bait_id','prey_id','decoy']].drop_duplicates()
-        res['total_intersection'] = len(intersection)
-        res['longest_intersection'] = longest_overlap
         res['main_var_xcorr_shape'] = xcorr_shape
         res['var_xcorr_shift'] = xcorr_shift
         res['var_mi'] = mi
         res['var_mass_ratio'] = mass_ratio
         res['var_snr'] = bp_snr
+        res['var_intersection'] = longest_overlap / len(intersection)
+        res['var_total_intersection'] = len(intersection)
 
     else:
         res = df[['condition_id','replicate_id','bait_id','prey_id','decoy']].drop_duplicates()
-        res['total_intersection'] = np.nan
-        res['longest_intersection'] = np.nan
         res['main_var_xcorr_shape'] = np.nan
         res['var_xcorr_shift'] = np.nan
         res['var_mi'] = np.nan
         res['var_mass_ratio'] = np.nan
         res['var_snr'] = np.nan
+        res['var_intersection'] = np.nan
+        res['var_total_intersection'] = np.nan
 
     return(res)
 

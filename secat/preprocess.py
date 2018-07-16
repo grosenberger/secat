@@ -372,11 +372,11 @@ class meta:
         return peptide_meta, protein_meta
 
 class query:
-    def __init__(self, net_data, protein_meta_data, min_interaction_confidence):
+    def __init__(self, net_data, negnet_data, protein_meta_data, min_interaction_confidence):
         self.min_interaction_confidence = min_interaction_confidence
-        self.df = self.generate_query(net_data, protein_meta_data)
+        self.df = self.generate_query(net_data, negnet_data, protein_meta_data)
 
-    def generate_query(self, net_data, protein_meta_data):
+    def generate_query(self, net_data, negnet_data, protein_meta_data):
         def _random_nonidentical_array(data):
             np.random.shuffle(data['bait_id'].values)
             return data
@@ -386,24 +386,29 @@ class query:
         queries['decoy'] = False
 
         # Append decoys
-        decoy_queries = queries.copy()
-        decoy_queries = decoy_queries.groupby(['intensity_bin','sec_min_bin','sec_max_bin'])
+        if negnet_data == None:
+            decoy_queries = queries.copy()
+            decoy_queries = decoy_queries.groupby(['intensity_bin','sec_min_bin','sec_max_bin'])
 
-        for it in range(0, 1):
-            if it == 0:
-                decoy_queries_shuffled = decoy_queries.apply(_random_nonidentical_array).reset_index()
-            else:
-                decoy_queries_shuffled = pd.concat([decoy_queries_shuffled, decoy_queries.apply(random_nonidentical_array).reset_index()])
-        decoy_queries = decoy_queries_shuffled
+            for it in range(0, 1):
+                if it == 0:
+                    decoy_queries_shuffled = decoy_queries.apply(_random_nonidentical_array).reset_index()
+                else:
+                    decoy_queries_shuffled = pd.concat([decoy_queries_shuffled, decoy_queries.apply(random_nonidentical_array).reset_index()])
+            decoy_queries = decoy_queries_shuffled.drop(['decoy'], axis=1)
+        else:
+            decoy_queries = pd.merge(negnet_data.to_df(), protein_meta_data, left_on='prey_id', right_on='protein_id', how='inner')
 
         # Exclude conflicting data from decoys (present in both targets and decoys)
-        decoy_queries = pd.merge(decoy_queries.drop(['decoy'], axis=1), queries[['bait_id','prey_id','decoy']], on=['bait_id','prey_id'], how='left')
+        decoy_queries = pd.merge(decoy_queries, queries[['bait_id','prey_id','decoy']], on=['bait_id','prey_id'], how='left')
         decoy_queries = decoy_queries.fillna(True)
         decoy_queries = decoy_queries[decoy_queries['decoy'] == True]
 
         # Filter for minimum interaction confidence
         queries = queries[queries['interaction_confidence'] >= self.min_interaction_confidence]
-        decoy_queries = decoy_queries[decoy_queries['bait_id'] != decoy_queries['prey_id']].sample(queries.shape[0]) # Same number of decoys as targets
+        decoy_queries = decoy_queries[decoy_queries['bait_id'] != decoy_queries['prey_id']]
+        if decoy_queries.shape[0] > queries.shape[0]:
+            decoy_queries = decoy_queries.sample(queries.shape[0]) # Same number of decoys as targets
 
         return pd.concat([queries, decoy_queries], sort=True)[['bait_id','prey_id','decoy']].drop_duplicates()
 
