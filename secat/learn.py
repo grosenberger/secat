@@ -21,9 +21,13 @@ from pyprophet.pyprophet import PyProphet
 from pyprophet.report import save_report
 
 class pyprophet:
-    def __init__(self, outfile, learning_data, xeval_fraction, xeval_num_iter, ss_initial_fdr, ss_iteration_fdr, ss_num_iter, parametric, pfdr, pi0_lambda, pi0_method, pi0_smooth_df, pi0_smooth_log_pi0, lfdr_truncate, lfdr_monotone, lfdr_transformation, lfdr_adj, lfdr_eps, threads, test):
+    def __init__(self, outfile, minimum_snr, minimum_mass_ratio, maximum_sec_shift, minimum_learning_confidence, xeval_fraction, xeval_num_iter, ss_initial_fdr, ss_iteration_fdr, ss_num_iter, parametric, pfdr, pi0_lambda, pi0_method, pi0_smooth_df, pi0_smooth_log_pi0, lfdr_truncate, lfdr_monotone, lfdr_transformation, lfdr_adj, lfdr_eps, threads, test):
 
         self.outfile = outfile
+        self.minimum_snr = minimum_snr
+        self.minimum_mass_ratio = minimum_mass_ratio
+        self.maximum_sec_shift = maximum_sec_shift
+        self.minimum_learning_confidence = minimum_learning_confidence
         self.xeval_fraction = xeval_fraction
         self.xeval_num_iter = xeval_num_iter
         self.ss_initial_fdr = ss_initial_fdr
@@ -44,24 +48,45 @@ class pyprophet:
         self.threads = threads
         self.test = test
 
-        result, self.weights = self.learn(learning_data)
-        self.df = result.scored_tables[['condition_id','replicate_id','bait_id','prey_id','decoy','d_score','p_value','q_value','pep']]
-        self.df.columns = ['condition_id','replicate_id','bait_id','prey_id','decoy','score','pvalue','qvalue','pep']
+        learning_data = self.read_learning()
+        _, self.weights = self.learn(learning_data)
+
         print self.weights
+
+        detecting_data = self.read_detecting()
+        self.df = self.apply(detecting_data)
+
+    def read_learning(self):
+        con = sqlite3.connect(self.outfile)
+        df = pd.read_sql('SELECT FEATURE.*, condition_id || "_" || replicate_id || "_" || FEATURE.bait_id || "_" || FEATURE.prey_id AS pyprophet_feature_id FROM FEATURE LEFT OUTER JOIN NETWORK ON FEATURE.bait_id = NETWORK.bait_id AND FEATURE.prey_id = NETWORK.prey_id WHERE var_xcorr_shift <= %s AND var_mass_ratio >= %s AND var_snr >= %s AND (interaction_confidence >= %s OR decoy == 1);' % (self.maximum_sec_shift, self.minimum_mass_ratio, self.minimum_snr, self.minimum_learning_confidence), con)
+        con.close()
+
+        return df
+
+    def read_detecting(self):
+        con = sqlite3.connect(self.outfile)
+        df = pd.read_sql('SELECT *, condition_id || "_" || replicate_id || "_" || bait_id || "_" || prey_id AS pyprophet_feature_id FROM FEATURE WHERE var_xcorr_shift <= %s AND var_mass_ratio >= %s AND var_snr >= %s;' % (self.maximum_sec_shift, self.minimum_mass_ratio, self.minimum_snr), con)
+        con.close()
+
+        return df
 
     def learn(self, learning_data):
         (result, scorer, weights) = PyProphet(self.xeval_fraction, self.xeval_num_iter, self.ss_initial_fdr, self.ss_iteration_fdr, self.ss_num_iter, self.group_id, self.parametric, self.pfdr, self.pi0_lambda, self.pi0_method, self.pi0_smooth_df, self.pi0_smooth_log_pi0, self.lfdr_truncate, self.lfdr_monotone, self.lfdr_transformation, self.lfdr_adj, self.lfdr_eps, False, self.threads, self.test).learn_and_apply(learning_data)
-        self.plot(result, scorer.pi0, "learn")
-        self.plot_scores(result.scored_tables, "learn")
+
+        self.plot(result, scorer.pi0, "learning")
+        self.plot_scores(result.scored_tables, "learning")
 
         return result, weights
 
     def apply(self, detecting_data):
         (result, scorer, weights) = PyProphet(self.xeval_fraction, self.xeval_num_iter, self.ss_initial_fdr, self.ss_iteration_fdr, self.ss_num_iter, self.group_id, self.parametric, self.pfdr, self.pi0_lambda, self.pi0_method, self.pi0_smooth_df, self.pi0_smooth_log_pi0, self.lfdr_truncate, self.lfdr_monotone, self.lfdr_transformation, self.lfdr_adj, self.lfdr_eps, False, self.threads, self.test).apply_weights(detecting_data, self.weights)
-        self.plot(result, scorer.pi0, str(int(detecting_data['sec_group'].values[0])))
 
-        df = result.scored_tables[['feature_id', 'bait_id', 'prey_id', 'interaction_id', 'decoy', 'pep', 'q_value']]
-        df.columns = ['feature_id', 'bait_id', 'prey_id', 'interaction_id', 'decoy', 'pep', 'qvalue']
+        df = result.scored_tables[['condition_id','replicate_id','bait_id','prey_id','decoy','d_score','p_value','q_value','pep']]
+        df.columns = ['condition_id','replicate_id','bait_id','prey_id','decoy','score','pvalue','qvalue','pep']
+
+        self.plot(result, scorer.pi0, "detecting")
+        self.plot_scores(result.scored_tables, "detecting")
+
         return df
 
     def plot(self, result, pi0, tag):

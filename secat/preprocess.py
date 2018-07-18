@@ -58,13 +58,16 @@ class mitab:
             return [u for u in string.split("|") if "uniprotkb" in u][0].split("uniprotkb:")[1]
 
         def _extract_score(string):
-            return float([u for u in string.split("|") if "score" in u][0].split("score:")[1])
+            if 'score:' in string:
+                return float([u for u in string.split("|") if "score" in u][0].split("score:")[1])
+            else:
+                return 0
 
         df = pd.read_table(mitabfile, header = None, usecols=[0,1,14])
         df.columns = ["bait_id","prey_id","interaction_confidence"]
 
         # Reduce DB to UniProtKB entries with scores
-        df = df[df['bait_id'].str.contains('uniprotkb:') & df['prey_id'].str.contains('uniprotkb:') & df['interaction_confidence'].str.contains('score:')]
+        df = df[df['bait_id'].str.contains('uniprotkb:') & df['prey_id'].str.contains('uniprotkb:') & (df['interaction_confidence'].str.contains('score:') | df['interaction_confidence'].str.contains('shortestPath:'))]
 
         if df.shape[0] == 0:
             sys.exit("Error: the MITAB file doesn't contain any valid entries.")
@@ -112,15 +115,49 @@ class stringdb:
 
         return df
 
+class bioplex:
+    def __init__(self, bioplexfile):
+        self.df = self.read(bioplexfile)
+
+    def read(self, bioplexfile):
+        df = pd.read_table(bioplexfile)
+
+        df = df[['UniprotA','UniprotB','p(Interaction)']]
+        df.columns = ["bait_id","prey_id","interaction_confidence"]
+
+        return df
+
+class preppi:
+    def __init__(self, preppifile):
+        self.df = self.read(preppifile)
+
+    def read(self, preppifile):
+        df = pd.read_table(preppifile)
+
+        # Criterion for direct physical interaction
+        df = df[df['str_max_score'] * df['red_score'] > 100]
+
+        # Estimate probability
+        df['interaction_confidence'] = df['final_score'] / (df['final_score'] + 600)
+
+        df = df[['prot1','prot2','interaction_confidence']]
+        df.columns = ["bait_id","prey_id","interaction_confidence"]
+
+        return df
+
 class net:
     def __init__(self, netfile, uniprot):
-        self.formats = ['stringdb','mitab']
+        self.formats = ['mitab','stringdb','bioplex','preppi']
         self.format = self.identify(netfile)
 
-        if self.format == 'stringdb':
-            network = stringdb(netfile, uniprot).df
-        elif self.format == 'mitab':
+        if self.format == 'mitab':
             network = mitab(netfile).df
+        elif self.format == 'stringdb':
+            network = stringdb(netfile, uniprot).df
+        elif self.format == 'bioplex':
+            network = bioplex(netfile).df
+        elif self.format == 'preppi':
+            network = preppi(netfile).df
 
         # Ensure that interactions are unique
         df = self.unique_interactions(network)
@@ -137,10 +174,16 @@ class net:
 
         # STRING-DB
         if columns == ['protein1', 'protein2', 'combined_score']:
-            return self.formats[0]
-        # MITAB 2.5, 2.6, 2.7
-        elif len(header.columns) in [15, 36, 42]:
             return self.formats[1]
+        # BioPlex
+        elif columns == ['GeneA','GeneB','UniprotA','UniprotB','SymbolA','SymbolB','p(Wrong)','p(No Interaction)','p(Interaction)']:
+            return self.formats[2]
+        # PrePPI
+        elif columns == ['prot1','prot2','str_score','protpep_score','str_max_score','red_score','ort_score','phy_score','coexp_score','go_score','total_score','dbs','pubs','exp_score','final_score']:
+            return self.formats[3]
+        # MITAB 2.5, 2.6, 2.7
+        elif len(header.columns) in [11, 15, 35, 36, 42]:
+            return self.formats[0]
         else:
             sys.exit("Error: Reference network file format is not supported.")
 

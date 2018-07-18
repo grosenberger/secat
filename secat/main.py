@@ -64,7 +64,7 @@ def preprocess(infiles, outfile, secfile, netfile, negnetfile, uniprotfile, colu
 
     # Generate Negative Network table
     if negnetfile != None:
-        click.echo("Info: Parsing negative network file %s." % netfile)
+        click.echo("Info: Parsing negative network file %s." % negnetfile)
         negnet_data = net(negnetfile, uniprot_data)
         negnet_data.to_df().to_sql('NEGATIVE_NETWORK', con, index=False)
     else:
@@ -127,7 +127,7 @@ def preprocess(infiles, outfile, secfile, netfile, negnetfile, uniprotfile, colu
 @click.option('--monomer_threshold_factor', 'monomer_threshold_factor', default=4.0, show_default=True, type=float, help='Factor threshold to consider a feature a complex rather than a monomer.')
 @click.option('--monomer_elution_width', 'monomer_elution_width', default=10.0, show_default=True, type=float, help='Expected monomer peak width in SEC units. Used to adjust left monomer threshold padding.')
 @click.option('--minimum_peptides', 'minimum_peptides', default=3, show_default=True, type=int, help='Minimum number of peptides required to score an interaction.')
-@click.option('--maximum_peptides', 'maximum_peptides', default=6, show_default=True, type=int, help='Maximum number of peptides used to score an interaction.')
+@click.option('--maximum_peptides', 'maximum_peptides', default=20, show_default=True, type=int, help='Maximum number of peptides used to score an interaction.')
 @click.option('--minimum_overlap', 'minimum_overlap', default=5, show_default=True, type=int, help='Minimum number of fractions required to score an interaction.')
 @click.option('--minimum_peptide_snr', 'minimum_peptide_snr', default=1.0, show_default=True, type=float, help='Minimum signal-to-noise ratio per peptide.')
 @click.option('--chunck_size', 'chunck_size', default=50000, show_default=True, type=int, help='Chunck size for processing.')
@@ -165,13 +165,14 @@ def score(infile, outfile, monomer_threshold_factor, monomer_elution_width, mini
 @click.option('--out', 'outfile', required=False, type=click.Path(exists=False), help='Output SECAT file.')
 # Prefiltering
 @click.option('--minimum_snr', 'minimum_snr', default=1.0, show_default=True, type=int, help='Minimum signal-to-noise ratio per peptide.')
-@click.option('--minimum_mass_ratio', 'minimum_mass_ratio', default=0.3, show_default=True, type=float, help='Minimum number of fractions required to score an interaction.')
-@click.option('--maximum_sec_shift', 'maximum_sec_shift', default=2.0, show_default=True, type=float, help='Maximum lag in SEC units between interactions and subunits.')
+@click.option('--minimum_mass_ratio', 'minimum_mass_ratio', default=0.2, show_default=True, type=float, help='Minimum number of fractions required to score an interaction.')
+@click.option('--maximum_sec_shift', 'maximum_sec_shift', default=3.0, show_default=True, type=float, help='Maximum lag in SEC units between interactions and subunits.')
+@click.option('--minimum_learning_confidence', 'minimum_learning_confidence', default=0.9, show_default=True, type=float, help='Minimum prior interaction confidence for semi-supervised learning.')
 # Semi-supervised learning
 @click.option('--xeval_fraction', default=0.5, show_default=True, type=float, help='Data fraction used for cross-validation of semi-supervised learning step.')
 @click.option('--xeval_num_iter', default=10, show_default=True, type=int, help='Number of iterations for cross-validation of semi-supervised learning step.')
-@click.option('--ss_initial_fdr', default=0.00, show_default=True, type=float, help='Initial FDR cutoff for best scoring targets.')
-@click.option('--ss_iteration_fdr', default=0.00, show_default=True, type=float, help='Iteration FDR cutoff for best scoring targets.')
+@click.option('--ss_initial_fdr', default=0.15, show_default=True, type=float, help='Initial FDR cutoff for best scoring targets.')
+@click.option('--ss_iteration_fdr', default=0.15, show_default=True, type=float, help='Iteration FDR cutoff for best scoring targets.')
 @click.option('--ss_num_iter', default=10, show_default=True, type=int, help='Number of iterations for semi-supervised learning step.')
 # Statistics
 @click.option('--parametric/--no-parametric', default=False, show_default=True, help='Do parametric estimation of p-values.')
@@ -187,7 +188,7 @@ def score(infile, outfile, monomer_threshold_factor, monomer_elution_width, mini
 @click.option('--lfdr_eps', default=np.power(10.0,-8), show_default=True, type=float, help='Numeric value that is threshold for the tails of the empirical p-value distribution.')
 @click.option('--threads', 'threads', default=1, show_default=True, type=int, help='Number of threads used for parallel processing of SEC runs. -1 means all available CPUs.')
 @click.option('--test/--no-test', default=False, show_default=True, help='Run in test mode with fixed seed.')
-def learn(infile, outfile, minimum_snr, minimum_mass_ratio, maximum_sec_shift, xeval_fraction, xeval_num_iter, ss_initial_fdr, ss_iteration_fdr, ss_num_iter, parametric, pfdr, pi0_lambda, pi0_method, pi0_smooth_df, pi0_smooth_log_pi0, lfdr_truncate, lfdr_monotone, lfdr_transformation, lfdr_adj, lfdr_eps, threads, test):
+def learn(infile, outfile, minimum_snr, minimum_mass_ratio, maximum_sec_shift, minimum_learning_confidence, xeval_fraction, xeval_num_iter, ss_initial_fdr, ss_iteration_fdr, ss_num_iter, parametric, pfdr, pi0_lambda, pi0_method, pi0_smooth_df, pi0_smooth_log_pi0, lfdr_truncate, lfdr_monotone, lfdr_transformation, lfdr_adj, lfdr_eps, threads, test):
     """
     Learn true/false interaction features in SEC data.
     """
@@ -202,13 +203,7 @@ def learn(infile, outfile, minimum_snr, minimum_mass_ratio, maximum_sec_shift, x
     # Run PyProphet training
     click.echo("Info: Running PyProphet.")
 
-    # Read data
-    con = sqlite3.connect(outfile)
-    learning_data = pd.read_sql('SELECT *, condition_id || "_" || replicate_id || "_" || bait_id || "_" || prey_id AS pyprophet_feature_id FROM FEATURE WHERE var_snr >= %s AND var_mass_ratio >= %s AND var_xcorr_shift <= %s;' % (minimum_snr, minimum_mass_ratio, maximum_sec_shift), con)
-    con.close()
-    learning_data = learning_data.drop(columns=['var_intersection'])
-
-    scored_data = pyprophet(outfile, learning_data, xeval_fraction, xeval_num_iter, ss_initial_fdr, ss_iteration_fdr, ss_num_iter, parametric, pfdr, pi0_lambda, pi0_method, pi0_smooth_df, pi0_smooth_log_pi0, lfdr_truncate, lfdr_monotone, lfdr_transformation, lfdr_adj, lfdr_eps, threads, test)
+    scored_data = pyprophet(outfile, minimum_snr, minimum_mass_ratio, maximum_sec_shift, minimum_learning_confidence, xeval_fraction, xeval_num_iter, ss_initial_fdr, ss_iteration_fdr, ss_num_iter, parametric, pfdr, pi0_lambda, pi0_method, pi0_smooth_df, pi0_smooth_log_pi0, lfdr_truncate, lfdr_monotone, lfdr_transformation, lfdr_adj, lfdr_eps, threads, test)
 
     con = sqlite3.connect(outfile)
     scored_data.df.to_sql('FEATURE_SCORED', con, index=False, if_exists='replace')
