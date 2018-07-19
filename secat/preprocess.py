@@ -313,8 +313,14 @@ class quantification:
         return df
 
     def read_long(self, infile):
+        def parse_protein_id(x):
+            if 'sp|' in x:
+                return x.split('|')[1]
+            else:
+                return x
+
         # Read data
-        df = pd.read_csv(infile, sep=None, engine='python')
+        df = pd.read_csv(infile, sep="\t")
 
         # Exclude decoys if present
         if 'decoy' in df.columns:
@@ -338,6 +344,9 @@ class quantification:
             df.protein_id = df.protein_id.str[2:]
         else:
             df = df.loc[df['protein_id'].str.find(';')==-1]
+
+        # Parse protein identifiers if necessary
+        df['protein_id'] = df['protein_id'].apply(parse_protein_id)
 
         # Simple validation
         run_id_columns = set(self.run_ids).intersection(set(df['run_id'].unique()))

@@ -33,8 +33,11 @@ class monomer:
         self.df = self.protein_thresholds()
 
     def protein_thresholds(self):
-        def get_sec_ids(protein_meta, sec_meta):
-            return sec_meta.groupby(['condition_id','replicate_id']).apply(lambda x: x.ix[(x['sec_mw']-self.monomer_threshold_factor*protein_meta['protein_mw'].values).abs().argsort()[:1]][['sec_id']]).reset_index(level=['condition_id','replicate_id'])
+        def get_sec_ids(protein_mw, sec_meta):
+            def condition_replicate_sec_ids(protein_mw, run_sec_meta):
+                return pd.Series({'sec_id': (run_sec_meta['sec_mw']-self.monomer_threshold_factor*protein_mw).abs().argsort()[:1].values[0]})
+
+            return sec_meta.groupby(['condition_id','replicate_id']).apply(lambda x: condition_replicate_sec_ids(protein_mw, x[['sec_id','sec_mw']])).reset_index()
 
         con = sqlite3.connect(self.outfile)
         protein_mw = pd.read_sql('SELECT protein_id, protein_mw FROM PROTEIN;', con)
@@ -42,7 +45,7 @@ class monomer:
         con.close()
 
         # Compute expected SEC fraction
-        protein_sec_thresholds = protein_mw.groupby(['protein_id','protein_mw']).apply(lambda x: get_sec_ids(x, sec_meta=sec_meta)).reset_index(level=['protein_id','protein_mw'])
+        protein_sec_thresholds = protein_mw.groupby(['protein_id']).apply(lambda x: get_sec_ids(x['protein_mw'].mean(), sec_meta=sec_meta)).reset_index(level=['protein_id'])
 
         # Correct for expected elution width of peak
         protein_sec_thresholds['sec_id'] - np.round(self.monomer_elution_width / 2)
@@ -193,11 +196,15 @@ class scoring:
         self.minimum_overlap = minimum_overlap
         self.minimum_peptide_snr = minimum_peptide_snr
 
+        click.echo("Info: Read peptide chromatograms.")
         chromatograms = self.read_chromatograms()
+        click.echo("Info: Filter peptide chromatograms.")
         self.chromatograms = self.filter_peptides(chromatograms)
+        click.echo("Info: Read queries and SEC boundaries.")
         self.queries = self.read_queries()
         self.sec_boundaries = self.read_sec_boundaries()
 
+        click.echo("Info: Score PPI.")
         self.df = self.compare()
 
     def read_chromatograms(self):
@@ -255,7 +262,7 @@ class scoring:
     def compare(self):
         # Obtain experimental design
         exp_design = self.chromatograms[['condition_id','replicate_id','protein_id']].drop_duplicates().sort_values(['condition_id','replicate_id','protein_id'])
-        comparisons = pd.merge(pd.merge(self.queries, exp_design, left_on='bait_id', right_on='protein_id')[['bait_id','prey_id','decoy']], exp_design, left_on='prey_id', right_on='protein_id')[['condition_id','replicate_id','bait_id','prey_id','decoy']]
+        comparisons = pd.merge(pd.merge(self.queries, exp_design, left_on='bait_id', right_on='protein_id')[['condition_id','replicate_id','bait_id','prey_id','decoy']], exp_design, left_on=['condition_id','replicate_id','prey_id'], right_on=['condition_id','replicate_id','protein_id'])[['condition_id','replicate_id','bait_id','prey_id','decoy']]
 
         # Split data into chunks for parallel processing
         comparisons_chunks = split(comparisons, self.chunck_size)

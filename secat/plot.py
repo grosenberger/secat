@@ -100,7 +100,7 @@ WHERE peptide_rank <= %s;
     def read_interactions(self):
         con = sqlite3.connect(self.infile)
         df = pd.read_sql('''
-SELECT DISTINCT bait_id || "_" || prey_id AS interaction_id FROM FEATURE_SCORED WHERE bait_id != prey_id AND decoy=1 AND qvalue < %s;
+SELECT DISTINCT bait_id || "_" || prey_id AS interaction_id FROM FEATURE_SCORED WHERE bait_id != prey_id AND decoy=0 AND qvalue < %s;
 ''' % (self.interaction_qvalue), con)
         con.close()
 
@@ -122,7 +122,7 @@ SELECT DISTINCT bait_id FROM NODE WHERE qvalue < %s;
         tags = peptide_data.sort_values(by=['tag'])['tag'].drop_duplicates().values.tolist()
 
         # f, axarr = plt.subplots(len(tags), 2, sharex=True, sharey=True, figsize=(15,15))
-        f, axarr = plt.subplots(1, 1, sharex=True, sharey=True, figsize=(15,15))
+        f, axarr = plt.subplots(1, 1, sharex=True, sharey=True, figsize=(10,6))
         f.suptitle(interaction_id)
 
         xmin = 0 # peptide_data['sec_id'].min()
