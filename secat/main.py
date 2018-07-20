@@ -9,7 +9,7 @@ import numpy as np
 
 from preprocess import uniprot, net, sec, quantification, meta, query
 from score import monomer, scoring
-from learn import pyprophet
+from learn import pyprophet, combine
 from quantify import quantitative_matrix, quantitative_test
 from plot import plot_features
 
@@ -209,12 +209,24 @@ def learn(infile, outfile, minimum_snr, minimum_mass_ratio, maximum_sec_shift, m
     scored_data.df.to_sql('FEATURE_SCORED', con, index=False, if_exists='replace')
     con.close()
 
+    # Combine
+    click.echo("Info: Combine evidence across runs.")
+
+    combined_data = combine(outfile, pi0_lambda, pi0_method, pi0_smooth_df, pi0_smooth_log_pi0, pfdr)
+
+    con = sqlite3.connect(outfile)
+    combined_data.df.to_sql('FEATURE_SCORED_COMBINED', con, index=False, if_exists='replace')
+    con.close()
+
 
 # SECAT quantify features
 @cli.command()
 @click.option('--in', 'infile', required=True, type=click.Path(exists=True), help='Input SECAT file.')
 @click.option('--out', 'outfile', required=False, type=click.Path(exists=False), help='Output SECAT file.')
-def quantify(infile, outfile):
+@click.option('--maximum_interaction_qvalue', default=0.1, show_default=True, type=float, help='Maximum q-value to consider interactions for quantification.')
+@click.option('--minimum_peptides', 'minimum_peptides', default=3, show_default=True, type=int, help='Minimum number of peptides required to quantify an interaction.')
+@click.option('--maximum_peptides', 'maximum_peptides', default=20, show_default=True, type=int, help='Maximum number of peptides used to quantify an interaction.')
+def quantify(infile, outfile, maximum_interaction_qvalue, minimum_peptides, maximum_peptides):
     """
     Quantify protein and interaction features in SEC data.
     """
@@ -228,9 +240,10 @@ def quantify(infile, outfile):
 
 
     click.echo("Info: Prepare quantitative matrix")
-    qm = quantitative_matrix(outfile)
+    qm = quantitative_matrix(outfile, maximum_interaction_qvalue, minimum_peptides, maximum_peptides)
 
     con = sqlite3.connect(outfile)
+    qm.monomer.to_sql('MONOMER_QM', con, index=False, if_exists='replace')
     qm.complex.to_sql('COMPLEX_QM', con, index=False, if_exists='replace')
     con.close()
 
@@ -238,7 +251,6 @@ def quantify(infile, outfile):
     qt = quantitative_test(outfile)
 
     con = sqlite3.connect(outfile)
-    qt.edge_directional.to_sql('EDGE_DIRECTIONAL', con, index=False, if_exists='replace')
     qt.edge.to_sql('EDGE', con, index=False, if_exists='replace')
     qt.edge_level.to_sql('EDGE_LEVEL', con, index=False, if_exists='replace')
     qt.node.to_sql('NODE', con, index=False, if_exists='replace')
@@ -253,25 +265,22 @@ def export(infile):
     Export SECAT results.
     """
 
-    outfile_nodes = infile.split(".secat")[0] + "_nodes.csv"
-    outfile_nodes_level = infile.split(".secat")[0] + "_nodes_level.csv"
-    outfile_edges_directional = infile.split(".secat")[0] + "_edges_directional.csv"
-    outfile_edges = infile.split(".secat")[0] + "_edges.csv"
-    outfile_edges_level = infile.split(".secat")[0] + "_edges_level.csv"
+    outfile_nodes = os.path.splitext(infile)[0] + "_nodes.csv"
+    outfile_nodes_level = os.path.splitext(infile)[0] + "_nodes_level.csv"
+    outfile_edges = os.path.splitext(infile)[0] + "_edges.csv"
+    outfile_edges_level = os.path.splitext(infile)[0] + "_edges_level.csv"
 
     con = sqlite3.connect(infile)
     node_data = pd.read_sql('SELECT * FROM node;' , con)
     node_level_data = pd.read_sql('SELECT * FROM node_level;' , con)
-    edge_directional_data = pd.read_sql('SELECT * FROM edge_directional;' , con)
     edge_data = pd.read_sql('SELECT * FROM edge;' , con)
     edge_level_data = pd.read_sql('SELECT * FROM edge_level;' , con)
     con.close()
 
-    node_data.to_csv(outfile_nodes, index=False)
-    node_level_data.to_csv(outfile_nodes_level, index=False)
-    edge_directional_data.to_csv(outfile_edges_directional, index=False)
-    edge_data.to_csv(outfile_edges, index=False)
-    edge_level_data.to_csv(outfile_edges_level, index=False)
+    node_data.sort_values(by=['pvalue']).to_csv(outfile_nodes, index=False)
+    node_level_data.sort_values(by=['pvalue']).to_csv(outfile_nodes_level, index=False)
+    edge_data.sort_values(by=['pvalue']).to_csv(outfile_edges, index=False)
+    edge_level_data.sort_values(by=['pvalue']).to_csv(outfile_edges_level, index=False)
 
 # SECAT plot chromatograms
 @cli.command()

@@ -14,11 +14,12 @@ try:
 except ImportError:
     plt = None
 
-from scipy.stats import gaussian_kde
+from scipy.stats import gaussian_kde, combine_pvalues
 from numpy import linspace, concatenate, around
 
 from pyprophet.pyprophet import PyProphet
 from pyprophet.report import save_report
+from pyprophet.stats import qvalue, pi0est
 
 class pyprophet:
     def __init__(self, outfile, minimum_snr, minimum_mass_ratio, maximum_sec_shift, minimum_learning_confidence, xeval_fraction, xeval_num_iter, ss_initial_fdr, ss_iteration_fdr, ss_num_iter, parametric, pfdr, pi0_lambda, pi0_method, pi0_smooth_df, pi0_smooth_log_pi0, lfdr_truncate, lfdr_monotone, lfdr_transformation, lfdr_adj, lfdr_eps, threads, test):
@@ -143,3 +144,37 @@ class pyprophet:
 
                     pdf.savefig()
                     plt.close()
+
+class combine:
+    def __init__(self, outfile, pi0_lambda, pi0_method, pi0_smooth_df, pi0_smooth_log_pi0, pfdr):
+
+        self.outfile = outfile
+        self.pi0_lambda = pi0_lambda
+        self.pi0_method = pi0_method
+        self.pi0_smooth_df = pi0_smooth_df
+        self.pi0_smooth_log_pi0 = pi0_smooth_log_pi0
+        self.pfdr = pfdr
+
+        scores = self.read()
+        self.df = self.combine_scores(scores)
+
+    def read(self):
+        con = sqlite3.connect(self.outfile)
+        df = pd.read_sql('SELECT * FROM FEATURE_SCORED WHERE decoy == 0;', con)
+        con.close()
+
+        return df
+
+    def combine_scores(self, scores):
+        combined_scores = scores.groupby(['bait_id','prey_id'])['pvalue'].apply(lambda x: combine_pvalues(x, method='stouffer')[1]).reset_index()
+
+        combined_scores['qvalue'] = qvalue(combined_scores['pvalue'], pi0est(combined_scores['pvalue'], self.pi0_lambda, self.pi0_method, self.pi0_smooth_df, self.pi0_smooth_log_pi0)['pi0'], self.pfdr)
+
+        click.echo("Info: %s unique interaction (q-value < 0.01) detected before integration." % (scores[scores['qvalue'] < 0.01][['bait_id','prey_id']].drop_duplicates().shape[0]))
+        click.echo("Info: %s unique interaction (q-value < 0.01) detected after integration." % (combined_scores[combined_scores['qvalue'] < 0.01][['bait_id','prey_id']].drop_duplicates().shape[0]))
+        click.echo("Info: %s unique interaction (q-value < 0.05) detected before integration." % (scores[scores['qvalue'] < 0.05][['bait_id','prey_id']].drop_duplicates().shape[0]))
+        click.echo("Info: %s unique interaction (q-value < 0.05) detected after integration." % (combined_scores[combined_scores['qvalue'] < 0.05][['bait_id','prey_id']].drop_duplicates().shape[0]))
+        click.echo("Info: %s unique interaction (q-value < 0.1) detected before integration." % (scores[scores['qvalue'] < 0.1][['bait_id','prey_id']].drop_duplicates().shape[0]))
+        click.echo("Info: %s unique interaction (q-value < 0.1) detected after integration." % (combined_scores[combined_scores['qvalue'] < 0.1][['bait_id','prey_id']].drop_duplicates().shape[0]))
+
+        return combined_scores

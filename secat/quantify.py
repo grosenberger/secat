@@ -14,24 +14,62 @@ from pyprophet.stats import pi0est, qvalue
 
 
 class quantitative_matrix:
-    def __init__(self, outfile):
+    def __init__(self, outfile, maximum_interaction_qvalue, minimum_peptides, maximum_peptides):
         self.outfile = outfile
+        self.maximum_interaction_qvalue = maximum_interaction_qvalue
+        self.minimum_peptides = minimum_peptides
+        self.maximum_peptides = maximum_peptides
 
         self.interactions, self.chromatograms = self.read()
-        self.complex = self.quantify()
+        self.monomer = self.quantify_monomers()
+        self.complex = self.quantify_complexes()
 
     def read(self):
         con = sqlite3.connect(self.outfile)
 
-        interactions = pd.read_sql('SELECT * FROM FEATURE_SCORED WHERE pvalue < 0.01 AND bait_id != prey_id;' , con)
+        interactions = pd.read_sql('SELECT * FROM FEATURE_SCORED_COMBINED WHERE qvalue <= %s AND bait_id != prey_id;' % (self.maximum_interaction_qvalue), con)
 
-        chromatograms = pd.read_sql('SELECT condition_id, replicate_id, sec_id, QUANTIFICATION.protein_id, QUANTIFICATION.peptide_id, peptide_intensity FROM QUANTIFICATION INNER JOIN PROTEIN_META ON QUANTIFICATION.protein_id = PROTEIN_META.protein_id INNER JOIN PEPTIDE_META ON QUANTIFICATION.peptide_id = PEPTIDE_META.peptide_id INNER JOIN SEC ON QUANTIFICATION.RUN_ID = SEC.RUN_ID WHERE peptide_rank <= 6;', con)
+        chromatograms = pd.read_sql('SELECT SEC.condition_id, SEC.replicate_id, SEC.sec_id, QUANTIFICATION.protein_id, QUANTIFICATION.peptide_id, peptide_intensity, MONOMER.sec_id AS monomer_sec_id FROM QUANTIFICATION INNER JOIN PROTEIN_META ON QUANTIFICATION.protein_id = PROTEIN_META.protein_id INNER JOIN PEPTIDE_META ON QUANTIFICATION.peptide_id = PEPTIDE_META.peptide_id INNER JOIN SEC ON QUANTIFICATION.RUN_ID = SEC.RUN_ID INNER JOIN MONOMER ON QUANTIFICATION.protein_id = MONOMER.protein_id and SEC.condition_id = MONOMER.condition_id AND SEC.replicate_id = MONOMER.replicate_id WHERE peptide_count >= %s AND peptide_rank <= %s;' % (self.minimum_peptides, self.maximum_peptides), con)
 
         con.close()
 
         return interactions, chromatograms
 
-    def quantify(self):
+    def quantify_monomers(self):
+        def summarize(df):
+            def aggregate(x):
+                peptide_ix = (x['peptide_intensity']-x['peptide_intensity'].median()).abs().argsort()[:1]
+                return pd.DataFrame({'peptide_intensity': x.iloc[peptide_ix]['peptide_intensity'], 'total_peptide_intensity': x.iloc[peptide_ix]['total_peptide_intensity']})
+
+            # Summarize total peptide intensities
+            peptide_total = df.groupby(['peptide_id'])['peptide_intensity'].sum().reset_index()
+            peptide_total.columns = ['peptide_id','total_peptide_intensity']
+
+             # Summarize monomer peptide intensities
+            peptide_mono = df[df['sec_id'] >= df['monomer_sec_id']].groupby(['peptide_id'])['peptide_intensity'].sum().reset_index()
+            peptide_mono.columns = ['peptide_id','peptide_intensity']
+
+            peptide = pd.merge(peptide_mono, peptide_total, on='peptide_id')
+
+            # Ensure that minimum peptides are present
+            if peptide.shape[0] >= self.minimum_peptides:
+                # Select representative closest to median and aggregate
+                peptide = aggregate(peptide)
+
+                # Aggregate to protein level
+                protein = pd.DataFrame({'monomer_intensity': peptide['peptide_intensity'].values, 'fractional_monomer_intensity': peptide['peptide_intensity'].values / peptide['total_peptide_intensity'].values, 'total_intensity': peptide['total_peptide_intensity'].values})
+
+                return protein
+
+        # Generate list for monomers
+        monomers = self.chromatograms.copy()
+        monomers['bait_id'] = monomers['protein_id']
+        monomers['prey_id'] = monomers['protein_id']
+        monomers_agg = monomers.groupby(['condition_id','replicate_id','bait_id','prey_id']).apply(summarize).reset_index(level=['condition_id','replicate_id','bait_id','prey_id'])
+
+        return monomers_agg
+
+    def quantify_complexes(self):
         def summarize(df):
             def aggregate(x):
                 peptide_ix = (x['peptide_intensity']-x['peptide_intensity'].median()).abs().argsort()[:1]
@@ -40,6 +78,9 @@ class quantitative_matrix:
             # Summarize total peptide intensities
             peptide_total = df.groupby(['is_bait','peptide_id'])['peptide_intensity'].sum().reset_index()
             peptide_total.columns = ['is_bait','peptide_id','total_peptide_intensity']
+
+            # Remove monomer fractions for complex-centric quantification
+            df = df[df['sec_id'] < df['monomer_sec_id']]
 
             # Find SEC intersections
             bait_sec = df[df['is_bait']]['sec_id'].unique()
@@ -55,43 +96,41 @@ class quantitative_matrix:
 
                 peptide = pd.merge(peptide_is, peptide_total, on='peptide_id')
 
-                # At least three peptides are required for both interactors for quantification.
-                if peptide[peptide['is_bait']].shape[0] >= 3 and peptide[~peptide['is_bait']].shape[0] >= 3:
+                # Ensure that minimum peptides are present for both interactors for quantification.
+                if peptide[peptide['is_bait']].shape[0] >= self.minimum_peptides and peptide[~peptide['is_bait']].shape[0] >= self.minimum_peptides:
                     # Select representative closest to median and aggregate
                     peptide = peptide.groupby(['is_bait']).apply(aggregate).reset_index(level=['is_bait'])
 
                     # Aggregate to protein level
-                    protein = pd.DataFrame({'bait_intensity': peptide[peptide['is_bait']]['peptide_intensity'].values, 'total_bait_intensity': peptide[peptide['is_bait']]['total_peptide_intensity'].values, 'fractional_bait_intensity': peptide[peptide['is_bait']]['peptide_intensity'].values / peptide[peptide['is_bait']]['total_peptide_intensity'].values, 'prey_intensity': peptide[~peptide['is_bait']]['peptide_intensity'].values, 'total_prey_intensity': peptide[~peptide['is_bait']]['total_peptide_intensity'].values, 'fractional_prey_intensity': peptide[~peptide['is_bait']]['peptide_intensity'].values / peptide[~peptide['is_bait']]['total_peptide_intensity'].values})
+                    protein = pd.DataFrame({'bait_intensity': peptide[peptide['is_bait']]['peptide_intensity'].values, 'fractional_bait_intensity': peptide[peptide['is_bait']]['peptide_intensity'].values / peptide[peptide['is_bait']]['total_peptide_intensity'].values, 'prey_intensity': peptide[~peptide['is_bait']]['peptide_intensity'].values, 'fractional_prey_intensity': peptide[~peptide['is_bait']]['peptide_intensity'].values / peptide[~peptide['is_bait']]['total_peptide_intensity'].values})
 
-                    protein['complex_intensity_ratio'] = protein['prey_intensity'] / protein['bait_intensity']
-                    protein['complex_fraction_ratio'] = protein['fractional_prey_intensity'] / protein['fractional_bait_intensity']
+                    protein['complex_ratio'] = protein['prey_intensity'] / protein['bait_intensity']
+                    protein['fractional_complex_ratio'] = protein['fractional_prey_intensity'] / protein['fractional_bait_intensity']
 
                     return protein
 
-        interactions = self.interactions
-
-        # Generate long list
-        baits = pd.merge(interactions, self.chromatograms, left_on=['condition_id','replicate_id','bait_id'], right_on=['condition_id','replicate_id','protein_id']).drop(columns=['protein_id'])
+        # Generate long list for interactions
+        baits = pd.merge(self.interactions, self.chromatograms, left_on=['bait_id'], right_on=['protein_id']).drop(columns=['protein_id'])
         baits['is_bait'] = True
 
-        preys = pd.merge(interactions, self.chromatograms, left_on=['condition_id','replicate_id','prey_id'], right_on=['condition_id','replicate_id','protein_id']).drop(columns=['protein_id'])
+        preys = pd.merge(self.interactions, self.chromatograms, left_on=['prey_id'], right_on=['protein_id']).drop(columns=['protein_id'])
         preys['is_bait'] = False
 
-        data = pd.concat([baits, preys]).reset_index()
+        complexes = pd.concat([baits, preys]).reset_index()
 
-        data_agg = data.groupby(['condition_id','replicate_id','bait_id','prey_id']).apply(summarize).reset_index(level=['condition_id','replicate_id','bait_id','prey_id'])
+        complexes_agg = complexes.groupby(['condition_id','replicate_id','bait_id','prey_id']).apply(summarize).reset_index(level=['condition_id','replicate_id','bait_id','prey_id'])
 
-        return data_agg
+        return complexes_agg
 
 class quantitative_test:
     def __init__(self, outfile):
         self.outfile = outfile
-        self.levels = ['bait_intensity','total_bait_intensity','fractional_bait_intensity','prey_intensity','total_prey_intensity','fractional_prey_intensity','complex_intensity_ratio','complex_fraction_ratio']
+        self.levels = ['total_intensity','monomer_intensity','fractional_monomer_intensity','bait_intensity','fractional_bait_intensity','prey_intensity','fractional_prey_intensity','complex_ratio','fractional_complex_ratio']
         self.comparisons = self.contrast()
 
-        self.complex_qm = self.read()
+        self.monomer_qm, self.complex_qm = self.read()
 
-        self.edge_directional = self.compare()
+        self.tests = self.compare()
         self.edge_level, self.edge, self.node_level, self.node = self.integrate()
 
     def contrast(self):
@@ -117,17 +156,18 @@ class quantitative_test:
     def read(self):
         con = sqlite3.connect(self.outfile)
 
+        monomer_qm = pd.read_sql('SELECT * FROM MONOMER_QM;' , con)
         complex_qm = pd.read_sql('SELECT * FROM COMPLEX_QM;' , con)
 
         con.close()
 
-        return complex_qm
+        return monomer_qm, complex_qm
 
     def compare(self):
         dfs = []
         for level in self.levels:
             for comparison in self.comparisons:
-                for state in [self.complex_qm]:
+                for state in [self.monomer_qm, self.complex_qm]:
                     if level in state.columns:
                         df = self.test(state, level, comparison[0], comparison[1])
 
@@ -163,7 +203,7 @@ class quantitative_test:
         df_test['condition_2'] = condition_2
         df_test['level'] = level
 
-        return df_test[['condition_1','condition_2','level','bait_id','prey_id']+[c for c in df_test.columns if c.startswith("quantitative_")]+['pvalue']]
+        return df_test[['condition_1','condition_2','level','bait_id','prey_id']+[c for c in df_test.columns if c.startswith("quantitative_")]+['pvalue']].dropna()
 
     def integrate(self):
         def collapse(x):
@@ -172,13 +212,25 @@ class quantitative_test:
             elif x.shape[0] == 1:
                 return pd.Series({'pvalue': x['pvalue'].values[0]})
 
-        df = self.edge_directional
+        df_edge_level = self.tests[self.tests['bait_id'] != self.tests['prey_id']]
+        df_edge = df_edge_level.groupby(['condition_1', 'condition_2','bait_id','prey_id']).apply(collapse).reset_index()
 
-        df_edge_level = df.groupby(['condition_1', 'condition_2','level']).apply(collapse).reset_index()
-        df_edge = df.groupby(['condition_1', 'condition_2']).apply(collapse).reset_index()
+        # Append reverse interactions; the full list contains monomers only once
+        df_edge_level_rev = self.tests.rename(index=str, columns={"bait_id": "prey_id", "prey_id": "bait_id"})
+        df_edge_level_rev.loc[df_edge_level_rev['level'] == 'bait_intensity', 'level'] = 'prey_intensity_new'
+        df_edge_level_rev.loc[df_edge_level_rev['level'] == 'prey_intensity', 'level'] = 'bait_intensity_new'
+        df_edge_level_rev.loc[df_edge_level_rev['level'] == 'fractional_bait_intensity', 'level'] = 'fractional_prey_intensity_new'
+        df_edge_level_rev.loc[df_edge_level_rev['level'] == 'fractional_prey_intensity', 'level'] = 'fractional_bait_intensity_new'
 
-        df_node_level = df.groupby(['condition_1', 'condition_2','level','bait_id']).apply(collapse).reset_index()
-        df_node = df.groupby(['condition_1', 'condition_2','bait_id']).apply(collapse).reset_index()
+        df_edge_level_rev.loc[df_edge_level_rev['level'] == 'prey_intensity_new', 'level'] = 'prey_intensity'
+        df_edge_level_rev.loc[df_edge_level_rev['level'] == 'bait_intensity_new', 'level'] = 'bait_intensity'
+        df_edge_level_rev.loc[df_edge_level_rev['level'] == 'fractional_prey_intensity_new', 'level'] = 'fractional_prey_intensity'
+        df_edge_level_rev.loc[df_edge_level_rev['level'] == 'fractional_bait_intensity_new', 'level'] = 'fractional_bait_intensity'
+
+        df_edge_full = pd.concat([df_edge_level, self.tests])
+
+        df_node_level = df_edge_full.groupby(['condition_1', 'condition_2','level','bait_id']).apply(collapse).reset_index()
+        df_node = df_edge_full.groupby(['condition_1', 'condition_2','bait_id']).apply(collapse).reset_index()
 
         # Multiple testing correction via q-value
         df_edge_level['qvalue'] = qvalue(df_edge_level['pvalue'].values, pi0est(df_edge_level['pvalue'].values)['pi0'])
