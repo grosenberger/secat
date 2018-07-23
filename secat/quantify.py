@@ -107,6 +107,9 @@ class quantitative_matrix:
                     # Aggregate to protein level
                     protein = pd.DataFrame({'bait_intensity': peptide[peptide['is_bait']]['peptide_intensity'].values, 'fractional_bait_intensity': peptide[peptide['is_bait']]['peptide_intensity'].values / peptide[peptide['is_bait']]['total_peptide_intensity'].values, 'prey_intensity': peptide[~peptide['is_bait']]['peptide_intensity'].values, 'fractional_prey_intensity': peptide[~peptide['is_bait']]['peptide_intensity'].values / peptide[~peptide['is_bait']]['total_peptide_intensity'].values})
 
+                    protein['complex_intensity'] = np.mean([protein['prey_intensity'], protein['bait_intensity']])
+                    protein['fractional_complex_intensity'] = np.mean([protein['fractional_prey_intensity'], protein['fractional_bait_intensity']])
+
                     protein['complex_ratio'] = protein['prey_intensity'] / protein['bait_intensity']
                     protein['fractional_complex_ratio'] = protein['fractional_prey_intensity'] / protein['fractional_bait_intensity']
 
@@ -138,7 +141,7 @@ class quantitative_matrix:
 class quantitative_test:
     def __init__(self, outfile):
         self.outfile = outfile
-        self.levels = ['score','total_intensity','monomer_intensity','fractional_monomer_intensity','bait_intensity','fractional_bait_intensity','prey_intensity','fractional_prey_intensity','complex_ratio','fractional_complex_ratio']
+        self.levels = ['score','total_intensity','monomer_intensity','fractional_monomer_intensity','complex_intensity','fractional_complex_intensity','complex_ratio','fractional_complex_ratio']
         self.comparisons = self.contrast()
 
         self.monomer_qm, self.complex_qm = self.read()

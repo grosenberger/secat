@@ -128,7 +128,7 @@ class plot_features:
     def read_interactions_dmeta(self):
         con = sqlite3.connect(self.infile)
 
-        df = pd.read_sql('SELECT FEATURE_SCORED_COMBINED.*, FEATURE_SCORED_COMBINED.bait_id || "_" || FEATURE_SCORED_COMBINED.prey_id AS interaction_id, BAIT_META.protein_name AS bait_name, PREY_META.protein_name AS prey_name FROM FEATURE_SCORED_COMBINED INNER JOIN (SELECT * FROM PROTEIN) AS BAIT_META ON FEATURE_SCORED_COMBINED.bait_id = BAIT_META.protein_id INNER JOIN (SELECT * FROM PROTEIN) AS PREY_META ON FEATURE_SCORED_COMBINED.prey_id = PREY_META.protein_id INNER JOIN (SELECT DISTINCT bait_id, prey_id FROM COMPLEX_QM) AS COMPLEX_QM ON FEATURE_SCORED_COMBINED.bait_id = COMPLEX_QM.bait_id AND FEATURE_SCORED_COMBINED.prey_id = COMPLEX_QM.prey_id;', con)
+        df = pd.read_sql('SELECT FEATURE_SCORED_COMBINED.bait_id AS bait_id, FEATURE_SCORED_COMBINED.prey_id AS prey_id, FEATURE_SCORED_COMBINED.bait_id || "_" || FEATURE_SCORED_COMBINED.prey_id AS interaction_id, BAIT_META.protein_name AS bait_name, PREY_META.protein_name AS prey_name, (FEATURE_SCORED_COMBINED.pvalue) AS pvalue, min(FEATURE_SCORED_COMBINED.qvalue) AS qvalue FROM FEATURE_SCORED_COMBINED INNER JOIN (SELECT * FROM PROTEIN) AS BAIT_META ON FEATURE_SCORED_COMBINED.bait_id = BAIT_META.protein_id INNER JOIN (SELECT * FROM PROTEIN) AS PREY_META ON FEATURE_SCORED_COMBINED.prey_id = PREY_META.protein_id INNER JOIN (SELECT DISTINCT bait_id, prey_id FROM COMPLEX_QM) AS COMPLEX_QM ON FEATURE_SCORED_COMBINED.bait_id = COMPLEX_QM.bait_id AND FEATURE_SCORED_COMBINED.prey_id = COMPLEX_QM.prey_id GROUP BY FEATURE_SCORED_COMBINED.bait_id, FEATURE_SCORED_COMBINED.prey_id;', con)
 
         con.close()
 
