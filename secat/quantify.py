@@ -27,7 +27,7 @@ class quantitative_matrix:
     def read(self):
         con = sqlite3.connect(self.outfile)
 
-        interactions = pd.read_sql('SELECT * FROM FEATURE_SCORED_COMBINED WHERE qvalue <= %s AND bait_id != prey_id;' % (self.maximum_interaction_qvalue), con)
+        interactions = pd.read_sql('SELECT DISTINCT bait_id, prey_id FROM FEATURE_SCORED_COMBINED WHERE qvalue <= %s AND bait_id != prey_id;' % (self.maximum_interaction_qvalue), con)
 
         chromatograms = pd.read_sql('SELECT SEC.condition_id, SEC.replicate_id, SEC.sec_id, QUANTIFICATION.protein_id, QUANTIFICATION.peptide_id, peptide_intensity, MONOMER.sec_id AS monomer_sec_id FROM QUANTIFICATION INNER JOIN PROTEIN_META ON QUANTIFICATION.protein_id = PROTEIN_META.protein_id INNER JOIN PEPTIDE_META ON QUANTIFICATION.peptide_id = PEPTIDE_META.peptide_id INNER JOIN SEC ON QUANTIFICATION.RUN_ID = SEC.RUN_ID INNER JOIN MONOMER ON QUANTIFICATION.protein_id = MONOMER.protein_id and SEC.condition_id = MONOMER.condition_id AND SEC.replicate_id = MONOMER.replicate_id WHERE peptide_count >= %s AND peptide_rank <= %s;' % (self.minimum_peptides, self.maximum_peptides), con)
 

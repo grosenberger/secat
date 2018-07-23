@@ -210,7 +210,7 @@ def learn(infile, outfile, minimum_snr, minimum_mass_ratio, maximum_sec_shift, m
     con.close()
 
     # Combine
-    click.echo("Info: Combine evidence across runs.")
+    click.echo("Info: Combine evidence across replicate runs.")
 
     combined_data = combine(outfile, pi0_lambda, pi0_method, pi0_smooth_df, pi0_smooth_log_pi0, pfdr)
 

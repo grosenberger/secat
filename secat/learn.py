@@ -166,7 +166,7 @@ class combine:
         return df
 
     def combine_scores(self, scores):
-        combined_scores = scores.groupby(['bait_id','prey_id'])['pvalue'].apply(lambda x: combine_pvalues(x, method='stouffer')[1]).reset_index()
+        combined_scores = scores.groupby(['condition_id','bait_id','prey_id'])['pvalue'].apply(lambda x: combine_pvalues(x, method='stouffer')[1]).reset_index()
 
         combined_scores['qvalue'] = qvalue(combined_scores['pvalue'], pi0est(combined_scores['pvalue'], self.pi0_lambda, self.pi0_method, self.pi0_smooth_df, self.pi0_smooth_log_pi0)['pi0'], self.pfdr)
 

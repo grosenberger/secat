@@ -52,41 +52,48 @@ class plot_features:
             self.plot_bait(bait_id)
 
         if self.interaction_qvalue is not None:
-            interaction_ids = self.read_interactions()
-            for interaction_id in interaction_ids:
-                self.plot_interaction(interaction_id)
+            interaction_ids, result_ids = self.read_interactions()
+            for interaction_id, result_id in zip(interaction_ids, result_ids):
+                self.plot_interaction(interaction_id, result_id)
 
         if self.bait_qvalue is not None:
-            bait_ids = self.read_baits()
-            for bait_id in bait_ids:
-                self.plot_bait(bait_id)
+            bait_ids, result_ids = self.read_baits()
+            for bait_id, result_id in zip(bait_ids, result_ids):
+                self.plot_bait(bait_id, result_id)
 
-    def plot_interaction(self, interaction_id):
+    def plot_interaction(self, interaction_id, result_id):
         feature_data = self.feature_data
         peptide_data = self.peptide_data
 
         feature_data = feature_data[feature_data['interaction_id'] == interaction_id]
         proteins = pd.DataFrame({"protein_id": pd.concat([feature_data['bait_id'], feature_data['prey_id']])}).drop_duplicates()
         peptide_data = pd.merge(peptide_data, proteins, how='inner', on='protein_id')
-        out = os.path.splitext(os.path.basename(self.infile))[0]+"_"+interaction_id+".pdf"
+        out = os.path.splitext(os.path.basename(self.infile))[0]+"_"+str(result_id).zfill(6)+"_"+interaction_id+".pdf"
 
         with PdfPages(out) as pdf:
-            f = self.generate_plot(peptide_data, feature_data)
+            f = self.generate_plot(peptide_data, feature_data, feature_data['bait_id'].values[0], feature_data['prey_id'].values[0])
             pdf.savefig()
             plt.close()
 
-    def plot_bait(self, bait_id):
+    def plot_bait(self, bait_id, result_id):
         feature_data = self.feature_data
         peptide_data = self.peptide_data
 
-        feature_data = feature_data[feature_data['bait_id'] == bait_id]
-        out = os.path.splitext(os.path.basename(self.infile))[0]+"_"+bait_id+".pdf"
+        interaction_data = self.interactions_dmeta[['bait_id','prey_id','interaction_id']].drop_duplicates()
+        interaction_data = interaction_data[(interaction_data['bait_id'] == bait_id) | (interaction_data['prey_id'] == bait_id)]
+
+        out = os.path.splitext(os.path.basename(self.infile))[0]+"_"+str(result_id).zfill(6)+"_"+bait_id+".pdf"
 
         with PdfPages(out) as pdf:
-            for prey_id in feature_data['prey_id'].drop_duplicates().values:
-                f = self.generate_plot(peptide_data[(peptide_data['protein_id'] == bait_id) | (peptide_data['protein_id'] == prey_id)], feature_data[feature_data['prey_id'] == prey_id])
-                pdf.savefig()
-                plt.close()
+            for idx, interaction in interaction_data.iterrows():
+                feature_data_int = feature_data[feature_data['interaction_id'] == interaction['interaction_id']]
+                if feature_data_int.shape[0] > 0:
+                    proteins_int = pd.DataFrame({"protein_id": pd.concat([feature_data_int['bait_id'], feature_data_int['prey_id']])}).drop_duplicates()
+                    peptide_data_int = pd.merge(peptide_data, proteins_int, how='inner', on='protein_id')
+
+                    f = self.generate_plot(peptide_data_int, feature_data_int, feature_data_int['bait_id'].values[0], feature_data_int['prey_id'].values[0])
+                    pdf.savefig()
+                    plt.close()
 
     def read_features(self):
         con = sqlite3.connect(self.infile)
@@ -110,13 +117,13 @@ class plot_features:
         con = sqlite3.connect(self.infile)
 
         if check_sqlite_table(con, 'EDGE'):
-            df = pd.read_sql('SELECT DISTINCT bait_id || "_" || prey_id AS interaction_id FROM EDGE WHERE qvalue < %s;' % (self.interaction_qvalue), con)
+            df = pd.read_sql('SELECT DISTINCT bait_id || "_" || prey_id AS interaction_id FROM EDGE WHERE qvalue < %s ORDER BY pvalue ASC;' % (self.interaction_qvalue), con)
         else:
-            df = pd.read_sql('SELECT DISTINCT bait_id || "_" || prey_id AS interaction_id FROM FEATURE_SCORED_COMBINED WHERE qvalue < %s;' % (self.interaction_qvalue), con)
+            df = pd.read_sql('SELECT DISTINCT bait_id || "_" || prey_id AS interaction_id FROM FEATURE_SCORED_COMBINED WHERE pvalue < %s ORDER BY qvalue ASC;' % (self.interaction_qvalue), con)
 
         con.close()
 
-        return df['interaction_id'].values
+        return df['interaction_id'].values, df.index+1
 
     def read_interactions_dmeta(self):
         con = sqlite3.connect(self.infile)
@@ -142,11 +149,11 @@ class plot_features:
     def read_baits(self):
         con = sqlite3.connect(self.infile)
 
-        df = pd.read_sql('SELECT DISTINCT bait_id FROM NODE WHERE qvalue < %s;' % (self.bait_qvalue), con)
+        df = pd.read_sql('SELECT DISTINCT bait_id FROM NODE WHERE qvalue < %s ORDER BY pvalue ASC;' % (self.bait_qvalue), con)
 
         con.close()
 
-        return df['bait_id'].values
+        return df['bait_id'].values, df.index+1
 
     def read_baits_meta(self):
         con = sqlite3.connect(self.infile)
@@ -160,9 +167,8 @@ class plot_features:
 
         return df
 
-    def generate_plot(self, peptide_data, feature_data):
-        interaction_id = feature_data['interaction_id'].drop_duplicates().values[0]
-        bp_pairs = feature_data[['bait_id','prey_id']].drop_duplicates().sort_values(by=['bait_id']).reset_index()
+    def generate_plot(self, peptide_data, feature_data, bait_id, prey_id):
+        interaction_id = bait_id + "_" + prey_id
 
         tags = peptide_data.sort_values(by=['tag'])['tag'].drop_duplicates().values.tolist()
 
@@ -186,43 +192,42 @@ class plot_features:
         ymax = peptide_data['peptide_intensity'].max() * 1.2
 
         # plot interactions
-        for bp_index, bp_pair in bp_pairs.iterrows():
-            for tag in tags:
-                axarr[tags.index(tag)].set_xlim(xmin, xmax)
-                axarr[tags.index(tag)].set_ylim(ymin, ymax)
-                proteins = peptide_data['protein_id'].drop_duplicates().values
-                for protein in proteins:
-                    if protein == bp_pair['bait_id']:
-                        protein_color = 'red'
-                    else:
-                        protein_color = 'black'
-                    # plot monomer threshold
-                    axarr[tags.index(tag)].axvline(x=peptide_data[peptide_data['protein_id'] == protein]['monomer_sec_id'].mean(), color=protein_color, alpha=0.5)
+        for tag in tags:
+            axarr[tags.index(tag)].set_xlim(xmin, xmax)
+            axarr[tags.index(tag)].set_ylim(ymin, ymax)
+            proteins = peptide_data['protein_id'].drop_duplicates().values
+            for protein in proteins:
+                if protein == bait_id:
+                    protein_color = 'red'
+                else:
+                    protein_color = 'black'
+                # plot monomer threshold
+                axarr[tags.index(tag)].axvline(x=peptide_data[peptide_data['protein_id'] == protein]['monomer_sec_id'].mean(), color=protein_color, alpha=0.5)
 
-                    # plot peptide chromatograms
-                    peptides = peptide_data[peptide_data['protein_id'] == protein]['peptide_id'].drop_duplicates().values
-                    for peptide in peptides:
-                        points = peptide_data[(peptide_data['peptide_id'] == peptide) & (peptide_data['tag'] == tag)].sort_values(by=['sec_id'])
+                # plot peptide chromatograms
+                peptides = peptide_data[peptide_data['protein_id'] == protein]['peptide_id'].drop_duplicates().values
+                for peptide in peptides:
+                    points = peptide_data[(peptide_data['peptide_id'] == peptide) & (peptide_data['tag'] == tag)].sort_values(by=['sec_id'])
 
-                        axarr[tags.index(tag)].plot(points['sec_id'], points['peptide_intensity'], color=protein_color)
+                    axarr[tags.index(tag)].plot(points['sec_id'], points['peptide_intensity'], color=protein_color)
 
-                # plot legend and subtitle
-                axarr[tags.index(tag)].legend([Line2D([0], [0], color='red'), Line2D([0], [0], color='black')], [bp_pair['bait_id'], bp_pair['prey_id']])
-                axarr[tags.index(tag)].set_title(tag, loc = 'center', pad = -15)
+            # plot legend and subtitle
+            axarr[tags.index(tag)].legend([Line2D([0], [0], color='red'), Line2D([0], [0], color='black')], [bait_id, prey_id])
+            axarr[tags.index(tag)].set_title(tag, loc = 'center', pad = -15)
 
-                # plot feature information if present
-                feature = feature_data[(feature_data['bait_id'] == bp_pair['bait_id']) & (feature_data['prey_id'] == bp_pair['prey_id']) & (feature_data['tag'] == tag)]
+            # plot feature information if present
+            feature = feature_data[(feature_data['bait_id'] == bait_id) & (feature_data['prey_id'] == prey_id) & (feature_data['tag'] == tag)]
 
-                if feature.shape[0] > 0:
-                    feature_string = "p-value: %s\nq-value: %s\npep: %s" % (np.round(feature['pvalue'].mean(),3),np.round(feature['qvalue'].mean(),3),np.round(feature['pep'].mean(),3))
-                    axarr[tags.index(tag)].text(0.01, 0.95, feature_string, transform=axarr[tags.index(tag)].transAxes, fontsize=10, verticalalignment='top', bbox=dict(boxstyle='square', facecolor='wheat', alpha=0.5))
+            if feature.shape[0] > 0:
+                feature_string = "p-value: %s\nq-value: %s\npep: %s" % (np.round(feature['pvalue'].mean(),3),np.round(feature['qvalue'].mean(),3),np.round(feature['pep'].mean(),3))
+                axarr[tags.index(tag)].text(0.01, 0.95, feature_string, transform=axarr[tags.index(tag)].transAxes, fontsize=10, verticalalignment='top', bbox=dict(boxstyle='square', facecolor='wheat', alpha=0.5))
 
         # plot quantitative metadata
         if self.interactions_qmeta is not None:
             qmeta = self.interactions_qmeta
             qmeta = qmeta[qmeta['interaction_id'] == interaction_id][['level','condition_1','condition_2','pvalue','qvalue']].sort_values(by='pvalue')
-
-            axarr[len(tags)].table(cellText=qmeta.values, colLabels=qmeta.columns, loc='center')
+            if qmeta.shape[0] > 0:
+                axarr[len(tags)].table(cellText=qmeta.values, colLabels=qmeta.columns, loc='center')
             axarr[len(tags)].axis('off')
 
         return f
