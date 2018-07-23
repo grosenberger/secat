@@ -20,20 +20,23 @@ class quantitative_matrix:
         self.minimum_peptides = minimum_peptides
         self.maximum_peptides = maximum_peptides
 
-        self.interactions, self.chromatograms = self.read()
+        self.interactions, self.detections, self.chromatograms = self.read()
         self.monomer = self.quantify_monomers()
         self.complex = self.quantify_complexes()
+        self.complex = self.detect_complexes()
 
     def read(self):
         con = sqlite3.connect(self.outfile)
 
         interactions = pd.read_sql('SELECT DISTINCT bait_id, prey_id FROM FEATURE_SCORED_COMBINED WHERE qvalue <= %s AND bait_id != prey_id;' % (self.maximum_interaction_qvalue), con)
 
+        detections = pd.read_sql('SELECT DISTINCT condition_id, replicate_id, FEATURE_SCORED.bait_id, FEATURE_SCORED.prey_id, 1-pep AS score FROM FEATURE_SCORED INNER JOIN (SELECT DISTINCT bait_id, prey_id FROM FEATURE_SCORED_COMBINED WHERE qvalue <= %s AND bait_id != prey_id) AS FEATURE_SCORED_COMBINED ON FEATURE_SCORED.bait_id = FEATURE_SCORED_COMBINED.bait_id AND FEATURE_SCORED.prey_id = FEATURE_SCORED_COMBINED.prey_id;' % (self.maximum_interaction_qvalue), con)
+
         chromatograms = pd.read_sql('SELECT SEC.condition_id, SEC.replicate_id, SEC.sec_id, QUANTIFICATION.protein_id, QUANTIFICATION.peptide_id, peptide_intensity, MONOMER.sec_id AS monomer_sec_id FROM QUANTIFICATION INNER JOIN PROTEIN_META ON QUANTIFICATION.protein_id = PROTEIN_META.protein_id INNER JOIN PEPTIDE_META ON QUANTIFICATION.peptide_id = PEPTIDE_META.peptide_id INNER JOIN SEC ON QUANTIFICATION.RUN_ID = SEC.RUN_ID INNER JOIN MONOMER ON QUANTIFICATION.protein_id = MONOMER.protein_id and SEC.condition_id = MONOMER.condition_id AND SEC.replicate_id = MONOMER.replicate_id WHERE peptide_count >= %s AND peptide_rank <= %s;' % (self.minimum_peptides, self.maximum_peptides), con)
 
         con.close()
 
-        return interactions, chromatograms
+        return interactions, detections, chromatograms
 
     def quantify_monomers(self):
         def summarize(df):
@@ -61,7 +64,7 @@ class quantitative_matrix:
 
                 return protein
 
-        # Generate list for monomers
+        # Quantify monomers
         monomers = self.chromatograms.copy()
         monomers['bait_id'] = monomers['protein_id']
         monomers['prey_id'] = monomers['protein_id']
@@ -109,7 +112,7 @@ class quantitative_matrix:
 
                     return protein
 
-        # Generate long list for interactions
+        # Quantify interactions
         baits = pd.merge(self.interactions, self.chromatograms, left_on=['bait_id'], right_on=['protein_id']).drop(columns=['protein_id'])
         baits['is_bait'] = True
 
@@ -122,10 +125,20 @@ class quantitative_matrix:
 
         return complexes_agg
 
+    def detect_complexes(self):
+        interactions = self.detections[['bait_id','prey_id']].drop_duplicates().reset_index()
+        interactions['id'] = 1
+        experimental_design = self.detections[['condition_id','replicate_id']].drop_duplicates().reset_index()
+        experimental_design['id'] = 1
+
+        detected_complexes = pd.merge(pd.merge(interactions, experimental_design, on='id')[['condition_id','replicate_id','bait_id','prey_id']], self.detections, on=['condition_id','replicate_id','bait_id','prey_id'], how='left').fillna(0)
+
+        return pd.merge(detected_complexes, self.complex, on=['condition_id','replicate_id','bait_id','prey_id'], how='left')
+
 class quantitative_test:
     def __init__(self, outfile):
         self.outfile = outfile
-        self.levels = ['total_intensity','monomer_intensity','fractional_monomer_intensity','bait_intensity','fractional_bait_intensity','prey_intensity','fractional_prey_intensity','complex_ratio','fractional_complex_ratio']
+        self.levels = ['score','total_intensity','monomer_intensity','fractional_monomer_intensity','bait_intensity','fractional_bait_intensity','prey_intensity','fractional_prey_intensity','complex_ratio','fractional_complex_ratio']
         self.comparisons = self.contrast()
 
         self.monomer_qm, self.complex_qm = self.read()
@@ -184,9 +197,6 @@ class quantitative_test:
                 if x['condition_id'].value_counts()[condition_1] > 0 and x['condition_id'].value_counts()[condition_2] > 0:
                     qm = pd.merge(experimental_design, x, how='left')
 
-                    if level == 'score':
-                        qm[level].fillna(0, inplace=True)
-
                     qmt = qm.transpose()
                     qmt.columns = "quantitative" + "_" + experimental_design["condition_id"] + "_" + experimental_design["replicate_id"]
                     # qmt['pvalue'] = mannwhitneyu(qm[qm['condition_id'] == condition_1][level].values, qm[qm['condition_id'] == condition_2][level].values)[1]
@@ -198,12 +208,12 @@ class quantitative_test:
         # compute number of replicates
         experimental_design = df[['condition_id','replicate_id']].drop_duplicates()
 
-        df_test = df.groupby(['bait_id','prey_id']).apply(lambda x: stat(x, experimental_design)).reset_index()#.dropna()
+        df_test = df.groupby(['bait_id','prey_id']).apply(lambda x: stat(x, experimental_design)).reset_index()
         df_test['condition_1'] = condition_1
         df_test['condition_2'] = condition_2
         df_test['level'] = level
 
-        return df_test[['condition_1','condition_2','level','bait_id','prey_id']+[c for c in df_test.columns if c.startswith("quantitative_")]+['pvalue']].dropna()
+        return df_test[['condition_1','condition_2','level','bait_id','prey_id']+[c for c in df_test.columns if c.startswith("quantitative_")]+['pvalue']]
 
     def integrate(self):
         def collapse(x):
