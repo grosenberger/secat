@@ -42,14 +42,15 @@ class plot_features:
         # Read meta data if available
         self.interactions_dmeta = self.read_interactions_dmeta()
         self.interactions_qmeta = self.read_interactions_qmeta()
-        self.baits_meta = self.read_baits_meta()
+
+        self.monomer_qmeta = self.read_monomer_qmeta()
 
 
         if self.interaction_id is not None:
             self.plot_interaction(interaction_id)
 
         if self.bait_id is not None:
-            self.plot_bait(bait_id)
+            self.plot_bait(bait_id, 0)
 
         if self.interaction_qvalue is not None:
             interaction_ids, result_ids = self.read_interactions()
@@ -82,6 +83,9 @@ class plot_features:
         interaction_data = self.interactions_dmeta[['bait_id','prey_id','interaction_id']].drop_duplicates()
         interaction_data = interaction_data[(interaction_data['bait_id'] == bait_id) | (interaction_data['prey_id'] == bait_id)]
 
+        # Add monomer
+        interaction_data = pd.concat([pd.DataFrame({'bait_id': [bait_id], 'prey_id': [bait_id], 'interaction_id': [bait_id + "_" + bait_id]}), interaction_data], sort=False)
+
         out = os.path.splitext(os.path.basename(self.infile))[0]+"_"+str(result_id).zfill(6)+"_"+bait_id+".pdf"
 
         with PdfPages(out) as pdf:
@@ -92,6 +96,10 @@ class plot_features:
                     peptide_data_int = pd.merge(peptide_data, proteins_int, how='inner', on='protein_id')
 
                     f = self.generate_plot(peptide_data_int, feature_data_int, feature_data_int['bait_id'].values[0], feature_data_int['prey_id'].values[0])
+                    pdf.savefig()
+                    plt.close()
+                elif interaction['interaction_id'] == (bait_id + "_" + bait_id):
+                    f = self.generate_plot(peptide_data[peptide_data['protein_id'] == bait_id], feature_data_int, bait_id, bait_id)
                     pdf.savefig()
                     plt.close()
 
@@ -146,16 +154,7 @@ class plot_features:
 
         return df
 
-    def read_baits(self):
-        con = sqlite3.connect(self.infile)
-
-        df = pd.read_sql('SELECT DISTINCT bait_id FROM NODE WHERE qvalue < %s ORDER BY pvalue ASC;' % (self.bait_qvalue), con)
-
-        con.close()
-
-        return df['bait_id'].values, df.index+1
-
-    def read_baits_meta(self):
+    def read_monomer_qmeta(self):
         con = sqlite3.connect(self.infile)
 
         df = None
@@ -166,6 +165,15 @@ class plot_features:
         con.close()
 
         return df
+
+    def read_baits(self):
+        con = sqlite3.connect(self.infile)
+
+        df = pd.read_sql('SELECT DISTINCT bait_id FROM NODE WHERE qvalue < %s ORDER BY pvalue ASC;' % (self.bait_qvalue), con)
+
+        con.close()
+
+        return df['bait_id'].values, df.index+1
 
     def generate_plot(self, peptide_data, feature_data, bait_id, prey_id):
         interaction_id = bait_id + "_" + prey_id
@@ -181,9 +189,12 @@ class plot_features:
         axarr.append(f.add_subplot(len(tags)+1, 1, len(tags)+1))
 
         # plot detection metadata
-        dmeta = self.interactions_dmeta
-        dmeta = dmeta[dmeta['interaction_id'] == interaction_id][['bait_name','prey_name','pvalue','qvalue']]
-        titletext = str(interaction_id) + "\n" + str(dmeta['bait_name'].values[0]) + " vs "  + str(dmeta['prey_name'].values[0]) + "\n" + "p-value: "  + str(np.round(dmeta['pvalue'].values[0], 3)) + " q-value: "  + str(np.round(dmeta['qvalue'].values[0], 3))
+        if bait_id is not prey_id:
+            dmeta = self.interactions_dmeta
+            dmeta = dmeta[dmeta['interaction_id'] == interaction_id][['bait_name','prey_name','pvalue','qvalue']]
+            titletext = str(interaction_id) + "\n" + str(dmeta['bait_name'].values[0]) + " vs "  + str(dmeta['prey_name'].values[0]) + "\n" + "p-value: "  + str(np.round(dmeta['pvalue'].values[0], 3)) + " q-value: "  + str(np.round(dmeta['qvalue'].values[0], 3))
+        else:
+            titletext = str(interaction_id)
         f.suptitle(titletext)
 
         xmin = 0 # peptide_data['sec_id'].min()
@@ -212,7 +223,8 @@ class plot_features:
                     axarr[tags.index(tag)].plot(points['sec_id'], points['peptide_intensity'], color=protein_color)
 
             # plot legend and subtitle
-            axarr[tags.index(tag)].legend([Line2D([0], [0], color='red'), Line2D([0], [0], color='black')], [bait_id, prey_id])
+            if bait_id is not prey_id:
+                axarr[tags.index(tag)].legend([Line2D([0], [0], color='red'), Line2D([0], [0], color='black')], [bait_id, prey_id])
             axarr[tags.index(tag)].set_title(tag, loc = 'center', pad = -15)
 
             # plot feature information if present
@@ -223,7 +235,13 @@ class plot_features:
                 axarr[tags.index(tag)].text(0.01, 0.95, feature_string, transform=axarr[tags.index(tag)].transAxes, fontsize=10, verticalalignment='top', bbox=dict(boxstyle='square', facecolor='wheat', alpha=0.5))
 
         # plot quantitative metadata
-        if self.interactions_qmeta is not None:
+        if bait_id == prey_id:
+            mmeta = self.monomer_qmeta
+            mmeta = mmeta[mmeta['bait_id'] == bait_id][['level','condition_1','condition_2','pvalue','qvalue']].sort_values(by='pvalue')
+            if mmeta.shape[0] > 0:
+                axarr[len(tags)].table(cellText=mmeta.values, colLabels=mmeta.columns, loc='center')
+            axarr[len(tags)].axis('off')
+        elif self.interactions_qmeta is not None:
             qmeta = self.interactions_qmeta
             qmeta = qmeta[qmeta['interaction_id'] == interaction_id][['level','condition_1','condition_2','pvalue','qvalue']].sort_values(by='pvalue')
             if qmeta.shape[0] > 0:
