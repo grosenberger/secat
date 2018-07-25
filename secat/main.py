@@ -39,7 +39,9 @@ def cli():
 @click.option('--decoy_left_sec_bins', 'decoy_left_sec_bins', default=1, show_default=True, type=int, help='Number of decoy bins for left SEC fraction.')
 @click.option('--decoy_right_sec_bins', 'decoy_right_sec_bins', default=1, show_default=True, type=int, help='Number of decoy bins for right SEC fraction.')
 @click.option('--min_interaction_confidence', 'min_interaction_confidence', default=0.0, show_default=True, type=float, help='Minimum interaction confidence for prior information from network.')
-def preprocess(infiles, outfile, secfile, netfile, negnetfile, uniprotfile, columns, decoy_intensity_bins, decoy_left_sec_bins, decoy_right_sec_bins, min_interaction_confidence):
+@click.option('--interaction_confidence_bins', 'interaction_confidence_bins', default=10, show_default=True, type=int, help='Number of interaction confidence bins for grouped error rate estimation.')
+
+def preprocess(infiles, outfile, secfile, netfile, negnetfile, uniprotfile, columns, decoy_intensity_bins, decoy_left_sec_bins, decoy_right_sec_bins, min_interaction_confidence, interaction_confidence_bins):
     """
     Import and preprocess SEC data.
     """
@@ -91,7 +93,7 @@ def preprocess(infiles, outfile, secfile, netfile, negnetfile, uniprotfile, colu
 
     # Generate interaction query data
     click.echo("Info: Generating interaction query data.")
-    query_data = query(net_data, negnet_data, meta_data.protein_meta, min_interaction_confidence)
+    query_data = query(net_data, negnet_data, meta_data.protein_meta, min_interaction_confidence, interaction_confidence_bins)
     query_data.to_df().to_sql('QUERY', con, index=False)
 
     # Remove any entries that are not necessary (proteins not covered by LC-MS/MS data)
@@ -167,7 +169,6 @@ def score(infile, outfile, monomer_threshold_factor, monomer_elution_width, mini
 @click.option('--minimum_snr', 'minimum_snr', default=1.0, show_default=True, type=int, help='Minimum signal-to-noise ratio per peptide.')
 @click.option('--minimum_mass_ratio', 'minimum_mass_ratio', default=0.2, show_default=True, type=float, help='Minimum number of fractions required to score an interaction.')
 @click.option('--maximum_sec_shift', 'maximum_sec_shift', default=3.0, show_default=True, type=float, help='Maximum lag in SEC units between interactions and subunits.')
-@click.option('--minimum_learning_confidence', 'minimum_learning_confidence', default=0.9, show_default=True, type=float, help='Minimum prior interaction confidence for semi-supervised learning.')
 # Semi-supervised learning
 @click.option('--xeval_fraction', default=0.5, show_default=True, type=float, help='Data fraction used for cross-validation of semi-supervised learning step.')
 @click.option('--xeval_num_iter', default=10, show_default=True, type=int, help='Number of iterations for cross-validation of semi-supervised learning step.')
@@ -188,7 +189,7 @@ def score(infile, outfile, monomer_threshold_factor, monomer_elution_width, mini
 @click.option('--lfdr_eps', default=np.power(10.0,-8), show_default=True, type=float, help='Numeric value that is threshold for the tails of the empirical p-value distribution.')
 @click.option('--threads', 'threads', default=1, show_default=True, type=int, help='Number of threads used for parallel processing of SEC runs. -1 means all available CPUs.')
 @click.option('--test/--no-test', default=False, show_default=True, help='Run in test mode with fixed seed.')
-def learn(infile, outfile, minimum_snr, minimum_mass_ratio, maximum_sec_shift, minimum_learning_confidence, xeval_fraction, xeval_num_iter, ss_initial_fdr, ss_iteration_fdr, ss_num_iter, parametric, pfdr, pi0_lambda, pi0_method, pi0_smooth_df, pi0_smooth_log_pi0, lfdr_truncate, lfdr_monotone, lfdr_transformation, lfdr_adj, lfdr_eps, threads, test):
+def learn(infile, outfile, minimum_snr, minimum_mass_ratio, maximum_sec_shift, xeval_fraction, xeval_num_iter, ss_initial_fdr, ss_iteration_fdr, ss_num_iter, parametric, pfdr, pi0_lambda, pi0_method, pi0_smooth_df, pi0_smooth_log_pi0, lfdr_truncate, lfdr_monotone, lfdr_transformation, lfdr_adj, lfdr_eps, threads, test):
     """
     Learn true/false interaction features in SEC data.
     """
@@ -203,7 +204,7 @@ def learn(infile, outfile, minimum_snr, minimum_mass_ratio, maximum_sec_shift, m
     # Run PyProphet training
     click.echo("Info: Running PyProphet.")
 
-    scored_data = pyprophet(outfile, minimum_snr, minimum_mass_ratio, maximum_sec_shift, minimum_learning_confidence, xeval_fraction, xeval_num_iter, ss_initial_fdr, ss_iteration_fdr, ss_num_iter, parametric, pfdr, pi0_lambda, pi0_method, pi0_smooth_df, pi0_smooth_log_pi0, lfdr_truncate, lfdr_monotone, lfdr_transformation, lfdr_adj, lfdr_eps, threads, test)
+    scored_data = pyprophet(outfile, minimum_snr, minimum_mass_ratio, maximum_sec_shift, xeval_fraction, xeval_num_iter, ss_initial_fdr, ss_iteration_fdr, ss_num_iter, parametric, pfdr, pi0_lambda, pi0_method, pi0_smooth_df, pi0_smooth_log_pi0, lfdr_truncate, lfdr_monotone, lfdr_transformation, lfdr_adj, lfdr_eps, threads, test)
 
     con = sqlite3.connect(outfile)
     scored_data.df.to_sql('FEATURE_SCORED', con, index=False, if_exists='replace')

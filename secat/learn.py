@@ -22,13 +22,12 @@ from pyprophet.report import save_report
 from pyprophet.stats import qvalue, pi0est
 
 class pyprophet:
-    def __init__(self, outfile, minimum_snr, minimum_mass_ratio, maximum_sec_shift, minimum_learning_confidence, xeval_fraction, xeval_num_iter, ss_initial_fdr, ss_iteration_fdr, ss_num_iter, parametric, pfdr, pi0_lambda, pi0_method, pi0_smooth_df, pi0_smooth_log_pi0, lfdr_truncate, lfdr_monotone, lfdr_transformation, lfdr_adj, lfdr_eps, threads, test):
+    def __init__(self, outfile, minimum_snr, minimum_mass_ratio, maximum_sec_shift, xeval_fraction, xeval_num_iter, ss_initial_fdr, ss_iteration_fdr, ss_num_iter, parametric, pfdr, pi0_lambda, pi0_method, pi0_smooth_df, pi0_smooth_log_pi0, lfdr_truncate, lfdr_monotone, lfdr_transformation, lfdr_adj, lfdr_eps, threads, test):
 
         self.outfile = outfile
         self.minimum_snr = minimum_snr
         self.minimum_mass_ratio = minimum_mass_ratio
         self.maximum_sec_shift = maximum_sec_shift
-        self.minimum_learning_confidence = minimum_learning_confidence
         self.xeval_fraction = xeval_fraction
         self.xeval_num_iter = xeval_num_iter
         self.ss_initial_fdr = ss_initial_fdr
@@ -49,29 +48,18 @@ class pyprophet:
         self.threads = threads
         self.test = test
 
-        learning_data = self.read_learning()
-        _, self.weights = self.learn(learning_data)
+        data = self.read_data()
+        self.weights = self.learn(data[data['confidence_bin'] == data['confidence_bin'].max()])
 
-        print self.weights
+        click.echo(self.weights)
 
-        detecting_data = self.read_detecting()
+        self.df = data.groupby('confidence_bin').apply(self.apply)
 
-        self.df = self.apply(detecting_data)
-        # self.df = detecting_data.groupby('sec_group').apply(self.apply)
-
-    def read_learning(self):
+    def read_data(self):
         con = sqlite3.connect(self.outfile)
-        df = pd.read_sql('SELECT FEATURE.*, condition_id || "_" || replicate_id || "_" || FEATURE.bait_id || "_" || FEATURE.prey_id AS pyprophet_feature_id FROM FEATURE LEFT OUTER JOIN NETWORK ON FEATURE.bait_id = NETWORK.bait_id AND FEATURE.prey_id = NETWORK.prey_id WHERE var_xcorr_shift <= %s AND var_mass_ratio >= %s AND var_snr >= %s AND (interaction_confidence >= %s OR decoy == 1);' % (self.maximum_sec_shift, self.minimum_mass_ratio, self.minimum_snr, self.minimum_learning_confidence), con)
+        # df = pd.read_sql('SELECT FEATURE.*, condition_id || "_" || replicate_id || "_" || FEATURE.bait_id || "_" || FEATURE.prey_id AS pyprophet_feature_id FROM FEATURE LEFT OUTER JOIN NETWORK ON FEATURE.bait_id = NETWORK.bait_id AND FEATURE.prey_id = NETWORK.prey_id WHERE var_xcorr_shift <= %s AND var_mass_ratio >= %s AND var_snr >= %s AND (interaction_confidence >= %s OR decoy == 1);' % (self.maximum_sec_shift, self.minimum_mass_ratio, self.minimum_snr, self.minimum_learning_confidence), con)
+        df = pd.read_sql('SELECT *, FEATURE.condition_id || "_" || FEATURE.replicate_id || "_" || FEATURE.bait_id || "_" || FEATURE.prey_id AS pyprophet_feature_id FROM FEATURE INNER JOIN QUERY ON FEATURE.bait_id = QUERY.bait_id AND FEATURE.prey_id = QUERY.prey_id AND FEATURE.decoy = QUERY.decoy WHERE var_xcorr_shift <= %s AND var_mass_ratio >= %s AND var_snr >= %s;' % (self.maximum_sec_shift, self.minimum_mass_ratio, self.minimum_snr), con)
         con.close()
-
-        return df
-
-    def read_detecting(self):
-        con = sqlite3.connect(self.outfile)
-        df = pd.read_sql('SELECT *, condition_id || "_" || replicate_id || "_" || bait_id || "_" || prey_id AS pyprophet_feature_id FROM FEATURE WHERE var_xcorr_shift <= %s AND var_mass_ratio >= %s AND var_snr >= %s;' % (self.maximum_sec_shift, self.minimum_mass_ratio, self.minimum_snr), con)
-        con.close()
-
-        # df['sec_group'] = pd.qcut(df['intersection'], q=4, labels=False)
 
         return df
 
@@ -81,7 +69,7 @@ class pyprophet:
         self.plot(result, scorer.pi0, "learning")
         self.plot_scores(result.scored_tables, "learning")
 
-        return result, weights
+        return weights
 
     def apply(self, detecting_data):
         (result, scorer, weights) = PyProphet(self.xeval_fraction, self.xeval_num_iter, self.ss_initial_fdr, self.ss_iteration_fdr, self.ss_num_iter, self.group_id, self.parametric, self.pfdr, self.pi0_lambda, self.pi0_method, self.pi0_smooth_df, self.pi0_smooth_log_pi0, self.lfdr_truncate, self.lfdr_monotone, self.lfdr_transformation, self.lfdr_adj, self.lfdr_eps, False, self.threads, self.test).apply_weights(detecting_data, self.weights)
@@ -89,8 +77,8 @@ class pyprophet:
         df = result.scored_tables[['condition_id','replicate_id','bait_id','prey_id','decoy','d_score','p_value','q_value','pep']]
         df.columns = ['condition_id','replicate_id','bait_id','prey_id','decoy','score','pvalue','qvalue','pep']
 
-        self.plot(result, scorer.pi0, "detecting")# + str(detecting_data['sec_group'].values[0]))
-        self.plot_scores(result.scored_tables, "detecting")# + str(detecting_data['sec_group'].values[0]))
+        self.plot(result, scorer.pi0, "detecting_" + str(detecting_data['confidence_bin'].values[0]))
+        self.plot_scores(result.scored_tables, "detecting_" + str(detecting_data['confidence_bin'].values[0]))
 
         return df
 

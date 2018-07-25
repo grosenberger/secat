@@ -424,8 +424,9 @@ class meta:
         return peptide_meta, protein_meta
 
 class query:
-    def __init__(self, net_data, negnet_data, protein_meta_data, min_interaction_confidence):
+    def __init__(self, net_data, negnet_data, protein_meta_data, min_interaction_confidence, interaction_confidence_bins):
         self.min_interaction_confidence = min_interaction_confidence
+        self.interaction_confidence_bins = interaction_confidence_bins
         self.df = self.generate_query(net_data, negnet_data, protein_meta_data)
 
     def generate_query(self, net_data, negnet_data, protein_meta_data):
@@ -437,10 +438,13 @@ class query:
         queries = pd.merge(net_data.to_df(), protein_meta_data, left_on='prey_id', right_on='protein_id', how='inner')
         queries['decoy'] = False
 
+        # Generate confidence bin assignment
+        queries['confidence_bin'] = pd.cut(queries['interaction_confidence'], bins=self.interaction_confidence_bins, labels=False)
+
         # Append decoys
-        if negnet_data == None:
+        if negnet_data is None:
             decoy_queries = queries.copy()
-            decoy_queries = decoy_queries.groupby(['intensity_bin','sec_min_bin','sec_max_bin'])
+            decoy_queries = decoy_queries.groupby(['confidence_bin','intensity_bin','sec_min_bin','sec_max_bin'])
 
             for it in range(0, 1):
                 if it == 0:
@@ -462,7 +466,14 @@ class query:
         if decoy_queries.shape[0] > queries.shape[0]:
             decoy_queries = decoy_queries.sample(queries.shape[0]) # Same number of decoys as targets
 
-        return pd.concat([queries, decoy_queries], sort=True)[['bait_id','prey_id','decoy']].drop_duplicates()
+        # Add confidence bin from target network if negative network is provided
+        if negnet_data is not None:
+            decoy_queries['confidence_bin'] = queries.sample(decoy_queries.shape[0], replace=True)['confidence_bin'].values
+
+        click.echo("Target queries per confidence bin:\n%s" % (queries['confidence_bin'].value_counts()))
+        click.echo("Decoy queries per confidence bin:\n%s" % (decoy_queries['confidence_bin'].value_counts()))
+
+        return pd.concat([queries, decoy_queries], sort=True)[['bait_id','prey_id','decoy','confidence_bin']].drop_duplicates()
 
     def to_df(self):
         return self.df
