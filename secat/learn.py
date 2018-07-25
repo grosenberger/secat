@@ -58,7 +58,7 @@ class pyprophet:
     def read_data(self):
         con = sqlite3.connect(self.outfile)
         # df = pd.read_sql('SELECT FEATURE.*, condition_id || "_" || replicate_id || "_" || FEATURE.bait_id || "_" || FEATURE.prey_id AS pyprophet_feature_id FROM FEATURE LEFT OUTER JOIN NETWORK ON FEATURE.bait_id = NETWORK.bait_id AND FEATURE.prey_id = NETWORK.prey_id WHERE var_xcorr_shift <= %s AND var_mass_ratio >= %s AND var_snr >= %s AND (interaction_confidence >= %s OR decoy == 1);' % (self.maximum_sec_shift, self.minimum_mass_ratio, self.minimum_snr, self.minimum_learning_confidence), con)
-        df = pd.read_sql('SELECT *, FEATURE.condition_id || "_" || FEATURE.replicate_id || "_" || FEATURE.bait_id || "_" || FEATURE.prey_id AS pyprophet_feature_id FROM FEATURE INNER JOIN QUERY ON FEATURE.bait_id = QUERY.bait_id AND FEATURE.prey_id = QUERY.prey_id AND FEATURE.decoy = QUERY.decoy WHERE var_xcorr_shift <= %s AND var_mass_ratio >= %s AND var_snr >= %s;' % (self.maximum_sec_shift, self.minimum_mass_ratio, self.minimum_snr), con)
+        df = pd.read_sql('SELECT *, condition_id || "_" || replicate_id || "_" || bait_id || "_" || prey_id AS pyprophet_feature_id FROM FEATURE WHERE var_xcorr_shift <= %s AND var_mass_ratio >= %s AND var_snr >= %s;' % (self.maximum_sec_shift, self.minimum_mass_ratio, self.minimum_snr), con)
         con.close()
 
         return df
