@@ -439,7 +439,7 @@ class query:
         queries['decoy'] = False
 
         # Generate confidence bin assignment
-        queries['confidence_bin'] = pd.cut(queries['interaction_confidence'], bins=self.interaction_confidence_bins, labels=False)
+        queries['confidence_bin'] = pd.qcut(queries['interaction_confidence'], q=self.interaction_confidence_bins, labels=False)
 
         # Append decoys
         if negnet_data is None:

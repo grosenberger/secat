@@ -39,7 +39,7 @@ def cli():
 @click.option('--decoy_left_sec_bins', 'decoy_left_sec_bins', default=1, show_default=True, type=int, help='Number of decoy bins for left SEC fraction.')
 @click.option('--decoy_right_sec_bins', 'decoy_right_sec_bins', default=1, show_default=True, type=int, help='Number of decoy bins for right SEC fraction.')
 @click.option('--min_interaction_confidence', 'min_interaction_confidence', default=0.0, show_default=True, type=float, help='Minimum interaction confidence for prior information from network.')
-@click.option('--interaction_confidence_bins', 'interaction_confidence_bins', default=10, show_default=True, type=int, help='Number of interaction confidence bins for grouped error rate estimation.')
+@click.option('--interaction_confidence_bins', 'interaction_confidence_bins', default=4, show_default=True, type=int, help='Number of interaction confidence bins for grouped error rate estimation.')
 
 def preprocess(infiles, outfile, secfile, netfile, negnetfile, uniprotfile, columns, decoy_intensity_bins, decoy_left_sec_bins, decoy_right_sec_bins, min_interaction_confidence, interaction_confidence_bins):
     """
