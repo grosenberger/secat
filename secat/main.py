@@ -38,10 +38,11 @@ def cli():
 @click.option('--decoy_intensity_bins', 'decoy_intensity_bins', default=1, show_default=True, type=int, help='Number of decoy bins for intensity.')
 @click.option('--decoy_left_sec_bins', 'decoy_left_sec_bins', default=1, show_default=True, type=int, help='Number of decoy bins for left SEC fraction.')
 @click.option('--decoy_right_sec_bins', 'decoy_right_sec_bins', default=1, show_default=True, type=int, help='Number of decoy bins for right SEC fraction.')
+@click.option('--decoy_subsample/--no-decoy_subsample', default=True, show_default=True, help='Whether decoys should be subsampled to be approximately of similar number as targets.')
 @click.option('--min_interaction_confidence', 'min_interaction_confidence', default=0.0, show_default=True, type=float, help='Minimum interaction confidence for prior information from network.')
 @click.option('--interaction_confidence_bins', 'interaction_confidence_bins', default=4, show_default=True, type=int, help='Number of interaction confidence bins for grouped error rate estimation.')
 
-def preprocess(infiles, outfile, secfile, netfile, negnetfile, uniprotfile, columns, decoy_intensity_bins, decoy_left_sec_bins, decoy_right_sec_bins, min_interaction_confidence, interaction_confidence_bins):
+def preprocess(infiles, outfile, secfile, netfile, negnetfile, uniprotfile, columns, decoy_intensity_bins, decoy_left_sec_bins, decoy_right_sec_bins, decoy_subsample, min_interaction_confidence, interaction_confidence_bins):
     """
     Import and preprocess SEC data.
     """
@@ -93,7 +94,7 @@ def preprocess(infiles, outfile, secfile, netfile, negnetfile, uniprotfile, colu
 
     # Generate interaction query data
     click.echo("Info: Generating interaction query data.")
-    query_data = query(net_data, negnet_data, meta_data.protein_meta, min_interaction_confidence, interaction_confidence_bins)
+    query_data = query(net_data, negnet_data, meta_data.protein_meta, min_interaction_confidence, interaction_confidence_bins, decoy_subsample)
     query_data.to_df().to_sql('QUERY', con, index=False)
 
     # Remove any entries that are not necessary (proteins not covered by LC-MS/MS data)

@@ -127,7 +127,7 @@ class plot_features:
         if check_sqlite_table(con, 'EDGE'):
             df = pd.read_sql('SELECT DISTINCT bait_id || "_" || prey_id AS interaction_id FROM EDGE WHERE qvalue < %s ORDER BY pvalue ASC;' % (self.interaction_qvalue), con)
         else:
-            df = pd.read_sql('SELECT DISTINCT bait_id || "_" || prey_id AS interaction_id FROM FEATURE_SCORED_COMBINED WHERE pvalue < %s ORDER BY qvalue ASC;' % (self.interaction_qvalue), con)
+            df = pd.read_sql('SELECT DISTINCT bait_id || "_" || prey_id AS interaction_id, min(pvalue) AS pvalue FROM FEATURE_SCORED_COMBINED WHERE pvalue < %s GROUP BY FEATURE_SCORED_COMBINED.bait_id, FEATURE_SCORED_COMBINED.prey_id ORDER BY pvalue ASC;' % (self.interaction_qvalue), con)
 
         con.close()
 
@@ -136,7 +136,10 @@ class plot_features:
     def read_interactions_dmeta(self):
         con = sqlite3.connect(self.infile)
 
-        df = pd.read_sql('SELECT FEATURE_SCORED_COMBINED.bait_id AS bait_id, FEATURE_SCORED_COMBINED.prey_id AS prey_id, FEATURE_SCORED_COMBINED.bait_id || "_" || FEATURE_SCORED_COMBINED.prey_id AS interaction_id, BAIT_META.protein_name AS bait_name, PREY_META.protein_name AS prey_name, (FEATURE_SCORED_COMBINED.pvalue) AS pvalue, min(FEATURE_SCORED_COMBINED.qvalue) AS qvalue FROM FEATURE_SCORED_COMBINED INNER JOIN (SELECT * FROM PROTEIN) AS BAIT_META ON FEATURE_SCORED_COMBINED.bait_id = BAIT_META.protein_id INNER JOIN (SELECT * FROM PROTEIN) AS PREY_META ON FEATURE_SCORED_COMBINED.prey_id = PREY_META.protein_id INNER JOIN (SELECT DISTINCT bait_id, prey_id FROM COMPLEX_QM) AS COMPLEX_QM ON FEATURE_SCORED_COMBINED.bait_id = COMPLEX_QM.bait_id AND FEATURE_SCORED_COMBINED.prey_id = COMPLEX_QM.prey_id GROUP BY FEATURE_SCORED_COMBINED.bait_id, FEATURE_SCORED_COMBINED.prey_id;', con)
+        if check_sqlite_table(con, 'COMPLEX_QM'):
+            df = pd.read_sql('SELECT FEATURE_SCORED_COMBINED.bait_id AS bait_id, FEATURE_SCORED_COMBINED.prey_id AS prey_id, FEATURE_SCORED_COMBINED.bait_id || "_" || FEATURE_SCORED_COMBINED.prey_id AS interaction_id, BAIT_META.protein_name AS bait_name, PREY_META.protein_name AS prey_name, min(FEATURE_SCORED_COMBINED.pvalue) AS pvalue, min(FEATURE_SCORED_COMBINED.qvalue) AS qvalue FROM FEATURE_SCORED_COMBINED INNER JOIN (SELECT * FROM PROTEIN) AS BAIT_META ON FEATURE_SCORED_COMBINED.bait_id = BAIT_META.protein_id INNER JOIN (SELECT * FROM PROTEIN) AS PREY_META ON FEATURE_SCORED_COMBINED.prey_id = PREY_META.protein_id INNER JOIN (SELECT DISTINCT bait_id, prey_id FROM COMPLEX_QM) AS COMPLEX_QM ON FEATURE_SCORED_COMBINED.bait_id = COMPLEX_QM.bait_id AND FEATURE_SCORED_COMBINED.prey_id = COMPLEX_QM.prey_id GROUP BY FEATURE_SCORED_COMBINED.bait_id, FEATURE_SCORED_COMBINED.prey_id;', con)
+        else:
+            df = pd.read_sql('SELECT FEATURE_SCORED_COMBINED.bait_id AS bait_id, FEATURE_SCORED_COMBINED.prey_id AS prey_id, FEATURE_SCORED_COMBINED.bait_id || "_" || FEATURE_SCORED_COMBINED.prey_id AS interaction_id, BAIT_META.protein_name AS bait_name, PREY_META.protein_name AS prey_name, min(FEATURE_SCORED_COMBINED.pvalue) AS pvalue, min(FEATURE_SCORED_COMBINED.qvalue) AS qvalue FROM FEATURE_SCORED_COMBINED INNER JOIN (SELECT * FROM PROTEIN) AS BAIT_META ON FEATURE_SCORED_COMBINED.bait_id = BAIT_META.protein_id INNER JOIN (SELECT * FROM PROTEIN) AS PREY_META ON FEATURE_SCORED_COMBINED.prey_id = PREY_META.protein_id GROUP BY FEATURE_SCORED_COMBINED.bait_id, FEATURE_SCORED_COMBINED.prey_id;', con)
 
         con.close()
 
@@ -149,6 +152,8 @@ class plot_features:
 
         if check_sqlite_table(con, 'EDGE'):
             df = pd.read_sql('SELECT *, "combined" AS level, bait_id || "_" || prey_id AS interaction_id FROM EDGE UNION SELECT condition_1, condition_2, bait_id, prey_id, pvalue, qvalue, level, bait_id || "_" || prey_id AS interaction_id FROM EDGE_LEVEL;', con)
+        else:
+            df = None
 
         con.close()
 
@@ -161,6 +166,8 @@ class plot_features:
 
         if check_sqlite_table(con, 'NODE'):
             df = pd.read_sql('SELECT *, "combined" AS level FROM NODE UNION SELECT condition_1, condition_2, bait_id, pvalue, qvalue, level FROM NODE_LEVEL;', con)
+        else:
+            df = None
 
         con.close()
 
@@ -224,7 +231,7 @@ class plot_features:
 
             # plot legend and subtitle
             if bait_id is not prey_id:
-                axarr[tags.index(tag)].legend([Line2D([0], [0], color='red'), Line2D([0], [0], color='black')], [bait_id, prey_id])
+                axarr[tags.index(tag)].legend([Line2D([0], [0], color='red'), Line2D([0], [0], color='black')], [bait_id, prey_id], loc = 1)
             axarr[tags.index(tag)].set_title(tag, loc = 'center', pad = -15)
 
             # plot feature information if present
@@ -240,13 +247,12 @@ class plot_features:
             mmeta = mmeta[mmeta['bait_id'] == bait_id][['level','condition_1','condition_2','pvalue','qvalue']].sort_values(by='pvalue')
             if mmeta.shape[0] > 0:
                 axarr[len(tags)].table(cellText=mmeta.values, colLabels=mmeta.columns, loc='center')
-            axarr[len(tags)].axis('off')
         elif self.interactions_qmeta is not None:
             qmeta = self.interactions_qmeta
             qmeta = qmeta[qmeta['interaction_id'] == interaction_id][['level','condition_1','condition_2','pvalue','qvalue']].sort_values(by='pvalue')
             if qmeta.shape[0] > 0:
                 axarr[len(tags)].table(cellText=qmeta.values, colLabels=qmeta.columns, loc='center')
-            axarr[len(tags)].axis('off')
+        axarr[len(tags)].axis('off')
 
         return f
 

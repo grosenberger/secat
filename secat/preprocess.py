@@ -424,9 +424,10 @@ class meta:
         return peptide_meta, protein_meta
 
 class query:
-    def __init__(self, net_data, negnet_data, protein_meta_data, min_interaction_confidence, interaction_confidence_bins):
+    def __init__(self, net_data, negnet_data, protein_meta_data, min_interaction_confidence, interaction_confidence_bins, decoy_subsample):
         self.min_interaction_confidence = min_interaction_confidence
         self.interaction_confidence_bins = interaction_confidence_bins
+        self.decoy_subsample = decoy_subsample
         self.df = self.generate_query(net_data, negnet_data, protein_meta_data)
 
     def generate_query(self, net_data, negnet_data, protein_meta_data):
@@ -463,7 +464,7 @@ class query:
         # Filter for minimum interaction confidence
         queries = queries[queries['interaction_confidence'] >= self.min_interaction_confidence]
         decoy_queries = decoy_queries[decoy_queries['bait_id'] != decoy_queries['prey_id']]
-        if decoy_queries.shape[0] > queries.shape[0]:
+        if (decoy_queries.shape[0] > queries.shape[0]) and self.decoy_subsample:
             decoy_queries = decoy_queries.sample(queries.shape[0]) # Same number of decoys as targets
 
         # Add confidence bin from target network if negative network is provided
