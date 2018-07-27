@@ -40,7 +40,7 @@ def cli():
 @click.option('--decoy_right_sec_bins', 'decoy_right_sec_bins', default=1, show_default=True, type=int, help='Number of decoy bins for right SEC fraction.')
 @click.option('--decoy_subsample/--no-decoy_subsample', default=True, show_default=True, help='Whether decoys should be subsampled to be approximately of similar number as targets.')
 @click.option('--min_interaction_confidence', 'min_interaction_confidence', default=0.0, show_default=True, type=float, help='Minimum interaction confidence for prior information from network.')
-@click.option('--interaction_confidence_bins', 'interaction_confidence_bins', default=4, show_default=True, type=int, help='Number of interaction confidence bins for grouped error rate estimation.')
+@click.option('--interaction_confidence_bins', 'interaction_confidence_bins', default=10, show_default=True, type=int, help='Number of interaction confidence bins for grouped error rate estimation.')
 
 def preprocess(infiles, outfile, secfile, netfile, negnetfile, uniprotfile, columns, decoy_intensity_bins, decoy_left_sec_bins, decoy_right_sec_bins, decoy_subsample, min_interaction_confidence, interaction_confidence_bins):
     """
@@ -127,12 +127,12 @@ def preprocess(infiles, outfile, secfile, netfile, negnetfile, uniprotfile, colu
 @cli.command()
 @click.option('--in', 'infile', required=True, type=click.Path(exists=True), help='Input SECAT file.')
 @click.option('--out', 'outfile', required=False, type=click.Path(exists=False), help='Output SECAT file.')
-@click.option('--monomer_threshold_factor', 'monomer_threshold_factor', default=2.0, show_default=True, type=float, help='Factor threshold to consider a feature a complex rather than a monomer.')
-@click.option('--monomer_elution_width', 'monomer_elution_width', default=0.0, show_default=True, type=float, help='Expected monomer peak width in SEC units. Used to adjust left monomer threshold padding.')
+@click.option('--monomer_threshold_factor', 'monomer_threshold_factor', default=1.0, show_default=True, type=float, help='Factor threshold to consider a feature a complex rather than a monomer.')
+@click.option('--monomer_elution_width', 'monomer_elution_width', default=6.0, show_default=True, type=float, help='Expected monomer peak width in SEC units. Used to adjust left monomer threshold padding.')
 @click.option('--minimum_peptides', 'minimum_peptides', default=3, show_default=True, type=int, help='Minimum number of peptides required to score an interaction.')
 @click.option('--maximum_peptides', 'maximum_peptides', default=20, show_default=True, type=int, help='Maximum number of peptides used to score an interaction.')
 @click.option('--minimum_overlap', 'minimum_overlap', default=5, show_default=True, type=int, help='Minimum number of fractions required to score an interaction.')
-@click.option('--minimum_peptide_snr', 'minimum_peptide_snr', default=1.0, show_default=True, type=float, help='Minimum signal-to-noise ratio per peptide.')
+@click.option('--minimum_peptide_snr', 'minimum_peptide_snr', default=0.5, show_default=True, type=float, help='Minimum signal-to-noise ratio per peptide.')
 @click.option('--chunck_size', 'chunck_size', default=50000, show_default=True, type=int, help='Chunck size for processing.')
 def score(infile, outfile, monomer_threshold_factor, monomer_elution_width, minimum_peptides, maximum_peptides, minimum_overlap, minimum_peptide_snr, chunck_size):
     """
@@ -167,7 +167,7 @@ def score(infile, outfile, monomer_threshold_factor, monomer_elution_width, mini
 @click.option('--in', 'infile', required=True, type=click.Path(exists=True), help='Input SECAT file.')
 @click.option('--out', 'outfile', required=False, type=click.Path(exists=False), help='Output SECAT file.')
 # Prefiltering
-@click.option('--minimum_snr', 'minimum_snr', default=1.0, show_default=True, type=int, help='Minimum signal-to-noise ratio per peptide.')
+@click.option('--minimum_snr', 'minimum_snr', default=1.0, show_default=True, type=int, help='Minimum signal-to-noise ratio per interaction.')
 @click.option('--minimum_mass_ratio', 'minimum_mass_ratio', default=0.2, show_default=True, type=float, help='Minimum number of fractions required to score an interaction.')
 @click.option('--maximum_sec_shift', 'maximum_sec_shift', default=3.0, show_default=True, type=float, help='Maximum lag in SEC units between interactions and subunits.')
 # Semi-supervised learning
