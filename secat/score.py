@@ -197,9 +197,9 @@ class scoring:
         self.minimum_peptide_snr = minimum_peptide_snr
 
         click.echo("Info: Read peptide chromatograms.")
-        self.chromatograms = self.read_chromatograms()
-        # click.echo("Info: Filter peptide chromatograms.")
-        # self.chromatograms = self.filter_peptides(chromatograms)
+        chromatograms = self.read_chromatograms()
+        click.echo("Info: Filter peptide chromatograms.")
+        self.chromatograms = self.filter_peptides(chromatograms)
         click.echo("Info: Read queries and SEC boundaries.")
         self.queries = self.read_queries()
         self.sec_boundaries = self.read_sec_boundaries()
