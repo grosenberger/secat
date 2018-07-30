@@ -152,35 +152,40 @@ class combine:
 
     def read(self):
         con = sqlite3.connect(self.outfile)
-        df = pd.read_sql('SELECT * FROM FEATURE_SCORED WHERE decoy == 0;', con)
+        df = pd.read_sql('SELECT * FROM FEATURE_SCORED;', con)
         con.close()
 
         return df
 
     def combine_scores(self, scores):
         # Generate full experimental design
-        interactions = scores[['bait_id','prey_id']].drop_duplicates().reset_index()
+        interactions = scores[['bait_id','prey_id','decoy']].drop_duplicates().reset_index()
         interactions['id'] = 1
         experimental_design = scores[['condition_id','replicate_id']].drop_duplicates().reset_index()
         experimental_design['id'] = 1
 
         # Missing detections need to be punished. We set the p-values, q-values and pep to 1.
-        scores = pd.merge(pd.merge(interactions, experimental_design, on='id')[['condition_id','replicate_id','bait_id','prey_id']], scores, on=['condition_id','replicate_id','bait_id','prey_id'], how='left')
+        scores = pd.merge(pd.merge(interactions, experimental_design, on='id')[['condition_id','replicate_id','bait_id','prey_id','decoy']], scores, on=['condition_id','replicate_id','bait_id','prey_id','decoy'], how='left')
         scores['pvalue'] = scores['pvalue'].fillna(1)
         scores['qvalue'] = scores['qvalue'].fillna(1)
         scores['pep'] = scores['pep'].fillna(1)
 
-        combined_scores = scores.groupby(['condition_id','bait_id','prey_id'])['pvalue'].apply(lambda x: combine_pvalues(x, method='stouffer')[1]).reset_index()
+        combined_scores = scores.groupby(['condition_id','bait_id','prey_id','decoy'])['pvalue'].apply(lambda x: combine_pvalues(x, method='stouffer')[1]).reset_index()
 
-        combined_scores['qvalue'] = qvalue(combined_scores['pvalue'], pi0est(combined_scores['pvalue'], self.pi0_lambda, self.pi0_method, self.pi0_smooth_df, self.pi0_smooth_log_pi0)['pi0'], self.pfdr)
+        combined_scores.loc[combined_scores['decoy'] == 0,'qvalue'] = qvalue(combined_scores[combined_scores['decoy'] == 0]['pvalue'], pi0est(combined_scores[combined_scores['decoy'] == 0]['pvalue'], self.pi0_lambda, self.pi0_method, self.pi0_smooth_df, self.pi0_smooth_log_pi0)['pi0'], self.pfdr)
 
-        click.echo("Info: %s unique interaction (q-value < 0.01) detected before integration." % (scores[scores['qvalue'] < 0.01][['bait_id','prey_id']].drop_duplicates().shape[0]))
-        click.echo("Info: %s unique interaction (q-value < 0.01) detected after integration." % (combined_scores[combined_scores['qvalue'] < 0.01][['bait_id','prey_id']].drop_duplicates().shape[0]))
-        click.echo("Info: %s unique interaction (q-value < 0.05) detected before integration." % (scores[scores['qvalue'] < 0.05][['bait_id','prey_id']].drop_duplicates().shape[0]))
-        click.echo("Info: %s unique interaction (q-value < 0.05) detected after integration." % (combined_scores[combined_scores['qvalue'] < 0.05][['bait_id','prey_id']].drop_duplicates().shape[0]))
-        click.echo("Info: %s unique interaction (q-value < 0.1) detected before integration." % (scores[scores['qvalue'] < 0.1][['bait_id','prey_id']].drop_duplicates().shape[0]))
-        click.echo("Info: %s unique interaction (q-value < 0.1) detected after integration." % (combined_scores[combined_scores['qvalue'] < 0.1][['bait_id','prey_id']].drop_duplicates().shape[0]))
-        click.echo("Info: %s unique interaction (q-value < 0.2) detected before integration." % (scores[scores['qvalue'] < 0.2][['bait_id','prey_id']].drop_duplicates().shape[0]))
-        click.echo("Info: %s unique interaction (q-value < 0.2) detected after integration." % (combined_scores[combined_scores['qvalue'] < 0.2][['bait_id','prey_id']].drop_duplicates().shape[0]))
+        click.echo("Info: Unique interactions detected before integration:")
+        click.echo("%s (at q-value < 0.01)" % (scores[(scores['decoy'] == 0) & (scores['qvalue'] < 0.01)][['bait_id','prey_id']].drop_duplicates().shape[0]))
+        click.echo("%s (at q-value < 0.05)" % (scores[(scores['decoy'] == 0) & (scores['qvalue'] < 0.05)][['bait_id','prey_id']].drop_duplicates().shape[0]))
+        click.echo("%s (at q-value < 0.1)" % (scores[(scores['decoy'] == 0) & (scores['qvalue'] < 0.1)][['bait_id','prey_id']].drop_duplicates().shape[0]))
+        click.echo("%s (at q-value < 0.2)" % (scores[(scores['decoy'] == 0) & (scores['qvalue'] < 0.2)][['bait_id','prey_id']].drop_duplicates().shape[0]))
+        click.echo("%s (at q-value < 0.5)" % (scores[(scores['decoy'] == 0) & (scores['qvalue'] < 0.5)][['bait_id','prey_id']].drop_duplicates().shape[0]))
+
+        click.echo("Info: Unique interactions detected after integration:")
+        click.echo("%s (at q-value < 0.01)" % (combined_scores[(combined_scores['decoy'] == 0) & (combined_scores['qvalue'] < 0.01)][['bait_id','prey_id']].drop_duplicates().shape[0]))
+        click.echo("%s (at q-value < 0.05)" % (combined_scores[(combined_scores['decoy'] == 0) & (combined_scores['qvalue'] < 0.05)][['bait_id','prey_id']].drop_duplicates().shape[0]))
+        click.echo("%s (at q-value < 0.1)" % (combined_scores[(combined_scores['decoy'] == 0) & (combined_scores['qvalue'] < 0.1)][['bait_id','prey_id']].drop_duplicates().shape[0]))
+        click.echo("%s (at q-value < 0.2)" % (combined_scores[(combined_scores['decoy'] == 0) & (combined_scores['qvalue'] < 0.2)][['bait_id','prey_id']].drop_duplicates().shape[0]))
+        click.echo("%s (at q-value < 0.5)" % (combined_scores[(combined_scores['decoy'] == 0) & (combined_scores['qvalue'] < 0.5)][['bait_id','prey_id']].drop_duplicates().shape[0]))
 
         return combined_scores

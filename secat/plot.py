@@ -137,7 +137,7 @@ class plot_features:
         if check_sqlite_table(con, 'EDGE') and self.mode == 'quantification':
             df = pd.read_sql('SELECT DISTINCT bait_id || "_" || prey_id AS interaction_id, 0 as decoy FROM %s WHERE qvalue < %s ORDER BY pvalue ASC;' % (table, self.interaction_qvalue), con)
         elif self.mode == 'detection_integrated':
-            df = pd.read_sql('SELECT DISTINCT bait_id || "_" || prey_id AS interaction_id, 0 as decoy FROM FEATURE_SCORED_COMBINED WHERE qvalue < %s GROUP BY FEATURE_SCORED_COMBINED.bait_id, FEATURE_SCORED_COMBINED.prey_id ORDER BY pvalue ASC;' % (self.interaction_qvalue), con)
+            df = pd.read_sql('SELECT DISTINCT bait_id || "_" || prey_id AS interaction_id, 0 as decoy FROM FEATURE_SCORED_COMBINED WHERE qvalue < %s AND decoy == 0 GROUP BY FEATURE_SCORED_COMBINED.bait_id, FEATURE_SCORED_COMBINED.prey_id ORDER BY pvalue ASC;' % (self.interaction_qvalue), con)
         elif self.mode == 'detection_separate':
             df = pd.read_sql('SELECT DISTINCT bait_id || "_" || prey_id AS interaction_id, decoy FROM FEATURE_SCORED WHERE qvalue < %s ORDER BY pvalue ASC;' % (self.interaction_qvalue), con)
         else:
