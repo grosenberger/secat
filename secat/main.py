@@ -40,7 +40,7 @@ def cli():
 @click.option('--decoy_right_sec_bins', 'decoy_right_sec_bins', default=1, show_default=True, type=int, help='Number of decoy bins for right SEC fraction.')
 @click.option('--decoy_subsample/--no-decoy_subsample', default=True, show_default=True, help='Whether decoys should be subsampled to be approximately of similar number as targets.')
 @click.option('--min_interaction_confidence', 'min_interaction_confidence', default=0.0, show_default=True, type=float, help='Minimum interaction confidence for prior information from network.')
-@click.option('--interaction_confidence_bins', 'interaction_confidence_bins', default=10, show_default=True, type=int, help='Number of interaction confidence bins for grouped error rate estimation.')
+@click.option('--interaction_confidence_bins', 'interaction_confidence_bins', default=20, show_default=True, type=int, help='Number of interaction confidence bins for grouped error rate estimation.')
 
 def preprocess(infiles, outfile, secfile, netfile, negnetfile, uniprotfile, columns, decoy_intensity_bins, decoy_left_sec_bins, decoy_right_sec_bins, decoy_subsample, min_interaction_confidence, interaction_confidence_bins):
     """
@@ -291,10 +291,12 @@ def export(infile):
 @click.option('--interaction_qvalue', default=None, show_default=True, type=float, help='Maximum q-value to plot interactions.')
 @click.option('--bait_id', required=False, type=str, help='Plot features for specified bait_id.')
 @click.option('--bait_qvalue', default=None, show_default=True, type=float, help='Maximum q-value to plot baits.')
+@click.option('--mode', default='quantification', show_default=True, type=click.Choice(['quantification', 'detection_integrated', 'detection_separate']), help='Select mode to order interaction plots by. Note: detection_separate will also report decoys')
+@click.option('--combined/--no-combined', default=False, show_default=True, help='Select interactions and baits according to combined q-values.')
 @click.option('--peptide_rank', default=6, show_default=True, type=int, help='Number of most intense peptides to plot.')
-def plot(infile, interaction_id, interaction_qvalue, bait_id, bait_qvalue, peptide_rank):
+def plot(infile, interaction_id, interaction_qvalue, bait_id, bait_qvalue, mode, combined, peptide_rank):
     """
     Plot SECAT results
     """
 
-    pf = plot_features(infile, interaction_id, interaction_qvalue, bait_id, bait_qvalue, peptide_rank)
+    pf = plot_features(infile, interaction_id, interaction_qvalue, bait_id, bait_qvalue, mode, combined, peptide_rank)

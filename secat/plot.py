@@ -27,12 +27,14 @@ def check_sqlite_table(con, table):
     return(table_present)
 
 class plot_features:
-    def __init__(self, infile, interaction_id, interaction_qvalue, bait_id, bait_qvalue, peptide_rank):
+    def __init__(self, infile, interaction_id, interaction_qvalue, bait_id, bait_qvalue, mode, combined, peptide_rank):
         self.infile = infile
         self.interaction_id = interaction_id
         self.interaction_qvalue = interaction_qvalue
         self.bait_id = bait_id
         self.bait_qvalue = bait_qvalue
+        self.mode = mode
+        self.combined = combined
         self.peptide_rank = peptide_rank
 
         # Read peptide and feature data
@@ -53,23 +55,26 @@ class plot_features:
             self.plot_bait(bait_id, 0)
 
         if self.interaction_qvalue is not None:
-            interaction_ids, result_ids = self.read_interactions()
-            for interaction_id, result_id in zip(interaction_ids, result_ids):
-                self.plot_interaction(interaction_id, result_id)
+            interaction_ids, result_ids, decoys = self.read_interactions()
+            for interaction_id, result_id, decoy in zip(interaction_ids, result_ids, decoys):
+                self.plot_interaction(interaction_id, result_id, decoy)
 
         if self.bait_qvalue is not None:
             bait_ids, result_ids = self.read_baits()
             for bait_id, result_id in zip(bait_ids, result_ids):
                 self.plot_bait(bait_id, result_id)
 
-    def plot_interaction(self, interaction_id, result_id):
+    def plot_interaction(self, interaction_id, result_id=000000, decoy=False):
         feature_data = self.feature_data
         peptide_data = self.peptide_data
 
         feature_data = feature_data[feature_data['interaction_id'] == interaction_id]
         proteins = pd.DataFrame({"protein_id": pd.concat([feature_data['bait_id'], feature_data['prey_id']])}).drop_duplicates()
         peptide_data = pd.merge(peptide_data, proteins, how='inner', on='protein_id')
-        out = os.path.splitext(os.path.basename(self.infile))[0]+"_"+str(result_id).zfill(6)+"_"+interaction_id+".pdf"
+        if decoy:
+            out = os.path.splitext(os.path.basename(self.infile))[0]+"_"+str(result_id).zfill(6)+"_DECOY_"+interaction_id+".pdf"
+        else:
+            out = os.path.splitext(os.path.basename(self.infile))[0]+"_"+str(result_id).zfill(6)+"_"+interaction_id+".pdf"
 
         with PdfPages(out) as pdf:
             f = self.generate_plot(peptide_data, feature_data, feature_data['bait_id'].values[0], feature_data['prey_id'].values[0])
@@ -124,22 +129,33 @@ class plot_features:
     def read_interactions(self):
         con = sqlite3.connect(self.infile)
 
-        if check_sqlite_table(con, 'EDGE'):
-            df = pd.read_sql('SELECT DISTINCT bait_id || "_" || prey_id AS interaction_id FROM EDGE WHERE qvalue < %s ORDER BY pvalue ASC;' % (self.interaction_qvalue), con)
+        if self.combined:
+            table = 'EDGE'
         else:
-            df = pd.read_sql('SELECT DISTINCT bait_id || "_" || prey_id AS interaction_id, min(pvalue) AS pvalue FROM FEATURE_SCORED_COMBINED WHERE pvalue < %s GROUP BY FEATURE_SCORED_COMBINED.bait_id, FEATURE_SCORED_COMBINED.prey_id ORDER BY pvalue ASC;' % (self.interaction_qvalue), con)
+            table = 'EDGE_LEVEL'
+
+        if check_sqlite_table(con, 'EDGE') and self.mode == 'quantification':
+            df = pd.read_sql('SELECT DISTINCT bait_id || "_" || prey_id AS interaction_id, 0 as decoy FROM %s WHERE qvalue < %s ORDER BY pvalue ASC;' % (table, self.interaction_qvalue), con)
+        elif self.mode == 'detection_integrated':
+            df = pd.read_sql('SELECT DISTINCT bait_id || "_" || prey_id AS interaction_id, 0 as decoy FROM FEATURE_SCORED_COMBINED WHERE qvalue < %s GROUP BY FEATURE_SCORED_COMBINED.bait_id, FEATURE_SCORED_COMBINED.prey_id ORDER BY pvalue ASC;' % (self.interaction_qvalue), con)
+        elif self.mode == 'detection_separate':
+            df = pd.read_sql('SELECT DISTINCT bait_id || "_" || prey_id AS interaction_id, decoy FROM FEATURE_SCORED WHERE qvalue < %s ORDER BY pvalue ASC;' % (self.interaction_qvalue), con)
+        else:
+            sys.exit("Mode for interaction plotting not supported.")
 
         con.close()
 
-        return df['interaction_id'].values, df.index+1
+        return df['interaction_id'].values, df.index+1, df['decoy'].values
 
     def read_interactions_dmeta(self):
         con = sqlite3.connect(self.infile)
 
-        if check_sqlite_table(con, 'COMPLEX_QM'):
+        if check_sqlite_table(con, 'COMPLEX_QM') and self.mode == 'quantification':
             df = pd.read_sql('SELECT FEATURE_SCORED_COMBINED.bait_id AS bait_id, FEATURE_SCORED_COMBINED.prey_id AS prey_id, FEATURE_SCORED_COMBINED.bait_id || "_" || FEATURE_SCORED_COMBINED.prey_id AS interaction_id, BAIT_META.protein_name AS bait_name, PREY_META.protein_name AS prey_name, min(FEATURE_SCORED_COMBINED.pvalue) AS pvalue, min(FEATURE_SCORED_COMBINED.qvalue) AS qvalue FROM FEATURE_SCORED_COMBINED INNER JOIN (SELECT * FROM PROTEIN) AS BAIT_META ON FEATURE_SCORED_COMBINED.bait_id = BAIT_META.protein_id INNER JOIN (SELECT * FROM PROTEIN) AS PREY_META ON FEATURE_SCORED_COMBINED.prey_id = PREY_META.protein_id INNER JOIN (SELECT DISTINCT bait_id, prey_id FROM COMPLEX_QM) AS COMPLEX_QM ON FEATURE_SCORED_COMBINED.bait_id = COMPLEX_QM.bait_id AND FEATURE_SCORED_COMBINED.prey_id = COMPLEX_QM.prey_id GROUP BY FEATURE_SCORED_COMBINED.bait_id, FEATURE_SCORED_COMBINED.prey_id;', con)
-        else:
+        elif self.mode == 'detection_integrated':
             df = pd.read_sql('SELECT FEATURE_SCORED_COMBINED.bait_id AS bait_id, FEATURE_SCORED_COMBINED.prey_id AS prey_id, FEATURE_SCORED_COMBINED.bait_id || "_" || FEATURE_SCORED_COMBINED.prey_id AS interaction_id, BAIT_META.protein_name AS bait_name, PREY_META.protein_name AS prey_name, min(FEATURE_SCORED_COMBINED.pvalue) AS pvalue, min(FEATURE_SCORED_COMBINED.qvalue) AS qvalue FROM FEATURE_SCORED_COMBINED INNER JOIN (SELECT * FROM PROTEIN) AS BAIT_META ON FEATURE_SCORED_COMBINED.bait_id = BAIT_META.protein_id INNER JOIN (SELECT * FROM PROTEIN) AS PREY_META ON FEATURE_SCORED_COMBINED.prey_id = PREY_META.protein_id GROUP BY FEATURE_SCORED_COMBINED.bait_id, FEATURE_SCORED_COMBINED.prey_id;', con)
+        elif self.mode == 'detection_separate':
+            df = None
 
         con.close()
 
@@ -176,7 +192,12 @@ class plot_features:
     def read_baits(self):
         con = sqlite3.connect(self.infile)
 
-        df = pd.read_sql('SELECT DISTINCT bait_id FROM NODE WHERE qvalue < %s ORDER BY pvalue ASC;' % (self.bait_qvalue), con)
+        if self.combined:
+            table = 'NODE'
+        else:
+            table = 'NODE_LEVEL'
+
+        df = pd.read_sql('SELECT DISTINCT bait_id FROM %s WHERE qvalue < %s ORDER BY pvalue ASC;' % (table, self.bait_qvalue), con)
 
         con.close()
 
@@ -196,7 +217,7 @@ class plot_features:
         axarr.append(f.add_subplot(len(tags)+1, 1, len(tags)+1))
 
         # plot detection metadata
-        if bait_id is not prey_id:
+        if bait_id is not prey_id and self.interactions_dmeta is not None:
             dmeta = self.interactions_dmeta
             dmeta = dmeta[dmeta['interaction_id'] == interaction_id][['bait_name','prey_name','pvalue','qvalue']]
             titletext = str(interaction_id) + "\n" + str(dmeta['bait_name'].values[0]) + " vs "  + str(dmeta['prey_name'].values[0]) + "\n" + "p-value: "  + str(np.round(dmeta['pvalue'].values[0], 3)) + " q-value: "  + str(np.round(dmeta['qvalue'].values[0], 3))
