@@ -5,7 +5,7 @@ import sqlite3
 import os
 import sys
 
-from EmpiricalBrownsMethod import EmpiricalBrownsMethod
+from .EmpiricalBrownsMethod import EmpiricalBrownsMethod
 import itertools
 
 from scipy.stats import mannwhitneyu, ttest_ind

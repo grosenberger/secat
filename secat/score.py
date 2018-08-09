@@ -250,6 +250,14 @@ class scoring:
                 x['peptide_intensity'] = signal.detrend(x['peptide_intensity'], type = 'constant')
                 return x
 
+        # Filter out monomers
+        df = df[df['sec_id'] < df['monomer_sec_id']]
+
+        # Report statistics before filtering
+        click.echo("Info: %s unique peptides before filtering." % len(df['peptide_id'].unique()))
+        click.echo("Info: %s peptide chromatograms before filtering." % df[['condition_id','replicate_id','protein_id','peptide_id']].drop_duplicates().shape[0])
+        click.echo("Info: %s data points before filtering." % df.shape[0])
+
         # Remove peptides below SNR threshold
         df_snr = df.groupby(['condition_id','replicate_id','protein_id','peptide_id']).apply(peptide_snr).reset_index().dropna()
 
@@ -262,8 +270,10 @@ class scoring:
 
         df = pd.merge(df_detrend, df_snr.drop(columns='peptide_snr'), on = ['condition_id','replicate_id','protein_id','peptide_id'])
 
-        # Filter out monomers
-        df = df[df['sec_id'] < df['monomer_sec_id']]
+        # Report statistics after filtering
+        click.echo("Info: %s unique peptides after filtering." % len(df['peptide_id'].unique()))
+        click.echo("Info: %s peptide chromatograms after filtering." % df[['condition_id','replicate_id','protein_id','peptide_id']].drop_duplicates().shape[0])
+        click.echo("Info: %s data points after filtering." % df.shape[0])
 
         return df
 

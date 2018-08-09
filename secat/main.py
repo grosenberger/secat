@@ -7,11 +7,11 @@ from shutil import copyfile
 import pandas as pd
 import numpy as np
 
-from preprocess import uniprot, net, sec, quantification, meta, query
-from score import monomer, scoring
-from learn import pyprophet, combine
-from quantify import quantitative_matrix, quantitative_test
-from plot import plot_features
+from .preprocess import uniprot, net, sec, quantification, meta, query
+from .score import monomer, scoring
+from .learn import pyprophet, combine
+from .quantify import quantitative_matrix, quantitative_test
+from .plot import plot_features
 
 from pyprophet.data_handling import transform_pi0_lambda
 
