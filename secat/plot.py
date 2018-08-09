@@ -219,8 +219,11 @@ class plot_features:
         # plot detection metadata
         if bait_id is not prey_id and self.interactions_dmeta is not None:
             dmeta = self.interactions_dmeta
-            dmeta = dmeta[dmeta['interaction_id'] == interaction_id][['bait_name','prey_name','pvalue','qvalue']]
-            titletext = str(interaction_id) + "\n" + str(dmeta['bait_name'].values[0]) + " vs "  + str(dmeta['prey_name'].values[0]) + "\n" + "p-value: "  + str(np.round(dmeta['pvalue'].values[0], 3)) + " q-value: "  + str(np.round(dmeta['qvalue'].values[0], 3))
+            if dmeta[dmeta['interaction_id'] == interaction_id].shape[0] > 0:
+                dmeta = dmeta[dmeta['interaction_id'] == interaction_id][['bait_name','prey_name','pvalue','qvalue']]
+                titletext = str(interaction_id) + "\n" + str(dmeta['bait_name'].values[0]) + " vs "  + str(dmeta['prey_name'].values[0]) + "\n" + "p-value: "  + str(np.round(dmeta['pvalue'].values[0], 3)) + " q-value: "  + str(np.round(dmeta['qvalue'].values[0], 3))
+            else:
+                titletext = str(interaction_id)
         else:
             titletext = str(interaction_id)
         f.suptitle(titletext)
