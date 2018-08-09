@@ -125,7 +125,7 @@ def interaction(df):
 
         snr = np.mean(np.append(bpsnr, ppsnr)) / np.std(np.append(bpsnr, ppsnr))
 
-        return np.mean(bpsnr), np.mean(ppsnr), snr
+        return snr
 
     # Workaround for parallelization
     minimum_overlap = df['minimum_overlap'].min()
@@ -150,17 +150,9 @@ def interaction(df):
         prey_sec_boundaries = sec_boundaries.copy()
         prey_sec_boundaries['peptide_id'] = df[~df['is_bait']]['peptide_id'].unique()[0]
 
-        # Compute bait peptide matrix over full profile
-        bait_peptides_profile = pd.merge(df[df['is_bait']], bait_sec_boundaries, on=['peptide_id','sec_id'], how='outer').sort_values(['sec_id']).pivot(index='peptide_id', columns='sec_id', values='peptide_intensity')
-        bmp = np.nan_to_num(bait_peptides_profile.values) # Replace missing values with zeros
-
         # Compute bait peptide matrix over intersection
         bait_peptides_is = pd.merge(df[df['sec_id'].isin(intersection) & df['is_bait']], bait_sec_boundaries, on=['peptide_id','sec_id'], how='outer').sort_values(['sec_id']).pivot(index='peptide_id', columns='sec_id', values='peptide_intensity')
         bmis = np.nan_to_num(bait_peptides_is.values) # Replace missing values with zeros
-
-        # Compute prey peptide matrix over full profile
-        prey_peptides_profile = pd.merge(df[~df['is_bait']], prey_sec_boundaries, on=['peptide_id','sec_id'], how='outer').sort_values(['sec_id']).pivot(index='peptide_id', columns='sec_id', values='peptide_intensity')
-        pmp = np.nan_to_num(prey_peptides_profile.values) # Replace missing values with zeros
 
         # Compute prey peptide matrix over intersection
         prey_peptides_is = pd.merge(df[df['sec_id'].isin(intersection) & ~df['is_bait']], prey_sec_boundaries, on=['peptide_id','sec_id'], how='outer').sort_values(['sec_id']).pivot(index='peptide_id', columns='sec_id', values='peptide_intensity')
@@ -168,11 +160,6 @@ def interaction(df):
 
         # Cross-correlation scores
         xcorr_shape, xcorr_shift, xcorr_apex = sec_xcorr(bmis, pmis)
-
-        # Cross-correlation dominance and delta scores
-        xcorr_shape_profile, xcorr_shift_profile, xcorr_apex_profile = sec_xcorr(bmp, pmp)
-        xcorr_delta = abs(xcorr_shift - xcorr_shift_profile)
-        xcorr_dominance = 1-(xcorr_shape - xcorr_shape_profile)
 
         # MIC score
         mic_stat = cstats(bait_peptides_is[intersection].values, prey_peptides_is[intersection].values, est="mic_e")
@@ -182,16 +169,14 @@ def interaction(df):
         mass_ratio = mass_similarity(bmis, pmis)
 
         # SNR score
-        bait_snr, prey_snr, bp_snr = snr(bmis, pmis)
+        snr = snr(bmis, pmis)
 
         res = df[['condition_id','replicate_id','bait_id','prey_id','decoy','confidence_bin']].drop_duplicates()
         res['main_var_xcorr_shape'] = xcorr_shape
-        res['var_xcorr_dominance'] = xcorr_dominance
         res['var_xcorr_shift'] = xcorr_shift
-        res['var_xcorr_delta'] = xcorr_delta
         res['var_mic'] = mic
         res['var_mass_ratio'] = mass_ratio
-        res['var_snr'] = bp_snr
+        res['var_snr'] = snr
         res['apex'] = xcorr_apex
         res['intersection'] = longest_overlap
         res['total_intersection'] = len(intersection)
@@ -199,9 +184,7 @@ def interaction(df):
     else:
         res = df[['condition_id','replicate_id','bait_id','prey_id','decoy','confidence_bin']].drop_duplicates()
         res['main_var_xcorr_shape'] = np.nan
-        res['var_xcorr_dominance'] = np.nan
         res['var_xcorr_shift'] = np.nan
-        res['var_xcorr_delta'] = np.nan
         res['var_mic'] = np.nan
         res['var_mass_ratio'] = np.nan
         res['var_snr'] = np.nan
