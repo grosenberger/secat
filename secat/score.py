@@ -10,8 +10,6 @@ from joblib import Parallel, delayed
 import multiprocessing
 
 from minepy import cstats
-from scipy import signal
-from sets import Set
 
 def split(dfm, chunk_size):
     def index_marks(nrows, chunk_size):
@@ -26,10 +24,10 @@ def applyParallel(dfGrouped, func):
     return pd.concat(retLst)
 
 class monomer:
-    def __init__(self, outfile, monomer_threshold_factor, monomer_elution_width):
+    def __init__(self, outfile, monomer_threshold_factor, expected_peak_width):
         self.outfile = outfile
         self.monomer_threshold_factor = monomer_threshold_factor
-        self.monomer_elution_width = monomer_elution_width
+        self.expected_peak_width = expected_peak_width
         self.df = self.protein_thresholds()
 
     def protein_thresholds(self):
@@ -48,7 +46,7 @@ class monomer:
         protein_sec_thresholds = protein_mw.groupby(['protein_id']).apply(lambda x: get_sec_ids(x['protein_mw'].mean(), sec_meta=sec_meta)).reset_index(level=['protein_id'])
 
         # Correct for expected elution width of peak
-        protein_sec_thresholds['sec_id'] - np.round(self.monomer_elution_width / 2)
+        protein_sec_thresholds['sec_id'] - np.round(float(self.expected_peak_width) / 2)
 
         return protein_sec_thresholds[['condition_id','replicate_id','protein_id','sec_id']]
 
@@ -56,7 +54,7 @@ def interaction(df):
     def longest_intersection(arr):
         # Compute longest continuous stretch
         n = len(arr)
-        s = Set()
+        s = set()
         ans=0
         for ele in arr:
             s.add(ele)
@@ -101,9 +99,6 @@ def interaction(df):
         xcorr_apex = np.mean(bplx)
         xcorr_shift = max([abs(xcorr_apex - np.mean(blx)), abs(xcorr_apex - np.mean(plx))])
 
-        if xcorr_shape < 0:
-            xcorr_shape = 0
-
         return xcorr_shape, xcorr_shift, xcorr_apex
 
     def mass_similarity(bm, pm):
@@ -118,19 +113,9 @@ def interaction(df):
 
         return mass_ratio
 
-    def snr(bm, pm):
-        # Compute SNR for bait, prey and bait-prey peptides
-        bpsnr = np.mean(bm, axis=1, keepdims=True) / np.std(bm, axis=1, keepdims=True)
-        ppsnr = np.mean(pm, axis=1, keepdims=True) / np.std(pm, axis=1, keepdims=True)
-
-        snr = np.mean(np.append(bpsnr, ppsnr)) / np.std(np.append(bpsnr, ppsnr))
-
-        return snr
-
     # Workaround for parallelization
-    minimum_overlap = df['minimum_overlap'].min()
+    expected_peak_width = df['expected_peak_width'].min()
     minimum_peptides = df['minimum_peptides'].min()
-    minimum_peptide_snr = df['minimum_peptide_snr'].min()
     sec_boundaries = pd.DataFrame({'sec_id': range(df['lower_sec_boundaries'].min(), df['upper_sec_boundaries'].max()+1)})
 
     # Require minimum overlap
@@ -141,42 +126,38 @@ def interaction(df):
     num_bait_peptides = len(df[df['sec_id'].isin(intersection) & df['is_bait']]['peptide_id'].unique())
     num_prey_peptides = len(df[df['sec_id'].isin(intersection) & ~df['is_bait']]['peptide_id'].unique())
 
-    if longest_overlap >= minimum_overlap and num_bait_peptides >= minimum_peptides and num_prey_peptides >= minimum_peptides:
+    if longest_overlap >= expected_peak_width and num_bait_peptides >= minimum_peptides and num_prey_peptides >= minimum_peptides:
         # Compute bait SEC boundaries
         bait_sec_boundaries = sec_boundaries.copy()
         bait_sec_boundaries['peptide_id'] = df[df['is_bait']]['peptide_id'].unique()[0]
+
+        # Compute bait peptide matrix over intersection
+        bpi = pd.merge(df[df['sec_id'].isin(intersection) & df['is_bait']], bait_sec_boundaries, on=['peptide_id','sec_id'], how='outer').sort_values(['sec_id']).pivot(index='peptide_id', columns='sec_id', values='peptide_intensity')
+        bmi = np.nan_to_num(bpi.values) # Replace missing values with zeros
 
         # Compute prey SEC boundaries
         prey_sec_boundaries = sec_boundaries.copy()
         prey_sec_boundaries['peptide_id'] = df[~df['is_bait']]['peptide_id'].unique()[0]
 
-        # Compute bait peptide matrix over intersection
-        bait_peptides_is = pd.merge(df[df['sec_id'].isin(intersection) & df['is_bait']], bait_sec_boundaries, on=['peptide_id','sec_id'], how='outer').sort_values(['sec_id']).pivot(index='peptide_id', columns='sec_id', values='peptide_intensity')
-        bmis = np.nan_to_num(bait_peptides_is.values) # Replace missing values with zeros
-
         # Compute prey peptide matrix over intersection
-        prey_peptides_is = pd.merge(df[df['sec_id'].isin(intersection) & ~df['is_bait']], prey_sec_boundaries, on=['peptide_id','sec_id'], how='outer').sort_values(['sec_id']).pivot(index='peptide_id', columns='sec_id', values='peptide_intensity')
-        pmis = np.nan_to_num(prey_peptides_is.values) # Replace missing values with zeros
+        ppi = pd.merge(df[df['sec_id'].isin(intersection) & ~df['is_bait']], prey_sec_boundaries, on=['peptide_id','sec_id'], how='outer').sort_values(['sec_id']).pivot(index='peptide_id', columns='sec_id', values='peptide_intensity')
+        pmi = np.nan_to_num(ppi.values) # Replace missing values with zeros
 
         # Cross-correlation scores
-        xcorr_shape, xcorr_shift, xcorr_apex = sec_xcorr(bmis, pmis)
+        xcorr_shape, xcorr_shift, xcorr_apex = sec_xcorr(bmi, pmi)
 
         # MIC score
-        mic_stat = cstats(bait_peptides_is[intersection].values, prey_peptides_is[intersection].values, est="mic_e")
-        mic = mic_stat[0].mean(axis=0).mean() # Axis 0: summary for prey peptides / Axis 1: summary for bait peptides
+        mic_stat, tic_stat = cstats(bpi[intersection].values, ppi[intersection].values, est="mic_e")
+        tic = tic_stat.mean(axis=0).mean() # Axis 0: summary for prey peptides / Axis 1: summary for bait peptides
 
         # Mass similarity score
-        mass_ratio = mass_similarity(bmis, pmis)
-
-        # SNR score
-        snr = snr(bmis, pmis)
+        mass_ratio = mass_similarity(bmi, pmi)
 
         res = df[['condition_id','replicate_id','bait_id','prey_id','decoy','confidence_bin']].drop_duplicates()
         res['main_var_xcorr_shape'] = xcorr_shape
         res['var_xcorr_shift'] = xcorr_shift
-        res['var_mic'] = mic
+        res['var_tic'] = tic
         res['var_mass_ratio'] = mass_ratio
-        res['var_snr'] = snr
         res['apex'] = xcorr_apex
         res['intersection'] = longest_overlap
         res['total_intersection'] = len(intersection)
@@ -185,9 +166,8 @@ def interaction(df):
         res = df[['condition_id','replicate_id','bait_id','prey_id','decoy','confidence_bin']].drop_duplicates()
         res['main_var_xcorr_shape'] = np.nan
         res['var_xcorr_shift'] = np.nan
-        res['var_mic'] = np.nan
+        res['var_tic'] = np.nan
         res['var_mass_ratio'] = np.nan
-        res['var_snr'] = np.nan
         res['apex'] = np.nan
         res['intersection'] = np.nan
         res['total_intersection'] = np.nan
@@ -195,13 +175,14 @@ def interaction(df):
     return(res)
 
 class scoring:
-    def __init__(self, outfile, chunck_size, minimum_peptides, maximum_peptides, minimum_overlap, minimum_peptide_snr):
+    def __init__(self, outfile, chunck_size, minimum_peptides, maximum_peptides, expected_peak_width):
         self.outfile = outfile
         self.chunck_size = chunck_size
         self.minimum_peptides = minimum_peptides
         self.maximum_peptides = maximum_peptides
-        self.minimum_overlap = minimum_overlap
-        self.minimum_peptide_snr = minimum_peptide_snr
+        self.expected_peak_width = expected_peak_width
+
+        self.sec_boundaries = self.read_sec_boundaries()
 
         click.echo("Info: Read peptide chromatograms.")
         chromatograms = self.read_chromatograms()
@@ -209,7 +190,6 @@ class scoring:
         self.chromatograms = self.filter_peptides(chromatograms)
         click.echo("Info: Read queries and SEC boundaries.")
         self.queries = self.read_queries()
-        self.sec_boundaries = self.read_sec_boundaries()
 
         click.echo("Info: Score PPI.")
         self.df = self.compare()
@@ -224,14 +204,10 @@ class scoring:
         return df
 
     def filter_peptides(self, df):
-        def peptide_snr(x):
-            if x.shape[0] > 2: # We need at least three datapoints
-                return pd.Series({'peptide_snr': np.mean(x['peptide_intensity']) / np.std(x['peptide_intensity'])})
-
         def peptide_detrend(x):
-            if x.shape[0] > 2: # We need at least three datapoints
-                x['peptide_intensity'] = signal.detrend(x['peptide_intensity'], type = 'constant')
-                return x
+            peptide_mean = np.mean(np.append(x['peptide_intensity'], np.zeros(len(self.sec_boundaries['sec_id'].unique())-x.shape[0])))
+            x['peptide_intensity'] -= peptide_mean
+            return x
 
         # Filter out monomers
         df = df[df['sec_id'] < df['monomer_sec_id']]
@@ -241,17 +217,11 @@ class scoring:
         click.echo("Info: %s peptide chromatograms before filtering." % df[['condition_id','replicate_id','protein_id','peptide_id']].drop_duplicates().shape[0])
         click.echo("Info: %s data points before filtering." % df.shape[0])
 
-        # Remove peptides below SNR threshold
-        df_snr = df.groupby(['condition_id','replicate_id','protein_id','peptide_id']).apply(peptide_snr).reset_index().dropna()
-
         # Remove constant trends from peptides
-        df_detrend = df.groupby(['condition_id','replicate_id','protein_id','peptide_id']).apply(peptide_detrend).dropna()
+        df = df.groupby(['condition_id','replicate_id','protein_id','peptide_id']).apply(peptide_detrend).dropna()
 
-        # Merge filters
-        df_detrend = df_detrend[df_detrend['peptide_intensity'] > 0]
-        df_snr = df_snr[df_snr['peptide_snr'] > self.minimum_peptide_snr]
-
-        df = pd.merge(df_detrend, df_snr.drop(columns='peptide_snr'), on = ['condition_id','replicate_id','protein_id','peptide_id'])
+        # Exclude low intensity data points
+        df = df[df['peptide_intensity'] > 0]
 
         # Report statistics after filtering
         click.echo("Info: %s unique peptides after filtering." % len(df['peptide_id'].unique()))
@@ -298,9 +268,8 @@ class scoring:
             data_pd = pd.concat([baits, preys]).reset_index()
 
             # Workaround for parallelization
-            data_pd['minimum_overlap'] = self.minimum_overlap
+            data_pd['expected_peak_width'] = self.expected_peak_width
             data_pd['minimum_peptides'] = self.minimum_peptides
-            data_pd['minimum_peptide_snr'] = self.minimum_peptide_snr
             data_pd['lower_sec_boundaries'] = self.sec_boundaries['sec_id'].min()
             data_pd['upper_sec_boundaries'] = self.sec_boundaries['sec_id'].max()
 
