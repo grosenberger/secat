@@ -116,7 +116,9 @@ def preprocess(infiles, outfile, secfile, netfile, negnetfile, uniprotfile, colu
     con.execute('CREATE INDEX IF NOT EXISTS idx_query_bait_id ON QUERY (bait_id);')
     con.execute('CREATE INDEX IF NOT EXISTS idx_query_prey_id ON QUERY (prey_id);')
     con.execute('CREATE INDEX IF NOT EXISTS idx_query_bait_id_prey_id ON QUERY (bait_id, prey_id);')
-    con.execute('VACUUM;')
+    # con.execute('VACUUM;')
+
+    con.commit()
 
     # Close connection to file
     con.close()
