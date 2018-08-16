@@ -19,8 +19,8 @@ def split(dfm, chunk_size):
     return np.split(dfm, indices)
 
 def applyParallel(dfGrouped, func):
-    retLst = Parallel(n_jobs=multiprocessing.cpu_count(), verbose=3)(delayed(func)(group) for name, group in dfGrouped)
-    # retLst = Parallel(n_jobs=4, verbose=3)(delayed(func)(group) for name, group in dfGrouped)
+    # retLst = Parallel(n_jobs=multiprocessing.cpu_count(), verbose=3)(delayed(func)(group) for name, group in dfGrouped)
+    retLst = Parallel(n_jobs=8, verbose=3)(delayed(func)(group) for name, group in dfGrouped)
     return pd.concat(retLst)
 
 class monomer:
