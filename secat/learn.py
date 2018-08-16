@@ -22,9 +22,10 @@ from pyprophet.report import save_report
 from pyprophet.stats import qvalue, pi0est
 
 class pyprophet:
-    def __init__(self, outfile, minimum_mass_ratio, maximum_sec_shift, xeval_fraction, xeval_num_iter, ss_initial_fdr, ss_iteration_fdr, ss_num_iter, parametric, pfdr, pi0_lambda, pi0_method, pi0_smooth_df, pi0_smooth_log_pi0, lfdr_truncate, lfdr_monotone, lfdr_transformation, lfdr_adj, lfdr_eps, threads, test):
+    def __init__(self, outfile, minimum_monomer_delta, minimum_mass_ratio, maximum_sec_shift, xeval_fraction, xeval_num_iter, ss_initial_fdr, ss_iteration_fdr, ss_num_iter, parametric, pfdr, pi0_lambda, pi0_method, pi0_smooth_df, pi0_smooth_log_pi0, lfdr_truncate, lfdr_monotone, lfdr_transformation, lfdr_adj, lfdr_eps, threads, test):
 
         self.outfile = outfile
+        self.minimum_monomer_delta = minimum_monomer_delta
         self.minimum_mass_ratio = minimum_mass_ratio
         self.maximum_sec_shift = maximum_sec_shift
         self.xeval_fraction = xeval_fraction
@@ -56,7 +57,7 @@ class pyprophet:
 
     def read_data(self):
         con = sqlite3.connect(self.outfile)
-        df = pd.read_sql('SELECT *, condition_id || "_" || replicate_id || "_" || bait_id || "_" || prey_id AS pyprophet_feature_id FROM FEATURE WHERE var_xcorr_shift <= %s AND var_mass_ratio >= %s;' % (self.maximum_sec_shift, self.minimum_mass_ratio), con)
+        df = pd.read_sql('SELECT *, condition_id || "_" || replicate_id || "_" || bait_id || "_" || prey_id AS pyprophet_feature_id FROM FEATURE WHERE var_monomer_delta >= %s AND var_xcorr_shift <= %s AND var_mass_ratio >= %s;' % (self.minimum_monomer_delta, self.maximum_sec_shift, self.minimum_mass_ratio), con)
         con.close()
 
         return df

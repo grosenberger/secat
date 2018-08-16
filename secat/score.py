@@ -24,10 +24,9 @@ def applyParallel(dfGrouped, func):
     return pd.concat(retLst)
 
 class monomer:
-    def __init__(self, outfile, monomer_threshold_factor, expected_peak_width):
+    def __init__(self, outfile, monomer_threshold_factor):
         self.outfile = outfile
         self.monomer_threshold_factor = monomer_threshold_factor
-        self.expected_peak_width = expected_peak_width
         self.df = self.protein_thresholds()
 
     def protein_thresholds(self):
@@ -44,9 +43,6 @@ class monomer:
 
         # Compute expected SEC fraction
         protein_sec_thresholds = protein_mw.groupby(['protein_id']).apply(lambda x: get_sec_ids(x['protein_mw'].mean(), sec_meta=sec_meta)).reset_index(level=['protein_id'])
-
-        # Correct for expected elution width of peak
-        protein_sec_thresholds['sec_id'] - np.round(float(self.expected_peak_width) / 2)
 
         return protein_sec_thresholds[['condition_id','replicate_id','protein_id','sec_id']]
 
@@ -153,11 +149,15 @@ def interaction(df):
         # Mass similarity score
         mass_ratio = mass_similarity(bmi, pmi)
 
+        # Monomer delta score
+        monomer_delta = np.min(np.array([df[df['is_bait']]['monomer_sec_id'].min() - xcorr_apex, df[~df['is_bait']]['monomer_sec_id'].min() - xcorr_apex]))
+
         res = df[['condition_id','replicate_id','bait_id','prey_id','decoy','confidence_bin']].drop_duplicates()
         res['main_var_xcorr_shape'] = xcorr_shape
         res['var_xcorr_shift'] = xcorr_shift
         res['var_tic'] = tic
         res['var_mass_ratio'] = mass_ratio
+        res['var_monomer_delta'] = monomer_delta
         res['apex'] = xcorr_apex
         res['intersection'] = longest_overlap
         res['total_intersection'] = len(intersection)
@@ -168,6 +168,7 @@ def interaction(df):
         res['var_xcorr_shift'] = np.nan
         res['var_tic'] = np.nan
         res['var_mass_ratio'] = np.nan
+        res['var_monomer_delta'] = np.nan
         res['apex'] = np.nan
         res['intersection'] = np.nan
         res['total_intersection'] = np.nan
