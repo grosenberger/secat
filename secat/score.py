@@ -210,9 +210,6 @@ class scoring:
             x['peptide_intensity'] -= peptide_mean
             return x
 
-        # Filter out monomers
-        df = df[df['sec_id'] < df['monomer_sec_id']]
-
         # Report statistics before filtering
         click.echo("Info: %s unique peptides before filtering." % len(df['peptide_id'].unique()))
         click.echo("Info: %s peptide chromatograms before filtering." % df[['condition_id','replicate_id','protein_id','peptide_id']].drop_duplicates().shape[0])
@@ -228,6 +225,9 @@ class scoring:
         click.echo("Info: %s unique peptides after filtering." % len(df['peptide_id'].unique()))
         click.echo("Info: %s peptide chromatograms after filtering." % df[['condition_id','replicate_id','protein_id','peptide_id']].drop_duplicates().shape[0])
         click.echo("Info: %s data points after filtering." % df.shape[0])
+
+        # Filter out monomers
+        df = df[df['sec_id'] < df['monomer_sec_id']]
 
         return df
 
