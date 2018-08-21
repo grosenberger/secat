@@ -7,8 +7,8 @@ import os
 import sys
 
 from joblib import Parallel, delayed
-import multiprocessing
 
+from scipy.signal import find_peaks, peak_widths
 from minepy import cstats
 
 def split(dfm, chunk_size):
@@ -47,6 +47,28 @@ class monomer:
         return protein_sec_thresholds[['condition_id','replicate_id','protein_id','sec_id']]
 
 def interaction(df):
+    def pick(x, sec_boundaries, expected_peak_width):
+        xpep = x.groupby(['peptide_id','sec_id'])['peptide_intensity'].mean().reset_index()
+        xprot = xpep.groupby(['sec_id'])['peptide_intensity'].mean().reset_index()
+
+        xall = pd.merge(pd.concat([pd.DataFrame({'sec_id': [0]}), sec_boundaries]), xprot[['sec_id','peptide_intensity']], on='sec_id', how='left').sort_values(['sec_id'])
+        xall['peptide_intensity'] = np.nan_to_num(xall['peptide_intensity'].values) # Replace missing values with zeros
+
+        peaks, _ = find_peaks(xall['peptide_intensity'])#, width=[expected_peak_width/2,expected_peak_width*2])
+        boundaries = peak_widths(xall['peptide_intensity'], peaks, rel_height=0.9)
+
+        left_boundaries = np.floor(boundaries[2])
+        right_boundaries = np.ceil(boundaries[3])
+
+        sec_list = None
+        for peak in list(zip(left_boundaries, right_boundaries)):
+            if sec_list is None:
+                sec_list = np.arange(peak[0],peak[1]+1)
+            else:
+                sec_list = np.append(sec_list, np.arange(peak[0],peak[1]+1))
+
+        return x[x['sec_id'].isin(np.unique(sec_list))]
+
     def longest_intersection(arr):
         # Compute longest continuous stretch
         n = len(arr)
@@ -113,6 +135,9 @@ def interaction(df):
     expected_peak_width = df['expected_peak_width'].min()
     minimum_peptides = df['minimum_peptides'].min()
     sec_boundaries = pd.DataFrame({'sec_id': range(df['lower_sec_boundaries'].min(), df['upper_sec_boundaries'].max()+1)})
+
+    # Pick profiles
+    df = pick(df, sec_boundaries, expected_peak_width)
 
     # Require minimum overlap
     intersection = list(set(df[df['is_bait']]['sec_id'].unique()) & set(df[~df['is_bait']]['sec_id'].unique()))
@@ -210,24 +235,49 @@ class scoring:
             x['peptide_intensity'] -= peptide_mean
             return x
 
+        def protein_pick(x):
+            xpep = x.groupby(['protein_id','peptide_id','sec_id'])['peptide_intensity'].mean().reset_index()
+            xprot = xpep.groupby(['protein_id','sec_id'])['peptide_intensity'].mean().reset_index()
+
+            xall = pd.merge(self.sec_boundaries, xprot[['sec_id','peptide_intensity']], on='sec_id', how='left').sort_values(['sec_id'])
+            xall['peptide_intensity'] = np.nan_to_num(xall['peptide_intensity'].values) # Replace missing values with zeros
+
+            peaks, _ = find_peaks(xall['peptide_intensity'], width=[self.expected_peak_width/2,self.expected_peak_width*2])
+            boundaries = peak_widths(xall['peptide_intensity'], peaks, rel_height=0.9)
+
+            left_boundaries = np.floor(boundaries[2])
+            right_boundaries = np.ceil(boundaries[3])
+
+            sec_list = None
+            for peak in list(zip(left_boundaries, right_boundaries)):
+                if sec_list is None:
+                    sec_list = np.arange(peak[0],peak[1]+1)
+                else:
+                    sec_list = np.append(sec_list, np.arange(peak[0],peak[1]+1))
+
+            return x[x['sec_id'].isin(np.unique(sec_list))]
+
         # Report statistics before filtering
         click.echo("Info: %s unique peptides before filtering." % len(df['peptide_id'].unique()))
         click.echo("Info: %s peptide chromatograms before filtering." % df[['condition_id','replicate_id','protein_id','peptide_id']].drop_duplicates().shape[0])
         click.echo("Info: %s data points before filtering." % df.shape[0])
 
+        # Filter out monomers
+        df = df[df['sec_id'] < df['monomer_sec_id']]
+
+        # Pick peaks on protein level
+        # df = df.groupby(['condition_id','protein_id']).apply(protein_pick).dropna()
+
         # Remove constant trends from peptides
-        df = df.groupby(['condition_id','replicate_id','protein_id','peptide_id']).apply(peptide_detrend).dropna()
+        # df = df.groupby(['condition_id','replicate_id','protein_id','peptide_id']).apply(peptide_detrend).dropna()
 
         # Exclude low intensity data points
-        df = df[df['peptide_intensity'] > 0]
+        # df = df[df['peptide_intensity'] > 0]
 
         # Report statistics after filtering
         click.echo("Info: %s unique peptides after filtering." % len(df['peptide_id'].unique()))
         click.echo("Info: %s peptide chromatograms after filtering." % df[['condition_id','replicate_id','protein_id','peptide_id']].drop_duplicates().shape[0])
         click.echo("Info: %s data points after filtering." % df.shape[0])
-
-        # Filter out monomers
-        df = df[df['sec_id'] < df['monomer_sec_id']]
 
         return df
 

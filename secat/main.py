@@ -169,7 +169,7 @@ def score(infile, outfile, monomer_threshold_factor, expected_peak_width, minimu
 # Prefiltering
 @click.option('--minimum_monomer_delta', 'minimum_monomer_delta', default=0, show_default=True, type=float, help='Minimum number of delta fractions from the expected monomer fraction required to score an interaction.')
 @click.option('--minimum_mass_ratio', 'minimum_mass_ratio', default=0.1, show_default=True, type=float, help='Minimum number of fractions required to score an interaction.')
-@click.option('--maximum_sec_shift', 'maximum_sec_shift', default=3.0, show_default=True, type=float, help='Maximum lag in SEC units between interactions and subunits.')
+@click.option('--maximum_sec_shift', 'maximum_sec_shift', default=5.0, show_default=True, type=float, help='Maximum lag in SEC units between interactions and subunits.')
 # Semi-supervised learning
 @click.option('--xeval_fraction', default=0.5, show_default=True, type=float, help='Data fraction used for cross-validation of semi-supervised learning step.')
 @click.option('--xeval_num_iter', default=10, show_default=True, type=int, help='Number of iterations for cross-validation of semi-supervised learning step.')
