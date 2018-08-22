@@ -147,7 +147,7 @@ def interaction(df):
     num_bait_peptides = len(df[df['sec_id'].isin(intersection) & df['is_bait']]['peptide_id'].unique())
     num_prey_peptides = len(df[df['sec_id'].isin(intersection) & ~df['is_bait']]['peptide_id'].unique())
 
-    if longest_overlap >= expected_peak_width and num_bait_peptides >= minimum_peptides and num_prey_peptides >= minimum_peptides:
+    if longest_overlap >= 3 and num_bait_peptides >= minimum_peptides and num_prey_peptides >= minimum_peptides:
         # Compute bait SEC boundaries
         bait_sec_boundaries = sec_boundaries.copy()
         bait_sec_boundaries['peptide_id'] = df[df['is_bait']]['peptide_id'].unique()[0]
