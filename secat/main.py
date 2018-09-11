@@ -9,7 +9,7 @@ import numpy as np
 
 from .preprocess import uniprot, net, sec, quantification, meta, query
 from .score import monomer, scoring
-from .learn import pyprophet, combine
+from .learn import pyprophet
 from .quantify import quantitative_matrix, quantitative_test
 from .plot import plot_features
 
@@ -171,10 +171,10 @@ def score(infile, outfile, monomer_threshold_factor, expected_peak_width, minimu
 @click.option('--minimum_mass_ratio', 'minimum_mass_ratio', default=0.1, show_default=True, type=float, help='Minimum number of fractions required to score an interaction.')
 @click.option('--maximum_sec_shift', 'maximum_sec_shift', default=5.0, show_default=True, type=float, help='Maximum lag in SEC units between interactions and subunits.')
 # Semi-supervised learning
-@click.option('--xeval_fraction', default=0.5, show_default=True, type=float, help='Data fraction used for cross-validation of semi-supervised learning step.')
+@click.option('--xeval_fraction', default=0.9, show_default=True, type=float, help='Data fraction used for cross-validation of semi-supervised learning step.')
 @click.option('--xeval_num_iter', default=10, show_default=True, type=int, help='Number of iterations for cross-validation of semi-supervised learning step.')
-@click.option('--ss_initial_fdr', default=0.15, show_default=True, type=float, help='Initial FDR cutoff for best scoring targets.')
-@click.option('--ss_iteration_fdr', default=0.15, show_default=True, type=float, help='Iteration FDR cutoff for best scoring targets.')
+@click.option('--ss_initial_fdr', default=0.1, show_default=True, type=float, help='Initial FDR cutoff for best scoring targets.')
+@click.option('--ss_iteration_fdr', default=0.05, show_default=True, type=float, help='Iteration FDR cutoff for best scoring targets.')
 @click.option('--ss_num_iter', default=10, show_default=True, type=int, help='Number of iterations for semi-supervised learning step.')
 # Statistics
 @click.option('--parametric/--no-parametric', default=False, show_default=True, help='Do parametric estimation of p-values.')
@@ -209,17 +209,8 @@ def learn(infile, outfile, minimum_monomer_delta, minimum_mass_ratio, maximum_se
 
     con = sqlite3.connect(outfile)
     scored_data.df.to_sql('FEATURE_SCORED', con, index=False, if_exists='replace')
+    scored_data.metadf.to_sql('FEATURE_SCORED_COMBINED', con, index=False, if_exists='replace')
     con.close()
-
-    # Combine
-    click.echo("Info: Combine evidence across replicate runs.")
-
-    combined_data = combine(outfile, pi0_lambda, pi0_method, pi0_smooth_df, pi0_smooth_log_pi0, pfdr)
-
-    con = sqlite3.connect(outfile)
-    combined_data.df.to_sql('FEATURE_SCORED_COMBINED', con, index=False, if_exists='replace')
-    con.close()
-
 
 # SECAT quantify features
 @cli.command()
