@@ -20,7 +20,7 @@ class quantitative_matrix:
         self.minimum_peptides = minimum_peptides
         self.maximum_peptides = maximum_peptides
 
-        self.interactions, self.detections, self.chromatograms = self.read()
+        self.interactions, self.detections, self.chromatograms, self.peaks = self.read()
         self.monomer = self.quantify_monomers()
         self.complex = self.quantify_complexes()
         self.complex = self.detect_complexes()
@@ -34,9 +34,11 @@ class quantitative_matrix:
 
         chromatograms = pd.read_sql('SELECT SEC.condition_id, SEC.replicate_id, SEC.sec_id, QUANTIFICATION.protein_id, QUANTIFICATION.peptide_id, peptide_intensity, MONOMER.sec_id AS monomer_sec_id FROM QUANTIFICATION INNER JOIN PROTEIN_META ON QUANTIFICATION.protein_id = PROTEIN_META.protein_id INNER JOIN PEPTIDE_META ON QUANTIFICATION.peptide_id = PEPTIDE_META.peptide_id INNER JOIN SEC ON QUANTIFICATION.RUN_ID = SEC.RUN_ID INNER JOIN MONOMER ON QUANTIFICATION.protein_id = MONOMER.protein_id and SEC.condition_id = MONOMER.condition_id AND SEC.replicate_id = MONOMER.replicate_id WHERE peptide_count >= %s AND peptide_rank <= %s;' % (self.minimum_peptides, self.maximum_peptides), con)
 
+        peaks = pd.read_sql('SELECT * FROM PROTEIN_PEAKS;', con)
+
         con.close()
 
-        return interactions, detections, chromatograms
+        return interactions, detections, chromatograms, peaks
 
     def quantify_monomers(self):
         def summarize(df):
@@ -115,11 +117,14 @@ class quantitative_matrix:
 
                     return protein
 
+        # Restrict chromatographic data to selected peaks only
+        chromatograms = pd.merge(self.chromatograms, self.peaks, on=['condition_id','replicate_id','protein_id','sec_id'])
+
         # Quantify interactions
-        baits = pd.merge(self.interactions, self.chromatograms, left_on=['bait_id'], right_on=['protein_id']).drop(columns=['protein_id'])
+        baits = pd.merge(self.interactions, chromatograms, left_on=['bait_id'], right_on=['protein_id']).drop(columns=['protein_id'])
         baits['is_bait'] = True
 
-        preys = pd.merge(self.interactions, self.chromatograms, left_on=['prey_id'], right_on=['protein_id']).drop(columns=['protein_id'])
+        preys = pd.merge(self.interactions, chromatograms, left_on=['prey_id'], right_on=['protein_id']).drop(columns=['protein_id'])
         preys['is_bait'] = False
 
         complexes = pd.concat([baits, preys]).reset_index()
@@ -191,7 +196,7 @@ class quantitative_test:
                         df['qvalue'] = qvalue(df['pvalue'].values, pi0est(df['pvalue'].values)['pi0'])
                         dfs.append(df)
 
-        return pd.concat(dfs).sort_values(by='pvalue', ascending=True, na_position='last')
+        return pd.concat(dfs, sort=True).sort_values(by='pvalue', ascending=True, na_position='last')
 
     def test(self, df, level, condition_1, condition_2):
         def stat(x, experimental_design):

@@ -11,6 +11,8 @@ from joblib import Parallel, delayed
 from scipy.signal import find_peaks, peak_widths
 from minepy import cstats
 
+np.seterr(divide='ignore', invalid='ignore')
+
 def split(dfm, chunk_size):
     def index_marks(nrows, chunk_size):
         return range(1 * chunk_size, (nrows // chunk_size + 1) * chunk_size, chunk_size)
@@ -47,28 +49,6 @@ class monomer:
         return protein_sec_thresholds[['condition_id','replicate_id','protein_id','sec_id']]
 
 def interaction(df):
-    def pick(x, sec_boundaries, expected_peak_width):
-        xpep = x.groupby(['peptide_id','sec_id'])['peptide_intensity'].mean().reset_index()
-        xprot = xpep.groupby(['sec_id'])['peptide_intensity'].mean().reset_index()
-
-        xall = pd.merge(pd.concat([pd.DataFrame({'sec_id': [0]}), sec_boundaries]), xprot[['sec_id','peptide_intensity']], on='sec_id', how='left').sort_values(['sec_id'])
-        xall['peptide_intensity'] = np.nan_to_num(xall['peptide_intensity'].values) # Replace missing values with zeros
-
-        peaks, _ = find_peaks(xall['peptide_intensity'])#, width=[expected_peak_width/2,expected_peak_width*2])
-        boundaries = peak_widths(xall['peptide_intensity'], peaks, rel_height=0.9)
-
-        left_boundaries = np.floor(boundaries[2])
-        right_boundaries = np.ceil(boundaries[3])
-
-        sec_list = None
-        for peak in list(zip(left_boundaries, right_boundaries)):
-            if sec_list is None:
-                sec_list = np.arange(peak[0],peak[1]+1)
-            else:
-                sec_list = np.append(sec_list, np.arange(peak[0],peak[1]+1))
-
-        return x[x['sec_id'].isin(np.unique(sec_list))]
-
     def longest_intersection(arr):
         # Compute longest continuous stretch
         n = len(arr)
@@ -132,22 +112,21 @@ def interaction(df):
         return mass_ratio
 
     # Workaround for parallelization
-    expected_peak_width = df['expected_peak_width'].min()
     minimum_peptides = df['minimum_peptides'].min()
     sec_boundaries = pd.DataFrame({'sec_id': range(df['lower_sec_boundaries'].min(), df['upper_sec_boundaries'].max()+1)})
 
-    # Pick profiles
-    df = pick(df, sec_boundaries, expected_peak_width)
-
     # Require minimum overlap
     intersection = list(set(df[df['is_bait']]['sec_id'].unique()) & set(df[~df['is_bait']]['sec_id'].unique()))
+    bait_overlap = len(df[df['is_bait']]['sec_id'].unique())
+    prey_overlap = len(df[~df['is_bait']]['sec_id'].unique())
+    delta_overlap = abs(bait_overlap-prey_overlap)
     longest_overlap = longest_intersection(intersection)
 
     # Requre minimum peptides
     num_bait_peptides = len(df[df['sec_id'].isin(intersection) & df['is_bait']]['peptide_id'].unique())
     num_prey_peptides = len(df[df['sec_id'].isin(intersection) & ~df['is_bait']]['peptide_id'].unique())
 
-    if longest_overlap >= 3 and num_bait_peptides >= minimum_peptides and num_prey_peptides >= minimum_peptides:
+    if num_bait_peptides >= minimum_peptides and num_prey_peptides >= minimum_peptides:
         # Compute bait SEC boundaries
         bait_sec_boundaries = sec_boundaries.copy()
         bait_sec_boundaries['peptide_id'] = df[df['is_bait']]['peptide_id'].unique()[0]
@@ -167,8 +146,9 @@ def interaction(df):
         # Cross-correlation scores
         xcorr_shape, xcorr_shift, xcorr_apex = sec_xcorr(bmi, pmi)
 
-        # MIC score
+        # MIC/TIC scores
         mic_stat, tic_stat = cstats(bpi[intersection].values, ppi[intersection].values, est="mic_e")
+        mic = mic_stat.mean(axis=0).mean() # Axis 0: summary for prey peptides / Axis 1: summary for bait peptides
         tic = tic_stat.mean(axis=0).mean() # Axis 0: summary for prey peptides / Axis 1: summary for bait peptides
 
         # Mass similarity score
@@ -178,35 +158,42 @@ def interaction(df):
         monomer_delta = np.min(np.array([df[df['is_bait']]['monomer_sec_id'].min() - xcorr_apex, df[~df['is_bait']]['monomer_sec_id'].min() - xcorr_apex]))
 
         res = df[['condition_id','replicate_id','bait_id','prey_id','decoy','confidence_bin']].drop_duplicates()
-        res['main_var_xcorr_shape'] = xcorr_shape
+        res['var_xcorr_shape'] = xcorr_shape
         res['var_xcorr_shift'] = xcorr_shift
+        res['var_mic'] = mic
         res['var_tic'] = tic
         res['var_mass_ratio'] = mass_ratio
         res['var_monomer_delta'] = monomer_delta
-        res['apex'] = xcorr_apex
-        res['intersection'] = longest_overlap
-        res['total_intersection'] = len(intersection)
+        res['var_sec_apex'] = xcorr_apex
+        res['var_sec_left'] = min(intersection)
+        res['var_sec_right'] = max(intersection)
+        res['var_intersection'] = longest_overlap
+        res['var_delta_intersection'] = delta_overlap
+        res['var_total_intersection'] = len(intersection)
 
     else:
         res = df[['condition_id','replicate_id','bait_id','prey_id','decoy','confidence_bin']].drop_duplicates()
-        res['main_var_xcorr_shape'] = np.nan
+        res['var_xcorr_shape'] = np.nan
         res['var_xcorr_shift'] = np.nan
+        res['var_mic'] = np.nan
         res['var_tic'] = np.nan
         res['var_mass_ratio'] = np.nan
         res['var_monomer_delta'] = np.nan
-        res['apex'] = np.nan
-        res['intersection'] = np.nan
-        res['total_intersection'] = np.nan
+        res['var_sec_apex'] = np.nan
+        res['var_sec_left'] = np.nan
+        res['var_sec_right'] = np.nan
+        res['var_intersection'] = np.nan
+        res['var_delta_intersection'] = np.nan
+        res['var_total_intersection'] = np.nan
 
     return(res)
 
 class scoring:
-    def __init__(self, outfile, chunck_size, minimum_peptides, maximum_peptides, expected_peak_width):
+    def __init__(self, outfile, chunck_size, minimum_peptides, maximum_peptides):
         self.outfile = outfile
         self.chunck_size = chunck_size
         self.minimum_peptides = minimum_peptides
         self.maximum_peptides = maximum_peptides
-        self.expected_peak_width = expected_peak_width
 
         self.sec_boundaries = self.read_sec_boundaries()
 
@@ -214,6 +201,7 @@ class scoring:
         chromatograms = self.read_chromatograms()
         click.echo("Info: Filter peptide chromatograms.")
         self.chromatograms = self.filter_peptides(chromatograms)
+        self.store_filtered()
         click.echo("Info: Read queries and SEC boundaries.")
         self.queries = self.read_queries()
 
@@ -232,47 +220,18 @@ class scoring:
     def filter_peptides(self, df):
         def peptide_detrend(x):
             peptide_mean = np.mean(np.append(x['peptide_intensity'], np.zeros(len(self.sec_boundaries['sec_id'].unique())-x.shape[0])))
-            x['peptide_intensity'] -= peptide_mean
-            return x
-
-        def protein_pick(x):
-            xpep = x.groupby(['protein_id','peptide_id','sec_id'])['peptide_intensity'].mean().reset_index()
-            xprot = xpep.groupby(['protein_id','sec_id'])['peptide_intensity'].mean().reset_index()
-
-            xall = pd.merge(self.sec_boundaries, xprot[['sec_id','peptide_intensity']], on='sec_id', how='left').sort_values(['sec_id'])
-            xall['peptide_intensity'] = np.nan_to_num(xall['peptide_intensity'].values) # Replace missing values with zeros
-
-            peaks, _ = find_peaks(xall['peptide_intensity'], width=[self.expected_peak_width/2,self.expected_peak_width*2])
-            boundaries = peak_widths(xall['peptide_intensity'], peaks, rel_height=0.9)
-
-            left_boundaries = np.floor(boundaries[2])
-            right_boundaries = np.ceil(boundaries[3])
-
-            sec_list = None
-            for peak in list(zip(left_boundaries, right_boundaries)):
-                if sec_list is None:
-                    sec_list = np.arange(peak[0],peak[1]+1)
-                else:
-                    sec_list = np.append(sec_list, np.arange(peak[0],peak[1]+1))
-
-            return x[x['sec_id'].isin(np.unique(sec_list))]
+            return x[x['peptide_intensity'] > peptide_mean][['sec_id','peptide_intensity','monomer_sec_id']]
 
         # Report statistics before filtering
         click.echo("Info: %s unique peptides before filtering." % len(df['peptide_id'].unique()))
         click.echo("Info: %s peptide chromatograms before filtering." % df[['condition_id','replicate_id','protein_id','peptide_id']].drop_duplicates().shape[0])
         click.echo("Info: %s data points before filtering." % df.shape[0])
 
-        # Filter out monomers
-        df = df[df['sec_id'] < df['monomer_sec_id']]
-
-        # Pick peaks on protein level
-        # df = df.groupby(['condition_id','protein_id']).apply(protein_pick).dropna()
-
         # Remove constant trends from peptides
-        # df = df.groupby(['condition_id','replicate_id','protein_id','peptide_id']).apply(peptide_detrend).dropna()
+        # df = df.groupby(['condition_id','replicate_id','protein_id','peptide_id']).apply(peptide_detrend).reset_index(level=['condition_id','replicate_id','protein_id','peptide_id'])
 
-        # Exclude low intensity data points
-        # df = df[df['peptide_intensity'] > 0]
+        # Filter monomers for detrending
+        df = df[df['sec_id'] <= df['monomer_sec_id']]
 
         # Report statistics after filtering
         click.echo("Info: %s unique peptides after filtering." % len(df['peptide_id'].unique()))
@@ -280,6 +239,11 @@ class scoring:
         click.echo("Info: %s data points after filtering." % df.shape[0])
 
         return df
+
+    def store_filtered(self):
+        con = sqlite3.connect(self.outfile)
+        self.chromatograms[['condition_id','replicate_id','protein_id','sec_id']].drop_duplicates().to_sql('PROTEIN_PEAKS', con, index=False, if_exists='replace')
+        con.close()
 
     def read_queries(self):
         # Read data
@@ -319,7 +283,6 @@ class scoring:
             data_pd = pd.concat([baits, preys]).reset_index()
 
             # Workaround for parallelization
-            data_pd['expected_peak_width'] = self.expected_peak_width
             data_pd['minimum_peptides'] = self.minimum_peptides
             data_pd['lower_sec_boundaries'] = self.sec_boundaries['sec_id'].min()
             data_pd['upper_sec_boundaries'] = self.sec_boundaries['sec_id'].max()
