@@ -40,6 +40,7 @@ class plot_features:
         # Read peptide and feature data
         self.feature_data = self.read_features()
         self.peptide_data = self.read_peptides()
+        self.protein_data = self.read_proteins()
 
         # Read meta data if available
         self.interactions_dmeta = self.read_interactions_dmeta()
@@ -66,11 +67,17 @@ class plot_features:
 
     def plot_interaction(self, interaction_id, result_id=000000, decoy=False):
         feature_data = self.feature_data
+        protein_data = self.protein_data
+        protein_data['picked'] = True
         peptide_data = self.peptide_data
 
         feature_data = feature_data[feature_data['interaction_id'] == interaction_id]
         proteins = pd.DataFrame({"protein_id": pd.concat([feature_data['bait_id'], feature_data['prey_id']])}).drop_duplicates()
         peptide_data = pd.merge(peptide_data, proteins, how='inner', on='protein_id')
+
+        peptide_data = pd.merge(peptide_data, protein_data, on=['condition_id', 'replicate_id', 'protein_id', 'sec_id'], how='left')
+        peptide_data.loc[peptide_data['picked'].isnull(), 'picked'] = False
+
         if decoy:
             out = os.path.splitext(os.path.basename(self.infile))[0]+"_"+str(result_id).zfill(6)+"_DECOY_"+interaction_id+".pdf"
         else:
@@ -83,7 +90,12 @@ class plot_features:
 
     def plot_bait(self, bait_id, result_id):
         feature_data = self.feature_data
+        protein_data = self.protein_data
+        protein_data['picked'] = True
         peptide_data = self.peptide_data
+
+        peptide_data = pd.merge(peptide_data, protein_data, on=['condition_id', 'replicate_id', 'protein_id', 'sec_id'], how='left')
+        peptide_data.loc[peptide_data['picked'].isnull(), 'picked'] = False
 
         interaction_data = self.interactions_dmeta[['bait_id','prey_id','interaction_id']].drop_duplicates()
         interaction_data = interaction_data[(interaction_data['bait_id'] == bait_id) | (interaction_data['prey_id'] == bait_id)]
@@ -117,6 +129,15 @@ class plot_features:
 
         return df
 
+    def read_proteins(self):
+        con = sqlite3.connect(self.infile)
+
+        df = pd.read_sql('SELECT * FROM PROTEIN_PEAKS;', con)
+
+        con.close()
+
+        return df
+
     def read_peptides(self):
         con = sqlite3.connect(self.infile)
 
@@ -137,9 +158,9 @@ class plot_features:
         if check_sqlite_table(con, 'EDGE') and self.mode == 'quantification':
             df = pd.read_sql('SELECT DISTINCT bait_id || "_" || prey_id AS interaction_id, 0 as decoy FROM %s WHERE qvalue < %s ORDER BY pvalue ASC;' % (table, self.interaction_qvalue), con)
         elif self.mode == 'detection_integrated':
-            df = pd.read_sql('SELECT DISTINCT bait_id || "_" || prey_id AS interaction_id, 0 as decoy FROM FEATURE_SCORED_COMBINED WHERE qvalue < %s AND decoy == 0 GROUP BY FEATURE_SCORED_COMBINED.bait_id, FEATURE_SCORED_COMBINED.prey_id ORDER BY pvalue ASC;' % (self.interaction_qvalue), con)
+            df = pd.read_sql('SELECT DISTINCT bait_id || "_" || prey_id AS interaction_id, decoy FROM FEATURE_SCORED_COMBINED WHERE qvalue < %s GROUP BY bait_id, prey_id ORDER BY qvalue ASC;' % (self.interaction_qvalue), con)
         elif self.mode == 'detection_separate':
-            df = pd.read_sql('SELECT DISTINCT bait_id || "_" || prey_id AS interaction_id, decoy FROM FEATURE_SCORED WHERE qvalue < %s ORDER BY pvalue ASC;' % (self.interaction_qvalue), con)
+            df = pd.read_sql('SELECT DISTINCT bait_id || "_" || prey_id AS interaction_id, decoy FROM FEATURE_SCORED WHERE qvalue < %s ORDER BY qvalue ASC;' % (self.interaction_qvalue), con)
         else:
             sys.exit("Mode for interaction plotting not supported.")
 
@@ -240,8 +261,10 @@ class plot_features:
             proteins = peptide_data['protein_id'].drop_duplicates().values
             for protein in proteins:
                 if protein == bait_id:
+                    background_color = 'rosybrown'
                     protein_color = 'red'
                 else:
+                    background_color = 'grey'
                     protein_color = 'black'
                 # plot monomer threshold
                 axarr[tags.index(tag)].axvline(x=peptide_data[peptide_data['protein_id'] == protein]['monomer_sec_id'].mean(), color=protein_color, alpha=0.5)
@@ -251,7 +274,10 @@ class plot_features:
                 for peptide in peptides:
                     points = peptide_data[(peptide_data['peptide_id'] == peptide) & (peptide_data['tag'] == tag)].sort_values(by=['sec_id'])
 
-                    axarr[tags.index(tag)].plot(points['sec_id'], points['peptide_intensity'], color=protein_color)
+                    # background
+                    axarr[tags.index(tag)].plot(points['sec_id'], points['peptide_intensity'], color=background_color)
+                    # # picked proteins
+                    axarr[tags.index(tag)].plot(points[points['picked']]['sec_id'], points[points['picked']]['peptide_intensity'], color=protein_color)
 
             # plot legend and subtitle
             if bait_id is not prey_id:
