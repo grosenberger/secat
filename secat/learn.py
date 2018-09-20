@@ -58,7 +58,8 @@ class pyprophet:
         self.weights = self.learn(data[data['confidence_bin'] == data['confidence_bin'].max()])
 
         # Apply model
-        self.df = data.groupby('confidence_bin').apply(self.apply)
+        # self.df = data[~data['learning']].groupby('confidence_bin').apply(self.apply)
+        self.df = data[data['confidence_bin'] != data['confidence_bin'].max()].groupby('confidence_bin').apply(self.apply)
 
     def read_data(self):
         con = sqlite3.connect(self.outfile)
@@ -155,11 +156,11 @@ class combine:
         self.pfdr = pfdr
 
         scores = self.read()
-        self.df = self.combine_scores(scores)
+        self.df = scores.groupby('confidence_bin').apply(self.combine_scores)
 
     def read(self):
         con = sqlite3.connect(self.outfile)
-        df = pd.read_sql('SELECT * FROM FEATURE_SCORED;', con)
+        df = pd.read_sql('SELECT FEATURE_SCORED.*, QUERY.confidence_bin FROM FEATURE_SCORED INNER JOIN QUERY ON FEATURE_SCORED.bait_id = QUERY.bait_id AND FEATURE_SCORED.prey_id = QUERY.prey_id AND FEATURE_SCORED.decoy = QUERY.decoy;', con)
         con.close()
 
         return df

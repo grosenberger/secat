@@ -157,7 +157,7 @@ def interaction(df):
         # Monomer delta score
         monomer_delta = np.min(np.array([df[df['is_bait']]['monomer_sec_id'].min() - xcorr_apex, df[~df['is_bait']]['monomer_sec_id'].min() - xcorr_apex]))
 
-        res = df[['condition_id','replicate_id','bait_id','prey_id','decoy','confidence_bin']].drop_duplicates()
+        res = df[['condition_id','replicate_id','bait_id','prey_id','decoy','confidence_bin','learning']].drop_duplicates()
         res['var_xcorr_shape'] = xcorr_shape
         res['var_xcorr_shift'] = xcorr_shift
         res['var_mic'] = mic
@@ -172,7 +172,7 @@ def interaction(df):
         res['var_total_intersection'] = len(intersection)
 
     else:
-        res = df[['condition_id','replicate_id','bait_id','prey_id','decoy','confidence_bin']].drop_duplicates()
+        res = df[['condition_id','replicate_id','bait_id','prey_id','decoy','confidence_bin','learning']].drop_duplicates()
         res['var_xcorr_shape'] = np.nan
         res['var_xcorr_shift'] = np.nan
         res['var_mic'] = np.nan
@@ -264,7 +264,7 @@ class scoring:
     def compare(self):
         # Obtain experimental design
         exp_design = self.chromatograms[['condition_id','replicate_id','protein_id']].drop_duplicates().sort_values(['condition_id','replicate_id','protein_id'])
-        comparisons = pd.merge(pd.merge(self.queries, exp_design, left_on='bait_id', right_on='protein_id')[['condition_id','replicate_id','bait_id','prey_id','decoy','confidence_bin']], exp_design, left_on=['condition_id','replicate_id','prey_id'], right_on=['condition_id','replicate_id','protein_id'])[['condition_id','replicate_id','bait_id','prey_id','decoy','confidence_bin']]
+        comparisons = pd.merge(pd.merge(self.queries, exp_design, left_on='bait_id', right_on='protein_id')[['condition_id','replicate_id','bait_id','prey_id','decoy','confidence_bin','learning']], exp_design, left_on=['condition_id','replicate_id','prey_id'], right_on=['condition_id','replicate_id','protein_id'])[['condition_id','replicate_id','bait_id','prey_id','decoy','confidence_bin','learning']]
 
         # Split data into chunks for parallel processing
         comparisons_chunks = split(comparisons, self.chunck_size)
@@ -288,9 +288,9 @@ class scoring:
             data_pd['upper_sec_boundaries'] = self.sec_boundaries['sec_id'].max()
 
             # Single threaded implementation
-            # data = data_pd.groupby(['condition_id','replicate_id','bait_id','prey_id','decoy','confidence_bin']).apply(interaction)
+            # data = data_pd.groupby(['condition_id','replicate_id','bait_id','prey_id','decoy','confidence_bin','learning']).apply(interaction)
             # Multi threaded implementation
-            data = applyParallel(data_pd.groupby(['condition_id','replicate_id','bait_id','prey_id','decoy','confidence_bin']), interaction)
+            data = applyParallel(data_pd.groupby(['condition_id','replicate_id','bait_id','prey_id','decoy','confidence_bin','learning']), interaction)
 
             # Require passing of mass ratio and SEC lag thresholds
             data = data.dropna()

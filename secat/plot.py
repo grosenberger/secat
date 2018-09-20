@@ -188,7 +188,7 @@ class plot_features:
         df = None
 
         if check_sqlite_table(con, 'EDGE'):
-            df = pd.read_sql('SELECT *, "combined" AS level, bait_id || "_" || prey_id AS interaction_id FROM EDGE UNION SELECT condition_1, condition_2, bait_id, prey_id, pvalue, qvalue, level, bait_id || "_" || prey_id AS interaction_id FROM EDGE_LEVEL;', con)
+            df = pd.read_sql('SELECT condition_1, condition_2, bait_id, prey_id, pvalue, qvalue, level, bait_id || "_" || prey_id AS interaction_id FROM EDGE_LEVEL;', con)
         else:
             df = None
 
@@ -202,7 +202,7 @@ class plot_features:
         df = None
 
         if check_sqlite_table(con, 'NODE'):
-            df = pd.read_sql('SELECT *, "combined" AS level FROM NODE UNION SELECT condition_1, condition_2, bait_id, pvalue, qvalue, level FROM NODE_LEVEL;', con)
+            df = pd.read_sql('SELECT condition_1, condition_2, bait_id, pvalue, qvalue, level FROM NODE_LEVEL;', con)
         else:
             df = None
 

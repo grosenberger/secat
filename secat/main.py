@@ -31,6 +31,7 @@ def cli():
 # Reference files
 @click.option('--sec', 'secfile', required=True, type=click.Path(exists=True), help='The input SEC calibration file.')
 @click.option('--net', 'netfile', required=True, type=click.Path(exists=True), help='Reference binary protein-protein interaction file in STRING-DB or HUPO-PSI MITAB (2.5-2.7) format.')
+@click.option('--posnet', 'posnetfile', required=False, type=click.Path(exists=True), help='Reference binary positive protein-protein interaction file in STRING-DB or HUPO-PSI MITAB (2.5-2.7) format.')
 @click.option('--negnet', 'negnetfile', required=False, type=click.Path(exists=True), help='Reference binary negative protein-protein interaction file in STRING-DB or HUPO-PSI MITAB (2.5-2.7) format.')
 @click.option('--uniprot', 'uniprotfile', required=True, type=click.Path(exists=True), help='Reference molecular weights file in UniProt XML format.')
 @click.option('--columns', default=["run_id","sec_id","sec_mw","condition_id","replicate_id","run_id","protein_id","peptide_id","peptide_intensity"], show_default=True, type=(str,str,str,str,str,str,str,str,str), help='Column names for SEC & peptide quantification files')
@@ -42,7 +43,7 @@ def cli():
 @click.option('--min_interaction_confidence', 'min_interaction_confidence', default=0.0, show_default=True, type=float, help='Minimum interaction confidence for prior information from network.')
 @click.option('--interaction_confidence_bins', 'interaction_confidence_bins', default=20, show_default=True, type=int, help='Number of interaction confidence bins for grouped error rate estimation.')
 
-def preprocess(infiles, outfile, secfile, netfile, negnetfile, uniprotfile, columns, decoy_intensity_bins, decoy_left_sec_bins, decoy_right_sec_bins, decoy_subsample, min_interaction_confidence, interaction_confidence_bins):
+def preprocess(infiles, outfile, secfile, netfile, posnetfile, negnetfile, uniprotfile, columns, decoy_intensity_bins, decoy_left_sec_bins, decoy_right_sec_bins, decoy_subsample, min_interaction_confidence, interaction_confidence_bins):
     """
     Import and preprocess SEC data.
     """
@@ -64,6 +65,14 @@ def preprocess(infiles, outfile, secfile, netfile, negnetfile, uniprotfile, colu
     click.echo("Info: Parsing network file %s." % netfile)
     net_data = net(netfile, uniprot_data)
     net_data.to_df().to_sql('NETWORK', con, index=False)
+
+    # Generate Positive Network table
+    if posnetfile != None:
+        click.echo("Info: Parsing positive network file %s." % posnetfile)
+        posnet_data = net(posnetfile, uniprot_data)
+        posnet_data.to_df().to_sql('POSITIVE_NETWORK', con, index=False)
+    else:
+        posnet_data = None
 
     # Generate Negative Network table
     if negnetfile != None:
@@ -94,7 +103,7 @@ def preprocess(infiles, outfile, secfile, netfile, negnetfile, uniprotfile, colu
 
     # Generate interaction query data
     click.echo("Info: Generating interaction query data.")
-    query_data = query(net_data, negnet_data, meta_data.protein_meta, min_interaction_confidence, interaction_confidence_bins, decoy_subsample)
+    query_data = query(net_data, posnet_data, negnet_data, meta_data.protein_meta, min_interaction_confidence, interaction_confidence_bins, decoy_subsample)
     query_data.to_df().to_sql('QUERY', con, index=False)
 
     # Remove any entries that are not necessary (proteins not covered by LC-MS/MS data)
@@ -225,7 +234,7 @@ def learn(infile, outfile, minimum_monomer_delta, minimum_mass_ratio, maximum_se
 @click.option('--out', 'outfile', required=False, type=click.Path(exists=False), help='Output SECAT file.')
 @click.option('--maximum_interaction_qvalue', default=0.1, show_default=True, type=float, help='Maximum q-value to consider interactions for quantification.')
 @click.option('--minimum_peptides', 'minimum_peptides', default=1, show_default=True, type=int, help='Minimum number of peptides required to quantify an interaction.')
-@click.option('--maximum_peptides', 'maximum_peptides', default=20, show_default=True, type=int, help='Maximum number of peptides used to quantify an interaction.')
+@click.option('--maximum_peptides', 'maximum_peptides', default=3, show_default=True, type=int, help='Maximum number of peptides used to quantify an interaction.')
 def quantify(infile, outfile, maximum_interaction_qvalue, minimum_peptides, maximum_peptides):
     """
     Quantify protein and interaction features in SEC data.

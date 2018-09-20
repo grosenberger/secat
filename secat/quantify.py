@@ -193,7 +193,7 @@ class quantitative_test:
                         df = self.test(state, level, comparison[0], comparison[1])
 
                         # Multiple testing correction via q-value
-                        df['qvalue'] = qvalue(df['pvalue'].values, pi0est(df['pvalue'].values)['pi0'])
+                        df['qvalue'] = qvalue(df['pvalue'].values, pi0est(df['pvalue'].values, pi0_method = "bootstrap")['pi0'])
                         dfs.append(df)
 
         return pd.concat(dfs, sort=True).sort_values(by='pvalue', ascending=True, na_position='last')
@@ -230,8 +230,13 @@ class quantitative_test:
             elif x.shape[0] == 1:
                 return pd.Series({'pvalue': x['pvalue'].values[0]})
 
+        def mtcorrect(x):
+                x['qvalue'] = qvalue(x['pvalue'].values, pi0est(x['pvalue'].values, pi0_method = "bootstrap")['pi0'])
+                return(x)
+
+
         df_edge_level = self.tests[self.tests['bait_id'] != self.tests['prey_id']]
-        df_edge = df_edge_level.groupby(['condition_1', 'condition_2','bait_id','prey_id']).apply(collapse).reset_index()
+        df_edge = df_edge_level.sort_values('pvalue').groupby(['condition_1','condition_2','bait_id','prey_id'], as_index=False).first()
 
         # Append reverse interactions; the full list contains monomers only once
         df_edge_level_rev = self.tests.rename(index=str, columns={"bait_id": "prey_id", "prey_id": "bait_id"})
@@ -248,13 +253,15 @@ class quantitative_test:
         df_edge_full = pd.concat([df_edge_level, self.tests])
 
         df_node_level = df_edge_full.groupby(['condition_1', 'condition_2','level','bait_id']).apply(collapse).reset_index()
-        df_node = df_edge_full.groupby(['condition_1', 'condition_2','bait_id']).apply(collapse).reset_index()
+        df_node_level = df_node_level.groupby(['condition_1', 'condition_2','level']).apply(mtcorrect).reset_index()
+
+        df_node = df_node_level.sort_values('pvalue').groupby(['condition_1','condition_2','bait_id'], as_index=False).first()
 
         # Multiple testing correction via q-value
-        df_edge_level['qvalue'] = qvalue(df_edge_level['pvalue'].values, pi0est(df_edge_level['pvalue'].values)['pi0'])
-        df_edge['qvalue'] = qvalue(df_edge['pvalue'].values, pi0est(df_edge['pvalue'].values)['pi0'])
+        # df_edge_level['qvalue'] = qvalue(df_edge_level['pvalue'].values, pi0est(df_edge_level['pvalue'].values, pi0_method = "bootstrap")['pi0'])
+        # df_edge['qvalue'] = qvalue(df_edge['pvalue'].values, pi0est(df_edge['pvalue'].values, pi0_method = "bootstrap")['pi0'])
 
-        df_node_level['qvalue'] = qvalue(df_node_level['pvalue'].values, pi0est(df_node_level['pvalue'].values)['pi0'])
-        df_node['qvalue'] = qvalue(df_node['pvalue'].values, pi0est(df_node['pvalue'].values)['pi0'])
+        # df_node_level['qvalue'] = qvalue(df_node_level['pvalue'].values, pi0est(df_node_level['pvalue'].values, pi0_method = "bootstrap")['pi0'])
+        # df_node['qvalue'] = qvalue(df_node['pvalue'].values, pi0est(df_node['pvalue'].values, pi0_method = "bootstrap")['pi0'])
 
         return df_edge_level, df_edge, df_node_level, df_node
