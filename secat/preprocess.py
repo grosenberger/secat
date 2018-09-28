@@ -424,10 +424,11 @@ class meta:
         return peptide_meta, protein_meta
 
 class query:
-    def __init__(self, net_data, posnet_data, negnet_data, protein_meta_data, min_interaction_confidence, interaction_confidence_bins, decoy_subsample):
+    def __init__(self, net_data, posnet_data, negnet_data, protein_meta_data, min_interaction_confidence, interaction_confidence_bins, decoy_subsample, decoy_exclude):
         self.min_interaction_confidence = min_interaction_confidence
         self.interaction_confidence_bins = interaction_confidence_bins
         self.decoy_subsample = decoy_subsample
+        self.decoy_exclude = decoy_exclude
         self.df = self.generate_query(net_data, posnet_data, negnet_data, protein_meta_data)
 
     def generate_query(self, net_data, posnet_data, negnet_data, protein_meta_data):
@@ -457,7 +458,7 @@ class query:
         # Append decoys
         if negnet_data is None:
             decoy_queries = queries.copy()
-            decoy_queries = decoy_queries.groupby(['confidence_bin','intensity_bin','sec_min_bin','sec_max_bin'])
+            decoy_queries = decoy_queries.groupby(['learning','confidence_bin','intensity_bin','sec_min_bin','sec_max_bin'])
 
             for it in range(0, 1):
                 if it == 0:
@@ -469,9 +470,12 @@ class query:
             decoy_queries = pd.merge(negnet_data.to_df(), protein_meta_data, left_on='prey_id', right_on='protein_id', how='inner')
 
         # Exclude conflicting data from decoys (present in both targets and decoys)
-        decoy_queries = pd.merge(decoy_queries, queries[['bait_id','prey_id','decoy']], on=['bait_id','prey_id'], how='left')
-        decoy_queries = decoy_queries.fillna(True)
-        decoy_queries = decoy_queries[decoy_queries['decoy'] == True]
+        if self.decoy_exclude:
+            decoy_queries = pd.merge(decoy_queries, queries[['bait_id','prey_id','decoy']], on=['bait_id','prey_id'], how='left')
+            decoy_queries = decoy_queries.fillna(True)
+            decoy_queries = decoy_queries[decoy_queries['decoy'] == True]
+        else:
+            decoy_queries['decoy'] = True
 
         # Filter for minimum interaction confidence
         queries = queries[queries['interaction_confidence'] >= self.min_interaction_confidence]

@@ -164,9 +164,9 @@ def interaction(df):
         res['var_tic'] = tic
         res['var_mass_ratio'] = mass_ratio
         res['var_monomer_delta'] = monomer_delta
-        res['var_sec_apex'] = xcorr_apex
-        res['var_sec_left'] = min(intersection)
-        res['var_sec_right'] = max(intersection)
+        # res['var_sec_apex'] = xcorr_apex
+        # res['var_sec_left'] = min(intersection)
+        # res['var_sec_right'] = max(intersection)
         res['var_intersection'] = longest_overlap
         res['var_delta_intersection'] = delta_overlap
         res['var_total_intersection'] = len(intersection)
@@ -179,9 +179,9 @@ def interaction(df):
         res['var_tic'] = np.nan
         res['var_mass_ratio'] = np.nan
         res['var_monomer_delta'] = np.nan
-        res['var_sec_apex'] = np.nan
-        res['var_sec_left'] = np.nan
-        res['var_sec_right'] = np.nan
+        # res['var_sec_apex'] = np.nan
+        # res['var_sec_left'] = np.nan
+        # res['var_sec_right'] = np.nan
         res['var_intersection'] = np.nan
         res['var_delta_intersection'] = np.nan
         res['var_total_intersection'] = np.nan
