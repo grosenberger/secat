@@ -375,10 +375,8 @@ class meta:
 
         # Peptide-level meta data
         top_pep_tg = df.groupby(['peptide_id'])
-        top_pep_s = top_pep_tg['peptide_intensity'].sum()
-        top_pep = pd.DataFrame(top_pep_s)
-        top_pep['peptide_id']=top_pep.index
-        top_pep.columns = ['sumIntensity','peptide_id']
+        top_pep = top_pep_tg['peptide_intensity'].sum().reset_index()
+        top_pep.columns = ['peptide_id','sumIntensity']
         top_pep_merged = pd.merge(df[['peptide_id','protein_id']], top_pep, on='peptide_id', how='inner')
         top_pep_rank = top_pep_merged[['protein_id','peptide_id','sumIntensity']].drop_duplicates()
         top_pep_rank['peptide_rank'] = top_pep_rank.groupby(['protein_id'])['sumIntensity'].rank(ascending=False)
@@ -387,34 +385,27 @@ class meta:
         peptide_meta = top_pep_rank[['peptide_id','peptide_rank']]
 
         # Protein-level meta data
-        num_pep = pd.DataFrame(top_pep_rank.groupby(['protein_id'])['peptide_id'].count())
-        num_pep['protein_id']=num_pep.index
-        num_pep.columns = ['peptide_count','protein_id']
+        num_pep = top_pep_rank.groupby(['protein_id'])['peptide_id'].count().reset_index()
+        num_pep.columns = ['protein_id','peptide_count']
 
         # Generate intensity bins
         inpep_intensity = df.groupby(['protein_id'])
-        inpep_intensity_sum = inpep_intensity['peptide_intensity'].sum()
-        inpep_intensity_ranks = pd.DataFrame(inpep_intensity_sum)
-        inpep_intensity_ranks['protein_id']=inpep_intensity_ranks.index
-        inpep_intensity_ranks.columns = ['sum_intensity','protein_id']
+        inpep_intensity_ranks = inpep_intensity['peptide_intensity'].sum().reset_index()
+        inpep_intensity_ranks.columns = ['protein_id','sum_intensity']
         inpep_intensity_ranks['intensity_rank'] = inpep_intensity_ranks['sum_intensity'].rank(ascending=False)
         inpep_intensity_ranks['intensity_bin'] = pd.cut(inpep_intensity_ranks['intensity_rank'], bins=self.decoy_intensity_bins, right=False, labels=False)
 
         # Generate left sec bins
         inpep_min_sec = df.groupby(['protein_id'])
-        inpep_min_sec_cnt = inpep_min_sec['sec_id'].min()
-        inpep_min_sec_ranks = pd.DataFrame(inpep_min_sec_cnt)
-        inpep_min_sec_ranks['protein_id']=inpep_min_sec_ranks.index
-        inpep_min_sec_ranks.columns = ['min_sec','protein_id']
+        inpep_min_sec_ranks = inpep_min_sec['sec_id'].min().reset_index()
+        inpep_min_sec_ranks.columns = ['protein_id','min_sec']
         inpep_min_sec_ranks['sec_min_rank'] = inpep_min_sec_ranks['min_sec'].rank(ascending=False)
         inpep_min_sec_ranks['sec_min_bin'] = pd.cut(inpep_min_sec_ranks['sec_min_rank'], bins=self.decoy_left_sec_bins, right=False, labels=False)
 
         # Generate right sec bins
         inpep_max_sec = df.groupby(['protein_id'])
-        inpep_max_sec_cnt = inpep_max_sec['sec_id'].max()
-        inpep_max_sec_ranks = pd.DataFrame(inpep_max_sec_cnt)
-        inpep_max_sec_ranks['protein_id']=inpep_max_sec_ranks.index
-        inpep_max_sec_ranks.columns = ['max_sec','protein_id']
+        inpep_max_sec_ranks = inpep_max_sec['sec_id'].max().reset_index()
+        inpep_max_sec_ranks.columns = ['protein_id','max_sec']
         inpep_max_sec_ranks['sec_max_rank'] = inpep_max_sec_ranks['max_sec'].rank(ascending=False)
         inpep_max_sec_ranks['sec_max_bin'] = pd.cut(inpep_max_sec_ranks['sec_max_rank'], bins=self.decoy_right_sec_bins, right=False, labels=False)
 
@@ -486,6 +477,11 @@ class query:
         # Add confidence bin from target network if negative network is provided
         if negnet_data is not None:
             decoy_queries['confidence_bin'] = queries.sample(decoy_queries.shape[0], replace=True)['confidence_bin'].values
+
+        # Add learning flag to decoys
+        if posnet_data is not None:
+            decoy_queries.loc[decoy_queries['confidence_bin'] != decoy_queries['confidence_bin'].max(), 'learning'] = False
+            decoy_queries.loc[decoy_queries['confidence_bin'] == decoy_queries['confidence_bin'].max(), 'learning'] = True
 
         click.echo("Target queries per confidence bin:\n%s" % (queries['confidence_bin'].value_counts()))
         click.echo("Decoy queries per confidence bin:\n%s" % (decoy_queries['confidence_bin'].value_counts()))
