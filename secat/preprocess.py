@@ -415,9 +415,10 @@ class meta:
         return peptide_meta, protein_meta
 
 class query:
-    def __init__(self, net_data, posnet_data, negnet_data, protein_meta_data, min_interaction_confidence, interaction_confidence_bins, decoy_subsample, decoy_exclude):
+    def __init__(self, net_data, posnet_data, negnet_data, protein_meta_data, min_interaction_confidence, interaction_confidence_bins, decoy_oversample, decoy_subsample, decoy_exclude):
         self.min_interaction_confidence = min_interaction_confidence
         self.interaction_confidence_bins = interaction_confidence_bins
+        self.decoy_oversample = decoy_oversample
         self.decoy_subsample = decoy_subsample
         self.decoy_exclude = decoy_exclude
         self.df = self.generate_query(net_data, posnet_data, negnet_data, protein_meta_data)
@@ -434,7 +435,8 @@ class query:
 
         # Generate confidence bin assignment
         if len(queries['interaction_confidence'].unique()) >= self.interaction_confidence_bins:
-            queries['confidence_bin'] = pd.qcut(queries['interaction_confidence'], q=self.interaction_confidence_bins, labels=False)
+            queries['confidence_bin'] = pd.cut(queries['interaction_confidence'], bins=self.interaction_confidence_bins, labels=False)
+            # queries['confidence_bin'] = pd.qcut(queries['interaction_confidence'], q=self.interaction_confidence_bins, labels=False)
         else:
             queries['confidence_bin'] = 1
 
@@ -451,14 +453,15 @@ class query:
             decoy_queries = queries.copy()
             decoy_queries = decoy_queries.groupby(['learning','confidence_bin','intensity_bin','sec_min_bin','sec_max_bin'])
 
-            for it in range(0, 1):
+            for it in range(0, self.decoy_oversample):
                 if it == 0:
                     decoy_queries_shuffled = decoy_queries.apply(_random_nonidentical_array).reset_index()
                 else:
                     decoy_queries_shuffled = pd.concat([decoy_queries_shuffled, decoy_queries.apply(_random_nonidentical_array).reset_index()])
-            decoy_queries = decoy_queries_shuffled.drop(['decoy'], axis=1)
+            decoy_queries = decoy_queries_shuffled.drop(['decoy'], axis=1).drop_duplicates()
         else:
             decoy_queries = pd.merge(negnet_data.to_df(), protein_meta_data, left_on='prey_id', right_on='protein_id', how='inner')
+            decoy_queries['learning'] = False
 
         # Exclude conflicting data from decoys (present in both targets and decoys)
         if self.decoy_exclude:
