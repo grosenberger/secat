@@ -54,12 +54,16 @@ class pyprophet:
         # Read data
         data = self.read_data()
 
-        # Learn model
-        self.weights = self.learn(data[data['confidence_bin'] == data['confidence_bin'].max()])
-
-        # Apply model
-        # self.df = data[~data['learning']].groupby('confidence_bin').apply(self.apply)
-        self.df = data[data['confidence_bin'] != data['confidence_bin'].max()].groupby('confidence_bin').apply(self.apply)
+        if data[data['learning'] == 1].shape[0] > 0:
+            # Learn model
+            self.weights = self.learn(data[data['learning'] == 1])
+            # Apply model
+            self.df = data[data['learning'] == 0].groupby('confidence_bin').apply(self.apply)
+        else:
+            # Learn model
+            self.weights = self.learn(data[data['confidence_bin'] == data['confidence_bin'].max()])
+            # Apply model
+            self.df = data.groupby('confidence_bin').apply(self.apply)       
 
     def read_data(self):
         con = sqlite3.connect(self.outfile)
