@@ -122,7 +122,7 @@ def interaction(df):
     delta_overlap = abs(bait_overlap-prey_overlap)
     longest_overlap = longest_intersection(intersection)
 
-    # Requre minimum peptides
+    # Require minimum peptides
     num_bait_peptides = len(df[df['sec_id'].isin(intersection) & df['is_bait']]['peptide_id'].unique())
     num_prey_peptides = len(df[df['sec_id'].isin(intersection) & ~df['is_bait']]['peptide_id'].unique())
 
@@ -133,7 +133,8 @@ def interaction(df):
 
         # Compute bait peptide matrix over intersection
         bpi = pd.merge(df[df['sec_id'].isin(intersection) & df['is_bait']], bait_sec_boundaries, on=['peptide_id','sec_id'], how='outer').sort_values(['sec_id']).pivot(index='peptide_id', columns='sec_id', values='peptide_intensity')
-        bmi = np.nan_to_num(bpi.values) # Replace missing values with zeros
+        bpi_ix = bpi.sum(axis=1, skipna=True) > 0 # Remove completely empty peptides
+        bmi = np.nan_to_num(bpi.loc[bpi_ix].values) # Replace missing values with zeros
 
         # Compute prey SEC boundaries
         prey_sec_boundaries = sec_boundaries.copy()
@@ -141,7 +142,8 @@ def interaction(df):
 
         # Compute prey peptide matrix over intersection
         ppi = pd.merge(df[df['sec_id'].isin(intersection) & ~df['is_bait']], prey_sec_boundaries, on=['peptide_id','sec_id'], how='outer').sort_values(['sec_id']).pivot(index='peptide_id', columns='sec_id', values='peptide_intensity')
-        pmi = np.nan_to_num(ppi.values) # Replace missing values with zeros
+        ppi_ix = ppi.sum(axis=1, skipna=True) > 0 # Remove completely empty peptides
+        pmi = np.nan_to_num(ppi.loc[ppi_ix].values) # Replace missing values with zeros
 
         # Cross-correlation scores
         xcorr_shape, xcorr_shift, xcorr_apex = sec_xcorr(bmi, pmi)
@@ -227,11 +229,11 @@ class scoring:
         click.echo("Info: %s peptide chromatograms before filtering." % df[['condition_id','replicate_id','protein_id','peptide_id']].drop_duplicates().shape[0])
         click.echo("Info: %s data points before filtering." % df.shape[0])
 
-        # Remove constant trends from peptides
-        # df = df.groupby(['condition_id','replicate_id','protein_id','peptide_id']).apply(peptide_detrend).reset_index(level=['condition_id','replicate_id','protein_id','peptide_id'])
-
         # Filter monomers for detrending
         df = df[df['sec_id'] <= df['monomer_sec_id']]
+
+        # # Remove constant trends from peptides
+        # df = df.groupby(['condition_id','replicate_id','protein_id','peptide_id']).apply(peptide_detrend).reset_index(level=['condition_id','replicate_id','protein_id','peptide_id'])
 
         # Report statistics after filtering
         click.echo("Info: %s unique peptides after filtering." % len(df['peptide_id'].unique()))
@@ -293,7 +295,6 @@ class scoring:
             data = applyParallel(data_pd.groupby(['condition_id','replicate_id','bait_id','prey_id','decoy','confidence_bin','learning']), interaction)
 
             # Require passing of mass ratio and SEC lag thresholds
-            data = data.dropna()
             chunck_data.append(data)
 
         return pd.concat(chunck_data)
