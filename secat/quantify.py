@@ -43,7 +43,7 @@ class quantitative_matrix:
     def quantify_monomers(self):
         def summarize(df):
             def aggregate(x):
-                peptide_ix = (x['peptide_intensity']-x['peptide_intensity'].median()).abs().argsort()[:1]
+                peptide_ix = (x['peptide_intensity']-x['peptide_intensity'].max()).abs().argsort()[:1]
                 return pd.DataFrame({'peptide_intensity': x.iloc[peptide_ix]['peptide_intensity'], 'total_peptide_intensity': x.iloc[peptide_ix]['total_peptide_intensity']})
 
             # Summarize total peptide intensities
@@ -58,7 +58,7 @@ class quantitative_matrix:
 
             # Ensure that minimum peptides are present
             if peptide.shape[0] >= self.minimum_peptides:
-                # Select representative closest to median and aggregate
+                # Select representative closest to max and aggregate
                 peptide = aggregate(peptide)
 
                 # Aggregate to protein level
@@ -77,7 +77,7 @@ class quantitative_matrix:
     def quantify_complexes(self):
         def summarize(df):
             def aggregate(x):
-                peptide_ix = (x['peptide_intensity']-x['peptide_intensity'].median()).abs().argsort()[:1]
+                peptide_ix = (x['peptide_intensity']-x['peptide_intensity'].max()).abs().argsort()[:1]
                 return pd.DataFrame({'peptide_intensity': x.iloc[peptide_ix]['peptide_intensity'], 'total_peptide_intensity': x.iloc[peptide_ix]['total_peptide_intensity']})
 
             # Summarize total peptide intensities
@@ -103,7 +103,7 @@ class quantitative_matrix:
 
                 # Ensure that minimum peptides are present for both interactors for quantification.
                 if peptide[peptide['is_bait']].shape[0] >= self.minimum_peptides and peptide[~peptide['is_bait']].shape[0] >= self.minimum_peptides:
-                    # Select representative closest to median and aggregate
+                    # Select representative closest to max and aggregate
                     peptide = peptide.groupby(['is_bait']).apply(aggregate).reset_index(level=['is_bait'])
 
                     # Aggregate to protein level
@@ -193,7 +193,7 @@ class quantitative_test:
                         df = self.test(state, level, comparison[0], comparison[1])
 
                         # Multiple testing correction via q-value
-                        df['qvalue'] = qvalue(df['pvalue'].values, pi0est(df['pvalue'].values, pi0_method = "bootstrap")['pi0'])
+                        df['qvalue'] = qvalue(df['pvalue'].values, pi0est(df['pvalue'].values, lambda_=np.arange(0.05,0.5,0.05), pi0_method = "bootstrap")['pi0'])
                         dfs.append(df)
 
         return pd.concat(dfs, sort=True).sort_values(by='pvalue', ascending=True, na_position='last')
@@ -207,9 +207,11 @@ class quantitative_test:
 
                     qmt = qm.transpose()
                     qmt.columns = "quantitative" + "_" + experimental_design["condition_id"] + "_" + experimental_design["replicate_id"]
-                    # qmt['pvalue'] = mannwhitneyu(qm[qm['condition_id'] == condition_1][level].values, qm[qm['condition_id'] == condition_2][level].values)[1]
-                    qmt['pvalue'] = ttest_ind(qm[qm['condition_id'] == condition_1][level].dropna().values, qm[qm['condition_id'] == condition_2][level].dropna().values, equal_var=False)[1]
-
+                    if (np.var(qm[level].dropna().values) != 0):
+                        qmt['pvalue'] = mannwhitneyu(qm[qm['condition_id'] == condition_1][level].dropna().values, qm[qm['condition_id'] == condition_2][level].dropna().values)[1]
+                    else:
+                        qmt['pvalue'] = 1
+                    # qmt['pvalue'] = ttest_ind(qm[qm['condition_id'] == condition_1][level].dropna().values, qm[qm['condition_id'] == condition_2][level].dropna().values, equal_var=False)[1]
 
                     return qmt.loc[level]
 
@@ -231,7 +233,7 @@ class quantitative_test:
                 return pd.Series({'pvalue': x['pvalue'].values[0]})
 
         def mtcorrect(x):
-                x['qvalue'] = qvalue(x['pvalue'].values, pi0est(x['pvalue'].values, pi0_method = "bootstrap")['pi0'])
+                x['qvalue'] = qvalue(x['pvalue'].values, pi0est(x['pvalue'].values, lambda_=np.arange(0.05,0.5,0.05), pi0_method = "bootstrap")['pi0'])
                 return(x)
 
 
