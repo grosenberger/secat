@@ -207,7 +207,7 @@ class quantitative_test:
 
                     qmt = qm.transpose()
                     qmt.columns = "quantitative" + "_" + experimental_design["condition_id"] + "_" + experimental_design["replicate_id"]
-                    if (np.var(qm[level].dropna().values) != 0):
+                    if (np.var(qm[level].dropna().values) > 1e-10):
                         qmt['pvalue'] = mannwhitneyu(qm[qm['condition_id'] == condition_1][level].dropna().values, qm[qm['condition_id'] == condition_2][level].dropna().values)[1]
                     else:
                         qmt['pvalue'] = 1
