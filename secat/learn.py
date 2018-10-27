@@ -63,7 +63,7 @@ class pyprophet:
             # Learn model
             self.weights = self.learn(data[data['confidence_bin'] == data['confidence_bin'].max()])
             # Apply model
-            self.df = data.groupby('confidence_bin').apply(self.apply)       
+            self.df = data.groupby('confidence_bin').apply(self.apply)
 
     def read_data(self):
         con = sqlite3.connect(self.outfile)
@@ -86,8 +86,8 @@ class pyprophet:
     def apply(self, detecting_data):
         (result, scorer, weights) = PyProphet(self.classifier, self.xgb_hyperparams, self.xgb_params, self.xeval_fraction, self.xeval_num_iter, self.ss_initial_fdr, self.ss_iteration_fdr, self.ss_num_iter, self.group_id, self.parametric, self.pfdr, self.pi0_lambda, self.pi0_method, self.pi0_smooth_df, self.pi0_smooth_log_pi0, self.lfdr_truncate, self.lfdr_monotone, self.lfdr_transformation, self.lfdr_adj, self.lfdr_eps, False, self.threads, self.test).apply_weights(detecting_data, self.weights)
 
-        df = result.scored_tables[['condition_id','replicate_id','bait_id','prey_id','decoy','d_score','p_value','q_value','pep']]
-        df.columns = ['condition_id','replicate_id','bait_id','prey_id','decoy','score','pvalue','qvalue','pep']
+        df = result.scored_tables[['condition_id','replicate_id','bait_id','prey_id','decoy','confidence_bin','d_score','p_value','q_value','pep']]
+        df.columns = ['condition_id','replicate_id','bait_id','prey_id','decoy','confidence_bin','score','pvalue','qvalue','pep']
 
         self.plot(result, scorer.pi0, "detecting_" + str(detecting_data['confidence_bin'].values[0]))
         self.plot_scores(result.scored_tables, "detecting_" + str(detecting_data['confidence_bin'].values[0]))
@@ -164,25 +164,25 @@ class combine:
 
     def read(self):
         con = sqlite3.connect(self.outfile)
-        df = pd.read_sql('SELECT FEATURE_SCORED.*, QUERY.confidence_bin FROM FEATURE_SCORED INNER JOIN QUERY ON FEATURE_SCORED.bait_id = QUERY.bait_id AND FEATURE_SCORED.prey_id = QUERY.prey_id AND FEATURE_SCORED.decoy = QUERY.decoy;', con)
+        df = pd.read_sql('SELECT * FROM FEATURE_SCORED;', con)
         con.close()
 
         return df
 
     def combine_scores(self, scores):
         # Generate full experimental design
-        interactions = scores[['bait_id','prey_id','decoy']].drop_duplicates().reset_index()
+        interactions = scores[['bait_id','prey_id','decoy','confidence_bin']].drop_duplicates().reset_index()
         interactions['id'] = 1
         experimental_design = scores[['condition_id','replicate_id']].drop_duplicates().reset_index()
         experimental_design['id'] = 1
 
         # Missing detections need to be punished. We set the p-values, q-values and pep to 1.
-        scores = pd.merge(pd.merge(interactions, experimental_design, on='id')[['condition_id','replicate_id','bait_id','prey_id','decoy']], scores, on=['condition_id','replicate_id','bait_id','prey_id','decoy'], how='left')
+        scores = pd.merge(pd.merge(interactions, experimental_design, on='id')[['condition_id','replicate_id','bait_id','prey_id','decoy','confidence_bin']], scores, on=['condition_id','replicate_id','bait_id','prey_id','decoy','confidence_bin'], how='left')
         scores['pvalue'] = scores['pvalue'].fillna(1)
         scores['qvalue'] = scores['qvalue'].fillna(1)
         scores['pep'] = scores['pep'].fillna(1)
 
-        combined_scores = scores.groupby(['condition_id','bait_id','prey_id','decoy'])['pvalue'].median().reset_index()
+        combined_scores = scores.groupby(['condition_id','bait_id','prey_id','decoy','confidence_bin'])['pvalue'].median().reset_index()
 
         combined_scores.loc[combined_scores['decoy'] == 0,'qvalue'] = qvalue(combined_scores[combined_scores['decoy'] == 0]['pvalue'], pi0est(combined_scores[combined_scores['decoy'] == 0]['pvalue'], self.pi0_lambda, self.pi0_method, self.pi0_smooth_df, self.pi0_smooth_log_pi0)['pi0'], self.pfdr)
 
