@@ -39,7 +39,7 @@ def cli():
 @click.option('--decoy_intensity_bins', 'decoy_intensity_bins', default=1, show_default=True, type=int, help='Number of decoy bins for intensity.')
 @click.option('--decoy_left_sec_bins', 'decoy_left_sec_bins', default=1, show_default=True, type=int, help='Number of decoy bins for left SEC fraction.')
 @click.option('--decoy_right_sec_bins', 'decoy_right_sec_bins', default=1, show_default=True, type=int, help='Number of decoy bins for right SEC fraction.')
-@click.option('--decoy_oversample','decoy_oversample', default=1, show_default=True, type=int, help='Number of iterations to sample decoys.')
+@click.option('--decoy_oversample','decoy_oversample', default=2, show_default=True, type=int, help='Number of iterations to sample decoys.')
 @click.option('--decoy_subsample/--no-decoy_subsample', default=False, show_default=True, help='Whether decoys should be subsampled to be approximately of similar number as targets.')
 @click.option('--decoy_exclude/--no-decoy_exclude', default=True, show_default=True, help='Whether decoy interactions also covered by targets should be excluded.')
 @click.option('--min_interaction_confidence', 'min_interaction_confidence', default=0.0, show_default=True, type=float, help='Minimum interaction confidence for prior information from network.')
@@ -141,8 +141,8 @@ def preprocess(infiles, outfile, secfile, netfile, posnetfile, negnetfile, unipr
 @click.option('--in', 'infile', required=True, type=click.Path(exists=True), help='Input SECAT file.')
 @click.option('--out', 'outfile', required=False, type=click.Path(exists=False), help='Output SECAT file.')
 @click.option('--monomer_threshold_factor', 'monomer_threshold_factor', default=2.0, show_default=True, type=float, help='Factor threshold to consider a feature a complex rather than a monomer.')
-@click.option('--minimum_peptides', 'minimum_peptides', default=1, show_default=True, type=int, help='Minimum number of peptides required to score an interaction.')
-@click.option('--maximum_peptides', 'maximum_peptides', default=20, show_default=True, type=int, help='Maximum number of peptides used to score an interaction.')
+@click.option('--minimum_peptides', 'minimum_peptides', default=3, show_default=True, type=int, help='Minimum number of peptides required to score an interaction.')
+@click.option('--maximum_peptides', 'maximum_peptides', default=3, show_default=True, type=int, help='Maximum number of peptides used to score an interaction.')
 @click.option('--chunck_size', 'chunck_size', default=50000, show_default=True, type=int, help='Chunck size for processing.')
 def score(infile, outfile, monomer_threshold_factor, minimum_peptides, maximum_peptides, chunck_size):
     """
@@ -235,7 +235,7 @@ def learn(infile, outfile, minimum_monomer_delta, minimum_mass_ratio, maximum_se
 @click.option('--in', 'infile', required=True, type=click.Path(exists=True), help='Input SECAT file.')
 @click.option('--out', 'outfile', required=False, type=click.Path(exists=False), help='Output SECAT file.')
 @click.option('--maximum_interaction_qvalue', default=0.1, show_default=True, type=float, help='Maximum q-value to consider interactions for quantification.')
-@click.option('--minimum_peptides', 'minimum_peptides', default=1, show_default=True, type=int, help='Minimum number of peptides required to quantify an interaction.')
+@click.option('--minimum_peptides', 'minimum_peptides', default=3, show_default=True, type=int, help='Minimum number of peptides required to quantify an interaction.')
 @click.option('--maximum_peptides', 'maximum_peptides', default=3, show_default=True, type=int, help='Maximum number of peptides used to quantify an interaction.')
 def quantify(infile, outfile, maximum_interaction_qvalue, minimum_peptides, maximum_peptides):
     """
@@ -250,13 +250,13 @@ def quantify(infile, outfile, maximum_interaction_qvalue, minimum_peptides, maxi
         outfile = outfile
 
 
-    click.echo("Info: Prepare quantitative matrix")
-    qm = quantitative_matrix(outfile, maximum_interaction_qvalue, minimum_peptides, maximum_peptides)
+    # click.echo("Info: Prepare quantitative matrix")
+    # qm = quantitative_matrix(outfile, maximum_interaction_qvalue, minimum_peptides, maximum_peptides)
 
-    con = sqlite3.connect(outfile)
-    qm.monomer.to_sql('MONOMER_QM', con, index=False, if_exists='replace')
-    qm.complex.to_sql('COMPLEX_QM', con, index=False, if_exists='replace')
-    con.close()
+    # con = sqlite3.connect(outfile)
+    # qm.monomer.to_sql('MONOMER_QM', con, index=False, if_exists='replace')
+    # qm.complex.to_sql('COMPLEX_QM', con, index=False, if_exists='replace')
+    # con.close()
 
     click.echo("Info: Assess differential features")
     qt = quantitative_test(outfile)

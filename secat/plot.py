@@ -37,6 +37,9 @@ class plot_features:
         self.combined = combined
         self.peptide_rank = peptide_rank
 
+        # Set global SEC boundaries
+        self.sec_min, self.sec_max = self.read_sec_boundaries()
+
         # Read peptide and feature data
         self.feature_data = self.read_features()
         self.peptide_data = self.read_peptides()
@@ -119,6 +122,15 @@ class plot_features:
                     f = self.generate_plot(peptide_data[peptide_data['protein_id'] == bait_id], feature_data_int, bait_id, bait_id)
                     pdf.savefig()
                     plt.close()
+
+    def read_sec_boundaries(self):
+        con = sqlite3.connect(self.infile)
+
+        df = pd.read_sql('SELECT min(sec_id) AS min_sec_id, max(sec_id) AS max_sec_id FROM SEC;', con)
+
+        con.close()
+
+        return df['min_sec_id'].values[0], df['max_sec_id'].values[0]
 
     def read_features(self):
         con = sqlite3.connect(self.infile)
@@ -218,9 +230,11 @@ class plot_features:
         else:
             table = 'NODE_LEVEL'
 
-        df = pd.read_sql('SELECT DISTINCT bait_id FROM %s WHERE qvalue < %s ORDER BY pvalue ASC;' % (table, self.bait_qvalue), con)
+        df = pd.read_sql('SELECT DISTINCT bait_id, min(pvalue) as pvalue FROM %s WHERE qvalue < %s GROUP BY bait_id;' % (table, self.bait_qvalue), con)
 
         con.close()
+
+        df = df.sort_values(by=['pvalue']).reset_index()
 
         return df['bait_id'].values, df.index+1
 
@@ -249,14 +263,12 @@ class plot_features:
             titletext = str(interaction_id)
         f.suptitle(titletext)
 
-        xmin = 0 # peptide_data['sec_id'].min()
-        xmax = peptide_data['sec_id'].max()
         ymin = 0 #peptide_data['peptide_intensity'].min()
         ymax = peptide_data['peptide_intensity'].max() * 1.2
 
         # plot interactions
         for tag in tags:
-            axarr[tags.index(tag)].set_xlim(xmin, xmax)
+            axarr[tags.index(tag)].set_xlim(self.sec_min, self.sec_max)
             axarr[tags.index(tag)].set_ylim(ymin, ymax)
             proteins = peptide_data['protein_id'].drop_duplicates().values
             for protein in proteins:

@@ -101,8 +101,8 @@ def interaction(df):
 
     def mass_similarity(bm, pm):
         # Sum bait and prey peptides
-        bpmass = np.sum(bm, axis=1, keepdims=True).max()
-        ppmass = np.sum(pm, axis=1, keepdims=True).max()
+        bpmass = np.sum(bm, axis=1, keepdims=True).mean()
+        ppmass = np.sum(pm, axis=1, keepdims=True).mean()
 
         # Compute mass ratio of bait and prey protein
         mass_ratio = bpmass / ppmass

@@ -19,7 +19,7 @@ from numpy import linspace, concatenate, around
 
 from pyprophet.pyprophet import PyProphet
 from pyprophet.report import save_report
-from pyprophet.stats import qvalue, pi0est
+from pyprophet.stats import pemp, qvalue, pi0est
 
 class pyprophet:
     def __init__(self, outfile, minimum_monomer_delta, minimum_mass_ratio, maximum_sec_shift, xeval_fraction, xeval_num_iter, ss_initial_fdr, ss_iteration_fdr, ss_num_iter, parametric, pfdr, pi0_lambda, pi0_method, pi0_smooth_df, pi0_smooth_log_pi0, lfdr_truncate, lfdr_monotone, lfdr_transformation, lfdr_adj, lfdr_eps, threads, test):
@@ -170,19 +170,21 @@ class combine:
         return df
 
     def combine_scores(self, scores):
-        # Generate full experimental design
-        interactions = scores[['bait_id','prey_id','decoy','confidence_bin']].drop_duplicates().reset_index()
-        interactions['id'] = 1
-        experimental_design = scores[['condition_id','replicate_id']].drop_duplicates().reset_index()
-        experimental_design['id'] = 1
+        # # Generate full experimental design
+        # interactions = scores[['bait_id','prey_id','decoy','confidence_bin']].drop_duplicates().reset_index()
+        # interactions['id'] = 1
+        # experimental_design = scores[['condition_id','replicate_id']].drop_duplicates().reset_index()
+        # experimental_design['id'] = 1
 
-        # Missing detections need to be punished. We set the p-values, q-values and pep to 1.
-        scores = pd.merge(pd.merge(interactions, experimental_design, on='id')[['condition_id','replicate_id','bait_id','prey_id','decoy','confidence_bin']], scores, on=['condition_id','replicate_id','bait_id','prey_id','decoy','confidence_bin'], how='left')
-        scores['pvalue'] = scores['pvalue'].fillna(1)
-        scores['qvalue'] = scores['qvalue'].fillna(1)
-        scores['pep'] = scores['pep'].fillna(1)
+        # # Missing detections need to be punished. We set the p-values, q-values and pep to 1.
+        # scores = pd.merge(pd.merge(interactions, experimental_design, on='id')[['condition_id','replicate_id','bait_id','prey_id','decoy','confidence_bin']], scores, on=['condition_id','replicate_id','bait_id','prey_id','decoy','confidence_bin'], how='left')
+        # scores['pvalue'] = scores['pvalue'].fillna(1)
+        # scores['qvalue'] = scores['qvalue'].fillna(1)
+        # scores['pep'] = scores['pep'].fillna(1)
 
-        combined_scores = scores.groupby(['condition_id','bait_id','prey_id','decoy','confidence_bin'])['pvalue'].median().reset_index()
+        combined_scores = scores.groupby(['condition_id','bait_id','prey_id','decoy','confidence_bin'])['score'].max().reset_index()
+
+        combined_scores.loc[combined_scores['decoy'] == 0,'pvalue'] = pemp(combined_scores[combined_scores['decoy'] == 0]['score'], combined_scores[combined_scores['decoy'] == 1]['score'])
 
         combined_scores.loc[combined_scores['decoy'] == 0,'qvalue'] = qvalue(combined_scores[combined_scores['decoy'] == 0]['pvalue'], pi0est(combined_scores[combined_scores['decoy'] == 0]['pvalue'], self.pi0_lambda, self.pi0_method, self.pi0_smooth_df, self.pi0_smooth_log_pi0)['pi0'], self.pfdr)
 

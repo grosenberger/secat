@@ -43,7 +43,7 @@ class quantitative_matrix:
     def quantify_monomers(self):
         def summarize(df):
             def aggregate(x):
-                peptide_ix = (x['peptide_intensity']-x['peptide_intensity'].max()).abs().argsort()[:1]
+                peptide_ix = (x['peptide_intensity']-x['peptide_intensity'].max()).abs().argsort()[:self.maximum_peptides]
                 return pd.DataFrame({'peptide_intensity': x.iloc[peptide_ix]['peptide_intensity'], 'total_peptide_intensity': x.iloc[peptide_ix]['total_peptide_intensity']})
 
             # Summarize total peptide intensities
@@ -62,7 +62,7 @@ class quantitative_matrix:
                 peptide = aggregate(peptide)
 
                 # Aggregate to protein level
-                protein = pd.DataFrame({'monomer_intensity': peptide['peptide_intensity'].values, 'fractional_monomer_intensity': peptide['peptide_intensity'].values / peptide['total_peptide_intensity'].values, 'total_intensity': peptide['total_peptide_intensity'].values})
+                protein = pd.DataFrame({'monomer_intensity': [np.mean(peptide['peptide_intensity'].values)], 'fractional_monomer_intensity': [np.mean(peptide['peptide_intensity'].values / peptide['total_peptide_intensity'].values)], 'total_intensity': [np.mean(peptide['total_peptide_intensity'].values)]})
 
                 return protein
 
@@ -77,7 +77,7 @@ class quantitative_matrix:
     def quantify_complexes(self):
         def summarize(df):
             def aggregate(x):
-                peptide_ix = (x['peptide_intensity']-x['peptide_intensity'].max()).abs().argsort()[:1]
+                peptide_ix = (x['peptide_intensity']-x['peptide_intensity'].max()).abs().argsort()[:self.maximum_peptides]
                 return pd.DataFrame({'peptide_intensity': x.iloc[peptide_ix]['peptide_intensity'], 'total_peptide_intensity': x.iloc[peptide_ix]['total_peptide_intensity']})
 
             # Summarize total peptide intensities
@@ -107,7 +107,7 @@ class quantitative_matrix:
                     peptide = peptide.groupby(['is_bait']).apply(aggregate).reset_index(level=['is_bait'])
 
                     # Aggregate to protein level
-                    protein = pd.DataFrame({'bait_intensity': peptide[peptide['is_bait']]['peptide_intensity'].values, 'fractional_bait_intensity': peptide[peptide['is_bait']]['peptide_intensity'].values / peptide[peptide['is_bait']]['total_peptide_intensity'].values, 'prey_intensity': peptide[~peptide['is_bait']]['peptide_intensity'].values, 'fractional_prey_intensity': peptide[~peptide['is_bait']]['peptide_intensity'].values / peptide[~peptide['is_bait']]['total_peptide_intensity'].values})
+                    protein = pd.DataFrame({'bait_intensity': [np.mean(peptide[peptide['is_bait']]['peptide_intensity'].values)], 'fractional_bait_intensity': [np.mean(peptide[peptide['is_bait']]['peptide_intensity'].values / peptide[peptide['is_bait']]['total_peptide_intensity'].values)], 'prey_intensity': [np.mean(peptide[~peptide['is_bait']]['peptide_intensity'].values)], 'fractional_prey_intensity': [np.mean(peptide[~peptide['is_bait']]['peptide_intensity'].values) / np.mean(peptide[~peptide['is_bait']]['total_peptide_intensity'].values)]})
 
                     protein['complex_intensity'] = np.mean([protein['prey_intensity'], protein['bait_intensity']])
                     protein['fractional_complex_intensity'] = np.mean([protein['fractional_prey_intensity'], protein['fractional_bait_intensity']])
@@ -190,7 +190,10 @@ class quantitative_test:
             for comparison in self.comparisons:
                 for state in [self.monomer_qm, self.complex_qm]:
                     if level in state.columns:
-                        df = self.test(state, level, comparison[0], comparison[1])
+                        df = self.test(state[['condition_id','replicate_id','bait_id','prey_id',level]], level, comparison[0], comparison[1])
+
+                        # Drop missing values from tests
+                        df = df.dropna(subset=['pvalue'])
 
                         # Multiple testing correction via q-value
                         df['qvalue'] = qvalue(df['pvalue'].values, pi0est(df['pvalue'].values, lambda_=np.arange(0.05,0.5,0.05), pi0_method = "bootstrap")['pi0'])
@@ -207,11 +210,15 @@ class quantitative_test:
 
                     qmt = qm.transpose()
                     qmt.columns = "quantitative" + "_" + experimental_design["condition_id"] + "_" + experimental_design["replicate_id"]
-                    if (np.var(qm[level].dropna().values) > 1e-10):
-                        qmt['pvalue'] = mannwhitneyu(qm[qm['condition_id'] == condition_1][level].dropna().values, qm[qm['condition_id'] == condition_2][level].dropna().values)[1]
+                    qv_condition_1 = qm[qm['condition_id'] == condition_1][level].dropna().values
+                    qv_condition_2 = qm[qm['condition_id'] == condition_2][level].dropna().values
+                    if len(qv_condition_1) > 0 and len(qv_condition_2) > 0: # both conditions need at least one quantitative value
+                        if (np.var(qm[level].dropna().values) > 1e-10): # all values are too similar
+                                qmt.loc[level,'pvalue'] = mannwhitneyu(qv_condition_1, qv_condition_2)[1]
+                        else:
+                            qmt.loc[level,'pvalue'] = 1
                     else:
-                        qmt['pvalue'] = 1
-                    # qmt['pvalue'] = ttest_ind(qm[qm['condition_id'] == condition_1][level].dropna().values, qm[qm['condition_id'] == condition_2][level].dropna().values, equal_var=False)[1]
+                        qmt.loc[level,'pvalue'] = np.nan
 
                     return qmt.loc[level]
 
@@ -238,7 +245,7 @@ class quantitative_test:
 
 
         df_edge_level = self.tests[self.tests['bait_id'] != self.tests['prey_id']]
-        df_edge = df_edge_level.sort_values('pvalue').groupby(['condition_1','condition_2','bait_id','prey_id'], as_index=False).first()
+        df_edge = df_edge_level.sort_values('pvalue').groupby(['condition_1','condition_2','bait_id','prey_id']).head(1).reset_index()
 
         # Append reverse interactions; the full list contains monomers only once
         df_edge_level_rev = self.tests.rename(index=str, columns={"bait_id": "prey_id", "prey_id": "bait_id"})
@@ -257,13 +264,6 @@ class quantitative_test:
         df_node_level = df_edge_full.groupby(['condition_1', 'condition_2','level','bait_id']).apply(collapse).reset_index()
         df_node_level = df_node_level.groupby(['condition_1', 'condition_2','level']).apply(mtcorrect).reset_index()
 
-        df_node = df_node_level.sort_values('pvalue').groupby(['condition_1','condition_2','bait_id'], as_index=False).first()
+        df_node = df_node_level.sort_values('pvalue').groupby(['condition_1','condition_2','bait_id']).head(1).reset_index()
 
-        # Multiple testing correction via q-value
-        # df_edge_level['qvalue'] = qvalue(df_edge_level['pvalue'].values, pi0est(df_edge_level['pvalue'].values, pi0_method = "bootstrap")['pi0'])
-        # df_edge['qvalue'] = qvalue(df_edge['pvalue'].values, pi0est(df_edge['pvalue'].values, pi0_method = "bootstrap")['pi0'])
-
-        # df_node_level['qvalue'] = qvalue(df_node_level['pvalue'].values, pi0est(df_node_level['pvalue'].values, pi0_method = "bootstrap")['pi0'])
-        # df_node['qvalue'] = qvalue(df_node['pvalue'].values, pi0est(df_node['pvalue'].values, pi0_method = "bootstrap")['pi0'])
-
-        return df_edge_level, df_edge, df_node_level, df_node
+        return df_edge_level[['condition_1','condition_2','level','bait_id','prey_id','pvalue','qvalue']], df_edge[['condition_1','condition_2','bait_id','prey_id','pvalue','qvalue']], df_node_level[['condition_1','condition_2','level','bait_id','pvalue','qvalue']], df_node[['condition_1','condition_2','bait_id','pvalue','qvalue']]
