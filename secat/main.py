@@ -250,13 +250,13 @@ def quantify(infile, outfile, maximum_interaction_qvalue, minimum_peptides, maxi
         outfile = outfile
 
 
-    # click.echo("Info: Prepare quantitative matrix")
-    # qm = quantitative_matrix(outfile, maximum_interaction_qvalue, minimum_peptides, maximum_peptides)
+    click.echo("Info: Prepare quantitative matrix")
+    qm = quantitative_matrix(outfile, maximum_interaction_qvalue, minimum_peptides, maximum_peptides)
 
-    # con = sqlite3.connect(outfile)
-    # qm.monomer.to_sql('MONOMER_QM', con, index=False, if_exists='replace')
-    # qm.complex.to_sql('COMPLEX_QM', con, index=False, if_exists='replace')
-    # con.close()
+    con = sqlite3.connect(outfile)
+    qm.monomer.to_sql('MONOMER_QM', con, index=False, if_exists='replace')
+    qm.complex.to_sql('COMPLEX_QM', con, index=False, if_exists='replace')
+    con.close()
 
     click.echo("Info: Assess differential features")
     qt = quantitative_test(outfile)
