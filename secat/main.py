@@ -177,9 +177,9 @@ def score(infile, outfile, monomer_threshold_factor, minimum_peptides, maximum_p
 @click.option('--in', 'infile', required=True, type=click.Path(exists=True), help='Input SECAT file.')
 @click.option('--out', 'outfile', required=False, type=click.Path(exists=False), help='Output SECAT file.')
 # Prefiltering
-@click.option('--minimum_monomer_delta', 'minimum_monomer_delta', default=0, show_default=True, type=float, help='Minimum number of delta fractions from the expected monomer fraction required to score an interaction.')
-@click.option('--minimum_mass_ratio', 'minimum_mass_ratio', default=0, show_default=True, type=float, help='Minimum number of fractions required to score an interaction.')
-@click.option('--maximum_sec_shift', 'maximum_sec_shift', default=100, show_default=True, type=float, help='Maximum lag in SEC units between interactions and subunits.')
+@click.option('--minimum_monomer_delta', 'minimum_monomer_delta', default=3, show_default=True, type=float, help='Minimum number of delta fractions from the expected monomer fraction required to score an interaction.')
+@click.option('--minimum_mass_ratio', 'minimum_mass_ratio', default=0.1, show_default=True, type=float, help='Minimum mass ratio required to score an interaction.')
+@click.option('--maximum_sec_shift', 'maximum_sec_shift', default=5, show_default=True, type=float, help='Maximum lag in SEC units between interactions and subunits.')
 # Semi-supervised learning
 @click.option('--xeval_fraction', default=0.5, show_default=True, type=float, help='Data fraction used for cross-validation of semi-supervised learning step.')
 @click.option('--xeval_num_iter', default=10, show_default=True, type=int, help='Number of iterations for cross-validation of semi-supervised learning step.')

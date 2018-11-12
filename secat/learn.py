@@ -67,8 +67,14 @@ class pyprophet:
 
     def read_data(self):
         con = sqlite3.connect(self.outfile)
-        df = pd.read_sql('SELECT *, condition_id || "_" || replicate_id || "_" || bait_id || "_" || prey_id AS pyprophet_feature_id, condition_id || "_" || bait_id || "_" || prey_id AS pyprophet_metafeature_id FROM FEATURE WHERE var_monomer_delta >= %s AND var_xcorr_shift <= %s AND var_mass_ratio >= %s ORDER BY pyprophet_metafeature_id;' % (self.minimum_monomer_delta, self.maximum_sec_shift, self.minimum_mass_ratio), con)
+        df = pd.read_sql('SELECT *, condition_id || "_" || replicate_id || "_" || bait_id || "_" || prey_id AS pyprophet_feature_id, condition_id || "_" || bait_id || "_" || prey_id AS pyprophet_metafeature_id FROM FEATURE ORDER BY pyprophet_metafeature_id;', con)
         con.close()
+
+        df_filter = df.groupby(["bait_id","prey_id","decoy"])[["var_monomer_delta","var_xcorr_shift","var_mass_ratio"]].mean().dropna().reset_index(level=["bait_id","prey_id","decoy"])
+
+        df_filter = df_filter[(df_filter['var_monomer_delta'] >= self.minimum_monomer_delta) & (df_filter['var_xcorr_shift'] <= self.maximum_sec_shift) & (df_filter['var_mass_ratio'] >= self.minimum_mass_ratio)]
+
+        df = pd.merge(df, df_filter[["bait_id","prey_id","decoy"]], on=["bait_id","prey_id","decoy"]).dropna()
 
         # We need to generate a score that selects for the very best interactions heterodimers of similar size: perfect shape, co-elution and identical mass
         df['main_var_kickstart'] = (df['var_xcorr_shape'] * df['var_mass_ratio']) / (df['var_xcorr_shift'] + 1)
