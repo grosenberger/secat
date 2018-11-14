@@ -22,7 +22,7 @@ from pyprophet.report import save_report
 from pyprophet.stats import pemp, qvalue, pi0est
 
 class pyprophet:
-    def __init__(self, outfile, minimum_monomer_delta, minimum_mass_ratio, maximum_sec_shift, xeval_fraction, xeval_num_iter, ss_initial_fdr, ss_iteration_fdr, ss_num_iter, parametric, pfdr, pi0_lambda, pi0_method, pi0_smooth_df, pi0_smooth_log_pi0, lfdr_truncate, lfdr_monotone, lfdr_transformation, lfdr_adj, lfdr_eps, threads, test):
+    def __init__(self, outfile, minimum_monomer_delta, minimum_mass_ratio, maximum_sec_shift, maximum_peptides, xeval_fraction, xeval_num_iter, ss_initial_fdr, ss_iteration_fdr, ss_num_iter, parametric, pfdr, pi0_lambda, pi0_method, pi0_smooth_df, pi0_smooth_log_pi0, lfdr_truncate, lfdr_monotone, lfdr_transformation, lfdr_adj, lfdr_eps, threads, test):
 
         self.outfile = outfile
         self.classifier = 'XGBoost'
@@ -31,6 +31,7 @@ class pyprophet:
         self.minimum_monomer_delta = minimum_monomer_delta
         self.minimum_mass_ratio = minimum_mass_ratio
         self.maximum_sec_shift = maximum_sec_shift
+        self.maximum_peptides = maximum_peptides
         self.xeval_fraction = xeval_fraction
         self.xeval_num_iter = xeval_num_iter
         self.ss_initial_fdr = ss_initial_fdr
@@ -52,11 +53,12 @@ class pyprophet:
         self.test = test
 
         # Read data
-        data = self.read_data()
+        global_abundance = self.read_global_abundance()
+        data = self.read_data(global_abundance)
 
         if data[data['learning'] == 1].shape[0] > 0:
             # Learn model
-            self.weights = self.learn(data[data['learning'] == 1])
+            self.weights = self.learn(data[(data['learning'] == 1) | (data['decoy'] == 1)])
             # Apply model
             self.df = data[data['learning'] == 0].groupby('confidence_bin').apply(self.apply)
         else:
@@ -65,14 +67,22 @@ class pyprophet:
             # Apply model
             self.df = data.groupby('confidence_bin').apply(self.apply)
 
-    def read_data(self):
+    def read_data(self, global_abundance):
         con = sqlite3.connect(self.outfile)
         df = pd.read_sql('SELECT *, condition_id || "_" || replicate_id || "_" || bait_id || "_" || prey_id AS pyprophet_feature_id, condition_id || "_" || bait_id || "_" || prey_id AS pyprophet_metafeature_id FROM FEATURE ORDER BY pyprophet_metafeature_id;', con)
         con.close()
 
-        df_filter = df.groupby(["bait_id","prey_id","decoy"])[["var_monomer_delta","var_xcorr_shift","var_mass_ratio"]].mean().dropna().reset_index(level=["bait_id","prey_id","decoy"])
+        # Append total mass ratio score
+        dfa = pd.merge(pd.merge(df[['condition_id','replicate_id','bait_id','prey_id']], global_abundance, left_on = ['condition_id','replicate_id','bait_id'], right_on = ['condition_id','replicate_id','protein_id']), global_abundance, left_on = ['condition_id','replicate_id','prey_id'], right_on = ['condition_id','replicate_id','protein_id'])
+        dfa['var_total_mass_ratio'] = dfa['peptide_intensity_x'] / dfa['peptide_intensity_y']
+        dfa.loc[dfa['var_total_mass_ratio'] > 1, 'var_total_mass_ratio'] = 1 / dfa.loc[dfa['var_total_mass_ratio'] > 1, 'var_total_mass_ratio']
+        dfa = dfa[['condition_id','replicate_id','bait_id','prey_id','var_total_mass_ratio']]
+        df = pd.merge(df, dfa, on=['condition_id','replicate_id','bait_id','prey_id'])
 
-        df_filter = df_filter[(df_filter['var_monomer_delta'] >= self.minimum_monomer_delta) & (df_filter['var_xcorr_shift'] <= self.maximum_sec_shift) & (df_filter['var_mass_ratio'] >= self.minimum_mass_ratio)]
+        # Filter according to boundaries
+        df_filter = df.groupby(["bait_id","prey_id","decoy"])[["var_monomer_delta","var_xcorr_shift","var_mass_ratio","var_total_mass_ratio"]].mean().dropna().reset_index(level=["bait_id","prey_id","decoy"])
+
+        df_filter = df_filter[(df_filter['var_monomer_delta'] >= self.minimum_monomer_delta) & (df_filter['var_xcorr_shift'] <= self.maximum_sec_shift) & (df_filter['var_mass_ratio'] >= self.minimum_mass_ratio) & (df_filter['var_total_mass_ratio'] >= self.minimum_mass_ratio)]
 
         df = pd.merge(df, df_filter[["bait_id","prey_id","decoy"]], on=["bait_id","prey_id","decoy"]).dropna()
 
@@ -80,6 +90,13 @@ class pyprophet:
         df['main_var_kickstart'] = (df['var_xcorr_shape'] * df['var_mass_ratio']) / (df['var_xcorr_shift'] + 1)
 
         return df
+
+    def read_global_abundance(self):
+        con = sqlite3.connect(self.outfile)
+        df = pd.read_sql('SELECT condition_id, replicate_id, protein_id, QUANTIFICATION.peptide_id, sum(peptide_intensity) as peptide_intensity FROM QUANTIFICATION INNER JOIN SEC ON QUANTIFICATION.run_id == SEC.run_id INNER JOIN PEPTIDE_META ON QUANTIFICATION.peptide_id = PEPTIDE_META.peptide_id WHERE peptide_rank <= %s GROUP BY condition_id, replicate_id, protein_id, QUANTIFICATION.peptide_id;' % (self.maximum_peptides), con)
+        con.close()
+
+        return df.groupby(['condition_id','replicate_id','protein_id'])['peptide_intensity'].mean().reset_index()
 
     def learn(self, learning_data):
         (result, scorer, weights) = PyProphet(self.classifier, self.xgb_hyperparams, self.xgb_params, self.xeval_fraction, self.xeval_num_iter, self.ss_initial_fdr, self.ss_iteration_fdr, self.ss_num_iter, self.group_id, self.parametric, self.pfdr, self.pi0_lambda, self.pi0_method, self.pi0_smooth_df, self.pi0_smooth_log_pi0, self.lfdr_truncate, self.lfdr_monotone, self.lfdr_transformation, self.lfdr_adj, self.lfdr_eps, False, self.threads, self.test).learn_and_apply(learning_data)
