@@ -22,7 +22,7 @@ from pyprophet.report import save_report
 from pyprophet.stats import pemp, qvalue, pi0est
 
 class pyprophet:
-    def __init__(self, outfile, minimum_monomer_delta, minimum_mass_ratio, maximum_sec_shift, maximum_peptides, xeval_fraction, xeval_num_iter, ss_initial_fdr, ss_iteration_fdr, ss_num_iter, parametric, pfdr, pi0_lambda, pi0_method, pi0_smooth_df, pi0_smooth_log_pi0, lfdr_truncate, lfdr_monotone, lfdr_transformation, lfdr_adj, lfdr_eps, threads, test):
+    def __init__(self, outfile, minimum_monomer_delta, minimum_mass_ratio, maximum_sec_shift, maximum_peptides, cb_decoys, xeval_fraction, xeval_num_iter, ss_initial_fdr, ss_iteration_fdr, ss_num_iter, parametric, pfdr, pi0_lambda, pi0_method, pi0_smooth_df, pi0_smooth_log_pi0, lfdr_truncate, lfdr_monotone, lfdr_transformation, lfdr_adj, lfdr_eps, threads, test):
 
         self.outfile = outfile
         self.classifier = 'XGBoost'
@@ -32,6 +32,7 @@ class pyprophet:
         self.minimum_mass_ratio = minimum_mass_ratio
         self.maximum_sec_shift = maximum_sec_shift
         self.maximum_peptides = maximum_peptides
+        self.cb_decoys = cb_decoys
         self.xeval_fraction = xeval_fraction
         self.xeval_num_iter = xeval_num_iter
         self.ss_initial_fdr = ss_initial_fdr
@@ -58,7 +59,15 @@ class pyprophet:
 
         if data[data['learning'] == 1].shape[0] > 0:
             # Learn model
-            self.weights = self.learn(data[(data['learning'] == 1) | (data['decoy'] == 1)])
+            if self.cb_decoys:
+                click.echo("Info: Using decoys from same confidence bin for learning.")
+                print(data[(data['learning'] == 1)].shape)
+                print(data[(data['learning'] == 0)].shape)
+                print(data[(data['learning'] == 1) | (data['decoy'] == 1)].shape)
+                sys.exit()
+                self.weights = self.learn(data[(data['learning'] == 1)])
+            else:
+                self.weights = self.learn(data[(data['learning'] == 1) | (data['decoy'] == 1)])
             # Apply model
             self.df = data[data['learning'] == 0].groupby('confidence_bin').apply(self.apply)
         else:
@@ -209,7 +218,8 @@ class combine:
 
         combined_scores.loc[combined_scores['decoy'] == 0,'pvalue'] = pemp(combined_scores[combined_scores['decoy'] == 0]['score'], combined_scores[combined_scores['decoy'] == 1]['score'])
 
-        combined_scores.loc[combined_scores['decoy'] == 0,'qvalue'] = qvalue(combined_scores[combined_scores['decoy'] == 0]['pvalue'], pi0est(combined_scores[combined_scores['decoy'] == 0]['pvalue'], self.pi0_lambda, self.pi0_method, self.pi0_smooth_df, self.pi0_smooth_log_pi0)['pi0'], self.pfdr)
+        pi0_combined = pi0est(combined_scores[combined_scores['decoy'] == 0]['pvalue'], self.pi0_lambda, self.pi0_method, self.pi0_smooth_df, self.pi0_smooth_log_pi0)['pi0']
+        combined_scores.loc[combined_scores['decoy'] == 0,'qvalue'] = qvalue(combined_scores[combined_scores['decoy'] == 0]['pvalue'], pi0_combined, self.pfdr)
 
         click.echo("Info: Unique interactions detected before integration:")
         click.echo("%s (at q-value < 0.01)" % (scores[(scores['decoy'] == 0) & (scores['qvalue'] < 0.01)][['bait_id','prey_id']].drop_duplicates().shape[0]))
@@ -224,5 +234,6 @@ class combine:
         click.echo("%s (at q-value < 0.1)" % (combined_scores[(combined_scores['decoy'] == 0) & (combined_scores['qvalue'] < 0.1)][['bait_id','prey_id']].drop_duplicates().shape[0]))
         click.echo("%s (at q-value < 0.2)" % (combined_scores[(combined_scores['decoy'] == 0) & (combined_scores['qvalue'] < 0.2)][['bait_id','prey_id']].drop_duplicates().shape[0]))
         click.echo("%s (at q-value < 0.5)" % (combined_scores[(combined_scores['decoy'] == 0) & (combined_scores['qvalue'] < 0.5)][['bait_id','prey_id']].drop_duplicates().shape[0]))
+        click.echo("Info: Combined pi0: %s." % pi0_combined)
 
         return combined_scores
