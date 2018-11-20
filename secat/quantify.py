@@ -62,7 +62,7 @@ class quantitative_matrix:
                 peptide = aggregate(peptide)
 
                 # Aggregate to protein level
-                protein = pd.DataFrame({'monomer_intensity': [np.mean(peptide['peptide_intensity'].values)], 'fractional_monomer_intensity': [np.mean(peptide['peptide_intensity'].values / peptide['total_peptide_intensity'].values)], 'total_intensity': [np.mean(peptide['total_peptide_intensity'].values)]})
+                protein = pd.DataFrame({'monomer_intensity': [np.mean(np.log2(peptide['peptide_intensity'].values))], 'fractional_monomer_intensity': [np.mean(peptide['peptide_intensity'].values / peptide['total_peptide_intensity'].values)], 'total_intensity': [np.mean(np.log2(peptide['total_peptide_intensity'].values))]})
 
                 return protein
 
@@ -107,7 +107,7 @@ class quantitative_matrix:
                     peptide = peptide.groupby(['is_bait']).apply(aggregate).reset_index(level=['is_bait'])
 
                     # Aggregate to protein level
-                    protein = pd.DataFrame({'bait_intensity': [np.mean(peptide[peptide['is_bait']]['peptide_intensity'].values)], 'fractional_bait_intensity': [np.mean(peptide[peptide['is_bait']]['peptide_intensity'].values / peptide[peptide['is_bait']]['total_peptide_intensity'].values)], 'prey_intensity': [np.mean(peptide[~peptide['is_bait']]['peptide_intensity'].values)], 'fractional_prey_intensity': [np.mean(peptide[~peptide['is_bait']]['peptide_intensity'].values) / np.mean(peptide[~peptide['is_bait']]['total_peptide_intensity'].values)]})
+                    protein = pd.DataFrame({'bait_intensity': [np.mean(np.log2(peptide[peptide['is_bait']]['peptide_intensity'].values))], 'fractional_bait_intensity': [np.mean(peptide[peptide['is_bait']]['peptide_intensity'].values / peptide[peptide['is_bait']]['total_peptide_intensity'].values)], 'prey_intensity': [np.mean(np.log2(peptide[~peptide['is_bait']]['peptide_intensity'].values))], 'fractional_prey_intensity': [np.mean(peptide[~peptide['is_bait']]['peptide_intensity'].values) / np.mean(peptide[~peptide['is_bait']]['total_peptide_intensity'].values)]})
 
                     protein['complex_intensity'] = np.mean([protein['prey_intensity'], protein['bait_intensity']])
                     protein['fractional_complex_intensity'] = np.mean([protein['fractional_prey_intensity'], protein['fractional_bait_intensity']])
@@ -214,11 +214,17 @@ class quantitative_test:
                     qv_condition_2 = qm[qm['condition_id'] == condition_2][level].dropna().values
                     if len(qv_condition_1) > 0 and len(qv_condition_2) > 0: # both conditions need at least one quantitative value
                         if (np.var(qm[level].dropna().values) > 1e-10): # all values are too similar
-                                qmt.loc[level,'pvalue'] = mannwhitneyu(qv_condition_1, qv_condition_2)[1]
+                            qmt.loc[level,'pvalue'] = mannwhitneyu(qv_condition_1, qv_condition_2)[1]
+                            if level != "score":
+                                qmt.loc[level,'fc'] = (np.mean(qv_condition_2) - np.mean(qv_condition_1)) / np.mean(qv_condition_1)
+                            else:
+                                qmt.loc[level,'fc'] = np.nan
                         else:
                             qmt.loc[level,'pvalue'] = 1
+                            qmt.loc[level,'fc'] = 0
                     else:
                         qmt.loc[level,'pvalue'] = np.nan
+                        qmt.loc[level,'fc'] = np.nan
 
                     return qmt.loc[level]
 
@@ -230,7 +236,7 @@ class quantitative_test:
         df_test['condition_2'] = condition_2
         df_test['level'] = level
 
-        return df_test[['condition_1','condition_2','level','bait_id','prey_id']+[c for c in df_test.columns if c.startswith("quantitative_")]+['pvalue']]
+        return df_test[['condition_1','condition_2','level','bait_id','prey_id']+[c for c in df_test.columns if c.startswith("quantitative_")]+['pvalue','fc']]
 
     def integrate(self):
         def collapse(x):
@@ -266,4 +272,15 @@ class quantitative_test:
 
         df_node = df_node_level.sort_values('pvalue').groupby(['condition_1','condition_2','bait_id']).head(1).reset_index()
 
-        return df_edge_level[['condition_1','condition_2','level','bait_id','prey_id','pvalue','qvalue']], df_edge[['condition_1','condition_2','bait_id','prey_id','pvalue','qvalue']], df_node_level[['condition_1','condition_2','level','bait_id','pvalue','qvalue']], df_node[['condition_1','condition_2','bait_id','pvalue','qvalue']]
+        click.echo("Info: Total dysregulated proteins detected:")
+        click.echo("%s (at q-value < 0.01)" % (df_node[df_node['qvalue'] < 0.01][['bait_id']].drop_duplicates().shape[0]))
+        click.echo("%s (at q-value < 0.05)" % (df_node[df_node['qvalue'] < 0.05][['bait_id']].drop_duplicates().shape[0]))
+        click.echo("%s (at q-value < 0.1)" % (df_node[df_node['qvalue'] < 0.1][['bait_id']].drop_duplicates().shape[0]))
+
+        for level in self.levels:
+            click.echo("Info: Dysregulated (%s-mode) proteins detected:" % (level))
+            click.echo("%s (at q-value < 0.01)" % (df_node_level[(df_node_level['level'] == level) & (df_node_level['qvalue'] < 0.01)][['bait_id']].drop_duplicates().shape[0]))
+            click.echo("%s (at q-value < 0.05)" % (df_node_level[(df_node_level['level'] == level) & (df_node_level['qvalue'] < 0.05)][['bait_id']].drop_duplicates().shape[0]))
+            click.echo("%s (at q-value < 0.1)" % (df_node_level[(df_node_level['level'] == level) & (df_node_level['qvalue'] < 0.1)][['bait_id']].drop_duplicates().shape[0]))
+
+        return df_edge_level, df_edge[['condition_1','condition_2','bait_id','prey_id','pvalue','qvalue']], df_node_level[['condition_1','condition_2','level','bait_id','pvalue','qvalue']], df_node[['condition_1','condition_2','bait_id','pvalue','qvalue']]

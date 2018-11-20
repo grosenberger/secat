@@ -141,7 +141,7 @@ def preprocess(infiles, outfile, secfile, netfile, posnetfile, negnetfile, unipr
 @click.option('--in', 'infile', required=True, type=click.Path(exists=True), help='Input SECAT file.')
 @click.option('--out', 'outfile', required=False, type=click.Path(exists=False), help='Output SECAT file.')
 @click.option('--monomer_threshold_factor', 'monomer_threshold_factor', default=2.0, show_default=True, type=float, help='Factor threshold to consider a feature a complex rather than a monomer.')
-@click.option('--minimum_peptides', 'minimum_peptides', default=3, show_default=True, type=int, help='Minimum number of peptides required to score an interaction.')
+@click.option('--minimum_peptides', 'minimum_peptides', default=1, show_default=True, type=int, help='Minimum number of peptides required to score an interaction.')
 @click.option('--maximum_peptides', 'maximum_peptides', default=3, show_default=True, type=int, help='Maximum number of peptides used to score an interaction.')
 @click.option('--chunck_size', 'chunck_size', default=50000, show_default=True, type=int, help='Chunck size for processing.')
 def score(infile, outfile, monomer_threshold_factor, minimum_peptides, maximum_peptides, chunck_size):
@@ -237,7 +237,7 @@ def learn(infile, outfile, minimum_monomer_delta, minimum_mass_ratio, maximum_se
 @click.option('--in', 'infile', required=True, type=click.Path(exists=True), help='Input SECAT file.')
 @click.option('--out', 'outfile', required=False, type=click.Path(exists=False), help='Output SECAT file.')
 @click.option('--maximum_interaction_qvalue', default=0.1, show_default=True, type=float, help='Maximum q-value to consider interactions for quantification.')
-@click.option('--minimum_peptides', 'minimum_peptides', default=3, show_default=True, type=int, help='Minimum number of peptides required to quantify an interaction.')
+@click.option('--minimum_peptides', 'minimum_peptides', default=1, show_default=True, type=int, help='Minimum number of peptides required to quantify an interaction.')
 @click.option('--maximum_peptides', 'maximum_peptides', default=3, show_default=True, type=int, help='Maximum number of peptides used to quantify an interaction.')
 def quantify(infile, outfile, maximum_interaction_qvalue, minimum_peptides, maximum_peptides):
     """
@@ -278,18 +278,24 @@ def export(infile):
     Export SECAT results.
     """
 
-    outfile_nodes = os.path.splitext(infile)[0] + "_nodes.csv"
-    outfile_nodes_level = os.path.splitext(infile)[0] + "_nodes_level.csv"
-    outfile_edges = os.path.splitext(infile)[0] + "_edges.csv"
-    outfile_edges_level = os.path.splitext(infile)[0] + "_edges_level.csv"
+    outfile_interactions = os.path.splitext(infile)[0] + "_interactions.csv"
+    outfile_network = os.path.splitext(infile)[0] + "_network.csv"
+    outfile_nodes = os.path.splitext(infile)[0] + "_differential_nodes.csv"
+    outfile_nodes_level = os.path.splitext(infile)[0] + "_differential_nodes_level.csv"
+    outfile_edges = os.path.splitext(infile)[0] + "_differential_edges.csv"
+    outfile_edges_level = os.path.splitext(infile)[0] + "_differential_edges_level.csv"
 
     con = sqlite3.connect(infile)
+    interaction_data = pd.read_sql('SELECT DISTINCT bait_id, prey_id FROM FEATURE_SCORED_COMBINED WHERE decoy == 0 and qvalue < 0.1;' , con)
+    network_data = pd.read_sql('SELECT DISTINCT bait_id, prey_id FROM FEATURE_SCORED_COMBINED WHERE decoy == 0 and qvalue < 0.1 UNION SELECT DISTINCT bait_id, prey_id FROM MONOMER_QM;' , con)
     node_data = pd.read_sql('SELECT * FROM node;' , con)
     node_level_data = pd.read_sql('SELECT * FROM node_level;' , con)
     edge_data = pd.read_sql('SELECT * FROM edge;' , con)
     edge_level_data = pd.read_sql('SELECT * FROM edge_level;' , con)
     con.close()
 
+    interaction_data.to_csv(outfile_interactions, index=False)
+    network_data.to_csv(outfile_network, index=False)
     node_data.sort_values(by=['pvalue']).to_csv(outfile_nodes, index=False)
     node_level_data.sort_values(by=['pvalue']).to_csv(outfile_nodes_level, index=False)
     edge_data.sort_values(by=['pvalue']).to_csv(outfile_edges, index=False)
