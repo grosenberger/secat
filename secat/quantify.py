@@ -10,7 +10,7 @@ import itertools
 
 from scipy.stats import mannwhitneyu, ttest_ind
 
-from pyprophet.stats import pi0est, qvalue
+from statsmodels.stats.multitest import multipletests
 
 
 class quantitative_matrix:
@@ -196,7 +196,7 @@ class quantitative_test:
                         df = df.dropna(subset=['pvalue'])
 
                         # Multiple testing correction via q-value
-                        df['qvalue'] = qvalue(df['pvalue'].values, pi0est(df['pvalue'].values, lambda_=np.arange(0.05,0.5,0.05), pi0_method = "bootstrap")['pi0'])
+                        df['pvalue_adjusted'] = multipletests(pvals=df['pvalue'].values, method="fdr_bh")[1]
                         dfs.append(df)
 
         return pd.concat(dfs, sort=True).sort_values(by='pvalue', ascending=True, na_position='last')
@@ -246,9 +246,8 @@ class quantitative_test:
                 return pd.Series({'pvalue': x['pvalue'].values[0]})
 
         def mtcorrect(x):
-                x['qvalue'] = qvalue(x['pvalue'].values, pi0est(x['pvalue'].values, lambda_=np.arange(0.05,0.5,0.05), pi0_method = "bootstrap")['pi0'])
+                x['pvalue_adjusted'] = multipletests(pvals=x['pvalue'].values, method="fdr_bh")[1]
                 return(x)
-
 
         df_edge_level = self.tests[self.tests['bait_id'] != self.tests['prey_id']]
         df_edge = df_edge_level.sort_values('pvalue').groupby(['condition_1','condition_2','bait_id','prey_id']).head(1).reset_index()
@@ -270,17 +269,17 @@ class quantitative_test:
         df_node_level = df_edge_full.groupby(['condition_1', 'condition_2','level','bait_id']).apply(collapse).reset_index()
         df_node_level = df_node_level.groupby(['condition_1', 'condition_2','level']).apply(mtcorrect).reset_index()
 
-        df_node = df_node_level.sort_values('pvalue').groupby(['condition_1','condition_2','bait_id']).head(1).reset_index()
+        df_node = df_node_level.sort_values('pvalue_adjusted').groupby(['condition_1','condition_2','bait_id']).head(1).reset_index()
 
         click.echo("Info: Total dysregulated proteins detected:")
-        click.echo("%s (at q-value < 0.01)" % (df_node[df_node['qvalue'] < 0.01][['bait_id']].drop_duplicates().shape[0]))
-        click.echo("%s (at q-value < 0.05)" % (df_node[df_node['qvalue'] < 0.05][['bait_id']].drop_duplicates().shape[0]))
-        click.echo("%s (at q-value < 0.1)" % (df_node[df_node['qvalue'] < 0.1][['bait_id']].drop_duplicates().shape[0]))
+        click.echo("%s (at FDR < 0.01)" % (df_node[df_node['pvalue_adjusted'] < 0.01][['bait_id']].drop_duplicates().shape[0]))
+        click.echo("%s (at FDR < 0.05)" % (df_node[df_node['pvalue_adjusted'] < 0.05][['bait_id']].drop_duplicates().shape[0]))
+        click.echo("%s (at FDR < 0.1)" % (df_node[df_node['pvalue_adjusted'] < 0.1][['bait_id']].drop_duplicates().shape[0]))
 
         for level in self.levels:
             click.echo("Info: Dysregulated (%s-mode) proteins detected:" % (level))
-            click.echo("%s (at q-value < 0.01)" % (df_node_level[(df_node_level['level'] == level) & (df_node_level['qvalue'] < 0.01)][['bait_id']].drop_duplicates().shape[0]))
-            click.echo("%s (at q-value < 0.05)" % (df_node_level[(df_node_level['level'] == level) & (df_node_level['qvalue'] < 0.05)][['bait_id']].drop_duplicates().shape[0]))
-            click.echo("%s (at q-value < 0.1)" % (df_node_level[(df_node_level['level'] == level) & (df_node_level['qvalue'] < 0.1)][['bait_id']].drop_duplicates().shape[0]))
+            click.echo("%s (at FDR < 0.01)" % (df_node_level[(df_node_level['level'] == level) & (df_node_level['pvalue_adjusted'] < 0.01)][['bait_id']].drop_duplicates().shape[0]))
+            click.echo("%s (at FDR < 0.05)" % (df_node_level[(df_node_level['level'] == level) & (df_node_level['pvalue_adjusted'] < 0.05)][['bait_id']].drop_duplicates().shape[0]))
+            click.echo("%s (at FDR < 0.1)" % (df_node_level[(df_node_level['level'] == level) & (df_node_level['pvalue_adjusted'] < 0.1)][['bait_id']].drop_duplicates().shape[0]))
 
-        return df_edge_level, df_edge[['condition_1','condition_2','bait_id','prey_id','pvalue','qvalue']], df_node_level[['condition_1','condition_2','level','bait_id','pvalue','qvalue']], df_node[['condition_1','condition_2','bait_id','pvalue','qvalue']]
+        return df_edge_level, df_edge[['condition_1','condition_2','bait_id','prey_id','pvalue','pvalue_adjusted']], df_node_level[['condition_1','condition_2','level','bait_id','pvalue','pvalue_adjusted']], df_node[['condition_1','condition_2','bait_id','pvalue','pvalue_adjusted']]

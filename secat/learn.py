@@ -22,7 +22,7 @@ from pyprophet.report import save_report
 from pyprophet.stats import pemp, qvalue, pi0est
 
 class pyprophet:
-    def __init__(self, outfile, minimum_monomer_delta, minimum_mass_ratio, maximum_sec_shift, maximum_peptides, cb_decoys, xeval_fraction, xeval_num_iter, ss_initial_fdr, ss_iteration_fdr, ss_num_iter, parametric, pfdr, pi0_lambda, pi0_method, pi0_smooth_df, pi0_smooth_log_pi0, lfdr_truncate, lfdr_monotone, lfdr_transformation, lfdr_adj, lfdr_eps, threads, test):
+    def __init__(self, outfile, minimum_monomer_delta, minimum_mass_ratio, maximum_sec_shift, minimum_peptides, maximum_peptides, cb_decoys, xeval_fraction, xeval_num_iter, ss_initial_fdr, ss_iteration_fdr, ss_num_iter, parametric, pfdr, pi0_lambda, pi0_method, pi0_smooth_df, pi0_smooth_log_pi0, lfdr_truncate, lfdr_monotone, lfdr_transformation, lfdr_adj, lfdr_eps, threads, test):
 
         self.outfile = outfile
         self.classifier = 'XGBoost'
@@ -31,6 +31,7 @@ class pyprophet:
         self.minimum_monomer_delta = minimum_monomer_delta
         self.minimum_mass_ratio = minimum_mass_ratio
         self.maximum_sec_shift = maximum_sec_shift
+        self.minimum_peptides = minimum_peptides
         self.maximum_peptides = maximum_peptides
         self.cb_decoys = cb_decoys
         self.xeval_fraction = xeval_fraction
@@ -102,7 +103,7 @@ class pyprophet:
 
     def read_global_abundance(self):
         con = sqlite3.connect(self.outfile)
-        df = pd.read_sql('SELECT condition_id, replicate_id, protein_id, QUANTIFICATION.peptide_id, sum(peptide_intensity) as peptide_intensity FROM QUANTIFICATION INNER JOIN SEC ON QUANTIFICATION.run_id == SEC.run_id INNER JOIN PEPTIDE_META ON QUANTIFICATION.peptide_id = PEPTIDE_META.peptide_id WHERE peptide_rank <= %s GROUP BY condition_id, replicate_id, protein_id, QUANTIFICATION.peptide_id;' % (self.maximum_peptides), con)
+        df = pd.read_sql('SELECT condition_id, replicate_id, protein_id, QUANTIFICATION.peptide_id, sum(peptide_intensity) as peptide_intensity FROM QUANTIFICATION INNER JOIN SEC ON QUANTIFICATION.run_id == SEC.run_id INNER JOIN PEPTIDE_META ON QUANTIFICATION.peptide_id = PEPTIDE_META.peptide_id WHERE peptide_count >= %s AND peptide_rank <= %s GROUP BY condition_id, replicate_id, protein_id, QUANTIFICATION.peptide_id;' % (self.minimum_peptides, self.maximum_peptides), con)
         con.close()
 
         return df.groupby(['condition_id','replicate_id','protein_id'])['peptide_intensity'].mean().reset_index()
