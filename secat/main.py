@@ -294,17 +294,17 @@ def export(infile):
     if check_sqlite_table(con, 'FEATURE_SCORED_COMBINED') and check_sqlite_table(con, 'MONOMER_QM'):
         network_data = pd.read_sql('SELECT DISTINCT bait_id, prey_id FROM FEATURE_SCORED_COMBINED WHERE decoy == 0 and qvalue < 0.1 UNION SELECT DISTINCT bait_id, prey_id FROM MONOMER_QM;' , con)
         network_data.to_csv(outfile_network, index=False)
-    if check_sqlite_table(con, 'node'):
-        node_data = pd.read_sql('SELECT * FROM node;' , con)
+    if check_sqlite_table(con, 'NODE'):
+        node_data = pd.read_sql('SELECT * FROM NODE;' , con)
         node_data.sort_values(by=['pvalue']).to_csv(outfile_nodes, index=False)
-    if check_sqlite_table(con, 'node_level'):
-        node_level_data = pd.read_sql('SELECT * FROM node_level;' , con)
+    if check_sqlite_table(con, 'NODE_LEVEL'):
+        node_level_data = pd.read_sql('SELECT * FROM NODE_LEVEL;' , con)
         node_level_data.sort_values(by=['pvalue']).to_csv(outfile_nodes_level, index=False)
-    if check_sqlite_table(con, 'edge'):
-        edge_data = pd.read_sql('SELECT * FROM edge;' , con)
+    if check_sqlite_table(con, 'EDGE'):
+        edge_data = pd.read_sql('SELECT * FROM EDGE;' , con)
         edge_data.sort_values(by=['pvalue']).to_csv(outfile_edges, index=False)
-    if check_sqlite_table(con, 'edge_level'):
-        edge_level_data = pd.read_sql('SELECT * FROM edge_level;' , con)
+    if check_sqlite_table(con, 'EDGE_LEVEL'):
+        edge_level_data = pd.read_sql('SELECT * FROM EDGE_LEVEL;' , con)
         edge_level_data.sort_values(by=['pvalue']).to_csv(outfile_edges_level, index=False)
     con.close()
 
