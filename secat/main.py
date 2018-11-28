@@ -11,7 +11,7 @@ from .preprocess import uniprot, net, sec, quantification, meta, query
 from .score import monomer, scoring
 from .learn import pyprophet, combine
 from .quantify import quantitative_matrix, quantitative_test
-from .plot import plot_features
+from .plot import plot_features, check_sqlite_table
 
 from pyprophet.data_handling import transform_pi0_lambda
 
@@ -287,20 +287,27 @@ def export(infile):
     outfile_edges_level = os.path.splitext(infile)[0] + "_differential_edges_level.csv"
 
     con = sqlite3.connect(infile)
-    interaction_data = pd.read_sql('SELECT DISTINCT bait_id, prey_id FROM FEATURE_SCORED_COMBINED WHERE decoy == 0 and qvalue < 0.1;' , con)
-    network_data = pd.read_sql('SELECT DISTINCT bait_id, prey_id FROM FEATURE_SCORED_COMBINED WHERE decoy == 0 and qvalue < 0.1 UNION SELECT DISTINCT bait_id, prey_id FROM MONOMER_QM;' , con)
-    node_data = pd.read_sql('SELECT * FROM node;' , con)
-    node_level_data = pd.read_sql('SELECT * FROM node_level;' , con)
-    edge_data = pd.read_sql('SELECT * FROM edge;' , con)
-    edge_level_data = pd.read_sql('SELECT * FROM edge_level;' , con)
+
+    if check_sqlite_table(con, 'FEATURE_SCORED_COMBINED'):
+        interaction_data = pd.read_sql('SELECT DISTINCT bait_id, prey_id FROM FEATURE_SCORED_COMBINED WHERE decoy == 0 and qvalue < 0.1;' , con)
+        interaction_data.to_csv(outfile_interactions, index=False)
+    if check_sqlite_table(con, 'FEATURE_SCORED_COMBINED') and check_sqlite_table(con, 'MONOMER_QM'):
+        network_data = pd.read_sql('SELECT DISTINCT bait_id, prey_id FROM FEATURE_SCORED_COMBINED WHERE decoy == 0 and qvalue < 0.1 UNION SELECT DISTINCT bait_id, prey_id FROM MONOMER_QM;' , con)
+        network_data.to_csv(outfile_network, index=False)
+    if check_sqlite_table(con, 'node'):
+        node_data = pd.read_sql('SELECT * FROM node;' , con)
+        node_data.sort_values(by=['pvalue']).to_csv(outfile_nodes, index=False)
+    if check_sqlite_table(con, 'node_level'):
+        node_level_data = pd.read_sql('SELECT * FROM node_level;' , con)
+        node_level_data.sort_values(by=['pvalue']).to_csv(outfile_nodes_level, index=False)
+    if check_sqlite_table(con, 'edge'):
+        edge_data = pd.read_sql('SELECT * FROM edge;' , con)
+        edge_data.sort_values(by=['pvalue']).to_csv(outfile_edges, index=False)
+    if check_sqlite_table(con, 'edge_level'):
+        edge_level_data = pd.read_sql('SELECT * FROM edge_level;' , con)
+        edge_level_data.sort_values(by=['pvalue']).to_csv(outfile_edges_level, index=False)
     con.close()
 
-    interaction_data.to_csv(outfile_interactions, index=False)
-    network_data.to_csv(outfile_network, index=False)
-    node_data.sort_values(by=['pvalue']).to_csv(outfile_nodes, index=False)
-    node_level_data.sort_values(by=['pvalue']).to_csv(outfile_nodes_level, index=False)
-    edge_data.sort_values(by=['pvalue']).to_csv(outfile_edges, index=False)
-    edge_level_data.sort_values(by=['pvalue']).to_csv(outfile_edges_level, index=False)
 
 # SECAT plot chromatograms
 @cli.command()

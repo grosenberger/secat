@@ -103,7 +103,7 @@ class pyprophet:
 
     def read_global_abundance(self):
         con = sqlite3.connect(self.outfile)
-        df = pd.read_sql('SELECT condition_id, replicate_id, protein_id, QUANTIFICATION.peptide_id, sum(peptide_intensity) as peptide_intensity FROM QUANTIFICATION INNER JOIN SEC ON QUANTIFICATION.run_id == SEC.run_id INNER JOIN PEPTIDE_META ON QUANTIFICATION.peptide_id = PEPTIDE_META.peptide_id WHERE peptide_count >= %s AND peptide_rank <= %s GROUP BY condition_id, replicate_id, protein_id, QUANTIFICATION.peptide_id;' % (self.minimum_peptides, self.maximum_peptides), con)
+        df = pd.read_sql('SELECT condition_id, replicate_id, QUANTIFICATION.protein_id, QUANTIFICATION.peptide_id, sum(peptide_intensity) as peptide_intensity FROM QUANTIFICATION INNER JOIN SEC ON QUANTIFICATION.run_id = SEC.run_id INNER JOIN PEPTIDE_META ON QUANTIFICATION.peptide_id = PEPTIDE_META.peptide_id INNER JOIN PROTEIN_META ON QUANTIFICATION.protein_id = PROTEIN_META.protein_id WHERE peptide_count >= %s AND peptide_rank <= %s GROUP BY condition_id, replicate_id, QUANTIFICATION.protein_id, QUANTIFICATION.peptide_id;' % (self.minimum_peptides, self.maximum_peptides), con)
         con.close()
 
         return df.groupby(['condition_id','replicate_id','protein_id'])['peptide_intensity'].mean().reset_index()

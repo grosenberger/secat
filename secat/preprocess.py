@@ -135,7 +135,7 @@ class preppi:
         df = pd.read_table(preppifile)
 
         # Criterion for direct physical interaction
-        df = df[df['str_max_score'] * df['red_score'] > 100]
+        # df = df[df['str_max_score'] * df['red_score'] > 100]
 
         # Estimate probability
         df['interaction_confidence'] = df['final_score'] / (df['final_score'] + 600)
