@@ -168,7 +168,7 @@ class plot_features:
             table = 'EDGE_LEVEL'
 
         if check_sqlite_table(con, 'EDGE') and self.mode == 'quantification':
-            df = pd.read_sql('SELECT DISTINCT bait_id || "_" || prey_id AS interaction_id, 0 as decoy FROM %s WHERE qvalue < %s ORDER BY pvalue ASC;' % (table, self.interaction_qvalue), con)
+            df = pd.read_sql('SELECT DISTINCT bait_id || "_" || prey_id AS interaction_id, 0 as decoy FROM %s WHERE pvalue_adjusted < %s ORDER BY pvalue ASC;' % (table, self.interaction_qvalue), con)
         elif self.mode == 'detection_integrated':
             df = pd.read_sql('SELECT DISTINCT bait_id || "_" || prey_id AS interaction_id, decoy FROM FEATURE_SCORED_COMBINED WHERE qvalue < %s GROUP BY bait_id, prey_id ORDER BY qvalue ASC;' % (self.interaction_qvalue), con)
         elif self.mode == 'detection_separate':
@@ -200,7 +200,7 @@ class plot_features:
         df = None
 
         if check_sqlite_table(con, 'EDGE'):
-            df = pd.read_sql('SELECT condition_1, condition_2, bait_id, prey_id, pvalue, qvalue, level, bait_id || "_" || prey_id AS interaction_id FROM EDGE_LEVEL;', con)
+            df = pd.read_sql('SELECT condition_1, condition_2, bait_id, prey_id, pvalue, pvalue_adjusted, level, bait_id || "_" || prey_id AS interaction_id FROM EDGE_LEVEL;', con)
         else:
             df = None
 
@@ -214,7 +214,7 @@ class plot_features:
         df = None
 
         if check_sqlite_table(con, 'NODE'):
-            df = pd.read_sql('SELECT condition_1, condition_2, bait_id, pvalue, qvalue, level FROM NODE_LEVEL;', con)
+            df = pd.read_sql('SELECT condition_1, condition_2, bait_id, pvalue, pvalue_adjusted, level FROM NODE_LEVEL;', con)
         else:
             df = None
 
@@ -230,7 +230,7 @@ class plot_features:
         else:
             table = 'NODE_LEVEL'
 
-        df = pd.read_sql('SELECT DISTINCT bait_id, min(pvalue) as pvalue FROM %s WHERE qvalue < %s GROUP BY bait_id;' % (table, self.bait_qvalue), con)
+        df = pd.read_sql('SELECT DISTINCT bait_id, min(pvalue) as pvalue FROM %s WHERE pvalue_adjusted < %s GROUP BY bait_id;' % (table, self.bait_qvalue), con)
 
         con.close()
 
@@ -306,12 +306,12 @@ class plot_features:
         # plot quantitative metadata
         if bait_id == prey_id:
             mmeta = self.monomer_qmeta
-            mmeta = mmeta[mmeta['bait_id'] == bait_id][['level','condition_1','condition_2','pvalue','qvalue']].sort_values(by='pvalue')
+            mmeta = mmeta[mmeta['bait_id'] == bait_id][['level','condition_1','condition_2','pvalue','pvalue_adjusted']].sort_values(by='pvalue')
             if mmeta.shape[0] > 0:
                 axarr[len(tags)].table(cellText=mmeta.values, colLabels=mmeta.columns, loc='center')
         elif self.interactions_qmeta is not None:
             qmeta = self.interactions_qmeta
-            qmeta = qmeta[qmeta['interaction_id'] == interaction_id][['level','condition_1','condition_2','pvalue','qvalue']].sort_values(by='pvalue')
+            qmeta = qmeta[qmeta['interaction_id'] == interaction_id][['level','condition_1','condition_2','pvalue','pvalue_adjusted']].sort_values(by='pvalue')
             if qmeta.shape[0] > 0:
                 axarr[len(tags)].table(cellText=qmeta.values, colLabels=qmeta.columns, loc='center')
         axarr[len(tags)].axis('off')
