@@ -203,19 +203,7 @@ class combine:
         return df
 
     def combine_scores(self, scores):
-        # # Generate full experimental design
-        # interactions = scores[['bait_id','prey_id','decoy','confidence_bin']].drop_duplicates().reset_index()
-        # interactions['id'] = 1
-        # experimental_design = scores[['condition_id','replicate_id']].drop_duplicates().reset_index()
-        # experimental_design['id'] = 1
-
-        # # Missing detections need to be punished. We set the p-values, q-values and pep to 1.
-        # scores = pd.merge(pd.merge(interactions, experimental_design, on='id')[['condition_id','replicate_id','bait_id','prey_id','decoy','confidence_bin']], scores, on=['condition_id','replicate_id','bait_id','prey_id','decoy','confidence_bin'], how='left')
-        # scores['pvalue'] = scores['pvalue'].fillna(1)
-        # scores['qvalue'] = scores['qvalue'].fillna(1)
-        # scores['pep'] = scores['pep'].fillna(1)
-
-        combined_scores = scores.groupby(['condition_id','bait_id','prey_id','decoy','confidence_bin'])['score'].max().reset_index()
+        combined_scores = scores.groupby(['condition_id','bait_id','prey_id','decoy','confidence_bin'])['score'].mean().reset_index()
 
         combined_scores.loc[combined_scores['decoy'] == 0,'pvalue'] = pemp(combined_scores[combined_scores['decoy'] == 0]['score'], combined_scores[combined_scores['decoy'] == 1]['score'])
 
