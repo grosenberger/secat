@@ -214,17 +214,22 @@ class quantitative_test:
                     qv_condition_2 = qm[qm['condition_id'] == condition_2][level].dropna().values
                     if len(qv_condition_1) > 0 and len(qv_condition_2) > 0: # both conditions need at least one quantitative value
                         if (np.var(qm[level].dropna().values) > 1e-10): # all values are too similar
-                            qmt.loc[level,'pvalue'] = mannwhitneyu(qv_condition_1, qv_condition_2)[1]
-                            if level != "score":
-                                qmt.loc[level,'fc'] = (np.mean(qv_condition_2) - np.mean(qv_condition_1)) / np.mean(qv_condition_1)
+                            if level in ['score']:
+                                qmt.loc[level,'pvalue'] = mannwhitneyu(qv_condition_1, qv_condition_2)[1]
                             else:
-                                qmt.loc[level,'fc'] = np.nan
+                                qmt.loc[level,'pvalue'] = ttest_ind(qv_condition_1, qv_condition_2, equal_var=False)[1]
+                            if level in ['total_intensity','monomer_intensity','complex_intensity']:
+                                qmt.loc[level,'log2fx'] = np.log2(np.mean(np.exp2(qv_condition_2)) / np.mean(np.exp2(qv_condition_1)))
+                            elif level in ['fractional_monomer_intensity','fractional_complex_intensity','complex_ratio','fractional_complex_ratio']:
+                                qmt.loc[level,'log2fx'] = np.log2(np.mean(qv_condition_2) / np.mean(qv_condition_1))
+                            else:
+                                qmt.loc[level,'log2fx'] = np.nan
                         else:
                             qmt.loc[level,'pvalue'] = 1
-                            qmt.loc[level,'fc'] = 0
+                            qmt.loc[level,'log2fx'] = 0
                     else:
                         qmt.loc[level,'pvalue'] = np.nan
-                        qmt.loc[level,'fc'] = np.nan
+                        qmt.loc[level,'log2fx'] = np.nan
 
                     return qmt.loc[level]
 
@@ -236,14 +241,14 @@ class quantitative_test:
         df_test['condition_2'] = condition_2
         df_test['level'] = level
 
-        return df_test[['condition_1','condition_2','level','bait_id','prey_id']+[c for c in df_test.columns if c.startswith("quantitative_")]+['pvalue','fc']]
+        return df_test[['condition_1','condition_2','level','bait_id','prey_id']+[c for c in df_test.columns if c.startswith("quantitative_")]+['pvalue','log2fx']]
 
     def integrate(self):
         def collapse(x):
             if x.shape[0] > 1:
-                return pd.Series({'pvalue': EmpiricalBrownsMethod(x[[c for c in x.columns if c.startswith("quantitative_")]].values, x['pvalue'].values)})
+                return pd.Series({'pvalue': EmpiricalBrownsMethod(x[[c for c in x.columns if c.startswith("quantitative_")]].values, x['pvalue'].values), 'log2fx': np.mean(np.abs(x['log2fx']))})
             elif x.shape[0] == 1:
-                return pd.Series({'pvalue': x['pvalue'].values[0]})
+                return pd.Series({'pvalue': x['pvalue'].values[0], 'log2fx': np.mean(np.abs(x['log2fx']))})
 
         def mtcorrect(x):
                 x['pvalue_adjusted'] = multipletests(pvals=x['pvalue'].values, method="fdr_bh")[1]
@@ -282,4 +287,4 @@ class quantitative_test:
             click.echo("%s (at FDR < 0.05)" % (df_node_level[(df_node_level['level'] == level) & (df_node_level['pvalue_adjusted'] < 0.05)][['bait_id']].drop_duplicates().shape[0]))
             click.echo("%s (at FDR < 0.1)" % (df_node_level[(df_node_level['level'] == level) & (df_node_level['pvalue_adjusted'] < 0.1)][['bait_id']].drop_duplicates().shape[0]))
 
-        return df_edge_level, df_edge[['condition_1','condition_2','bait_id','prey_id','pvalue','pvalue_adjusted']], df_node_level[['condition_1','condition_2','level','bait_id','pvalue','pvalue_adjusted']], df_node[['condition_1','condition_2','bait_id','pvalue','pvalue_adjusted']]
+        return df_edge_level, df_edge[['condition_1','condition_2','bait_id','prey_id','pvalue','pvalue_adjusted']], df_node_level[['condition_1','condition_2','level','bait_id','log2fx','pvalue','pvalue_adjusted']], df_node[['condition_1','condition_2','bait_id','pvalue','pvalue_adjusted']]
