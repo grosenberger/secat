@@ -74,8 +74,10 @@ class plot_features:
         protein_data['picked'] = True
         peptide_data = self.peptide_data
 
+        bait_id, prey_id = interaction_id.split("_")
+
         feature_data = feature_data[feature_data['interaction_id'] == interaction_id]
-        proteins = pd.DataFrame({"protein_id": pd.concat([feature_data['bait_id'], feature_data['prey_id']])}).drop_duplicates()
+        proteins = pd.DataFrame({"protein_id": [bait_id, prey_id]}).drop_duplicates()
         peptide_data = pd.merge(peptide_data, proteins, how='inner', on='protein_id')
 
         peptide_data = pd.merge(peptide_data, protein_data, on=['condition_id', 'replicate_id', 'protein_id', 'sec_id'], how='left')
@@ -87,7 +89,7 @@ class plot_features:
             out = os.path.splitext(os.path.basename(self.infile))[0]+"_"+str(result_id).zfill(6)+"_"+interaction_id+".pdf"
 
         with PdfPages(out) as pdf:
-            f = self.generate_plot(peptide_data, feature_data, feature_data['bait_id'].values[0], feature_data['prey_id'].values[0])
+            f = self.generate_plot(peptide_data, feature_data, bait_id, prey_id)
             pdf.savefig()
             plt.close()
 
