@@ -269,7 +269,7 @@ class quantitative_test:
         df_edge_level_rev.loc[df_edge_level_rev['level'] == 'fractional_prey_intensity_new', 'level'] = 'fractional_prey_intensity'
         df_edge_level_rev.loc[df_edge_level_rev['level'] == 'fractional_bait_intensity_new', 'level'] = 'fractional_bait_intensity'
 
-        df_edge_full = pd.concat([df_edge_level, self.tests])
+        df_edge_full = pd.concat([self.tests, df_edge_level_rev])
 
         df_node_level = df_edge_full.groupby(['condition_1', 'condition_2','level','bait_id']).apply(collapse).reset_index()
         df_node_level = df_node_level.groupby(['condition_1', 'condition_2','level']).apply(mtcorrect).reset_index()
