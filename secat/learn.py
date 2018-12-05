@@ -62,10 +62,6 @@ class pyprophet:
             # Learn model
             if self.cb_decoys:
                 click.echo("Info: Using decoys from same confidence bin for learning.")
-                print(data[(data['learning'] == 1)].shape)
-                print(data[(data['learning'] == 0)].shape)
-                print(data[(data['learning'] == 1) | (data['decoy'] == 1)].shape)
-                sys.exit()
                 self.weights = self.learn(data[(data['learning'] == 1)])
             else:
                 self.weights = self.learn(data[(data['learning'] == 1) | (data['decoy'] == 1)])
