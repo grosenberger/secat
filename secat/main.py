@@ -312,16 +312,16 @@ def export(infile):
 # SECAT plot chromatograms
 @cli.command()
 @click.option('--in', 'infile', required=True, type=click.Path(exists=True), help='Input SECAT file.')
-@click.option('--interaction_id', required=False, type=str, help='Plot features for specified interaction_id.')
-@click.option('--interaction_qvalue', default=None, show_default=True, type=float, help='Maximum q-value to plot interactions.')
-@click.option('--bait_id', required=False, type=str, help='Plot features for specified bait_id.')
-@click.option('--bait_qvalue', default=None, show_default=True, type=float, help='Maximum q-value to plot baits.')
+@click.option('--level', default='bait', show_default=True, type=click.Choice(['bait', 'interaction']), help='Plot either all interactions of bait proteins or individual interactions')
+@click.option('--id', required=False, type=str, help='Plot specific UniProt bait_id (Q10000) or interaction_id (Q10000_P10000)')
+@click.option('--max_qvalue', default=0.01, show_default=True, type=float, help='Maximum q-value to plot baits or interactions.')
+@click.option('--min_log2fx', default=2.0, show_default=True, type=float, help='Minimum log2fx to plot baits or interactions.')
 @click.option('--mode', default='quantification', show_default=True, type=click.Choice(['quantification', 'detection_integrated', 'detection_separate']), help='Select mode to order interaction plots by. Note: detection_separate will also report decoys')
 @click.option('--combined/--no-combined', default=False, show_default=True, help='Select interactions and baits according to combined q-values.')
 @click.option('--peptide_rank', default=6, show_default=True, type=int, help='Number of most intense peptides to plot.')
-def plot(infile, interaction_id, interaction_qvalue, bait_id, bait_qvalue, mode, combined, peptide_rank):
+def plot(infile, level, id, max_qvalue, min_log2fx, mode, combined, peptide_rank):
     """
     Plot SECAT results
     """
 
-    pf = plot_features(infile, interaction_id, interaction_qvalue, bait_id, bait_qvalue, mode, combined, peptide_rank)
+    pf = plot_features(infile, level, id, max_qvalue, min_log2fx, mode, combined, peptide_rank)

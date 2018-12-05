@@ -27,12 +27,12 @@ def check_sqlite_table(con, table):
     return(table_present)
 
 class plot_features:
-    def __init__(self, infile, interaction_id, interaction_qvalue, bait_id, bait_qvalue, mode, combined, peptide_rank):
+    def __init__(self, infile, level, id, max_qvalue, min_log2fx, mode, combined, peptide_rank):
         self.infile = infile
-        self.interaction_id = interaction_id
-        self.interaction_qvalue = interaction_qvalue
-        self.bait_id = bait_id
-        self.bait_qvalue = bait_qvalue
+        self.level = level
+        self.id = id
+        self.max_qvalue = max_qvalue
+        self.min_log2fx = min_log2fx
         self.mode = mode
         self.combined = combined
         self.peptide_rank = peptide_rank
@@ -52,18 +52,18 @@ class plot_features:
         self.monomer_qmeta = self.read_monomer_qmeta()
 
 
-        if self.interaction_id is not None:
-            self.plot_interaction(interaction_id)
+        if self.level is 'interaction' and self.id is not None:
+            self.plot_interaction(id)
 
-        if self.bait_id is not None:
-            self.plot_bait(bait_id, 0)
+        if self.level is 'bait' and self.id is not None:
+            self.plot_bait(id, 0)
 
-        if self.interaction_qvalue is not None:
+        if self.level is 'interaction' and self.id is None and self.max_qvalue is not None:
             interaction_ids, result_ids, decoys = self.read_interactions()
             for interaction_id, result_id, decoy in zip(interaction_ids, result_ids, decoys):
                 self.plot_interaction(interaction_id, result_id, decoy)
 
-        if self.bait_qvalue is not None:
+        if self.level is 'bait' and self.id is None and self.max_qvalue is not None:
             bait_ids, result_ids = self.read_baits()
             for bait_id, result_id in zip(bait_ids, result_ids):
                 self.plot_bait(bait_id, result_id)
@@ -170,11 +170,11 @@ class plot_features:
             table = 'EDGE_LEVEL'
 
         if check_sqlite_table(con, 'EDGE') and self.mode == 'quantification':
-            df = pd.read_sql('SELECT DISTINCT bait_id || "_" || prey_id AS interaction_id, 0 as decoy FROM %s WHERE pvalue_adjusted < %s ORDER BY pvalue ASC;' % (table, self.interaction_qvalue), con)
+            df = pd.read_sql('SELECT DISTINCT bait_id || "_" || prey_id AS interaction_id, 0 as decoy FROM %s WHERE pvalue_adjusted < %s AND log2fx >= %s ORDER BY pvalue ASC;' % (table, self.max_qvalue, self.min_log2fx), con)
         elif self.mode == 'detection_integrated':
-            df = pd.read_sql('SELECT DISTINCT bait_id || "_" || prey_id AS interaction_id, decoy FROM FEATURE_SCORED_COMBINED WHERE qvalue < %s GROUP BY bait_id, prey_id ORDER BY qvalue ASC;' % (self.interaction_qvalue), con)
+            df = pd.read_sql('SELECT DISTINCT bait_id || "_" || prey_id AS interaction_id, decoy FROM FEATURE_SCORED_COMBINED WHERE qvalue < %s GROUP BY bait_id, prey_id ORDER BY qvalue ASC;' % (self.max_qvalue), con)
         elif self.mode == 'detection_separate':
-            df = pd.read_sql('SELECT DISTINCT bait_id || "_" || prey_id AS interaction_id, decoy FROM FEATURE_SCORED WHERE qvalue < %s ORDER BY qvalue ASC;' % (self.interaction_qvalue), con)
+            df = pd.read_sql('SELECT DISTINCT bait_id || "_" || prey_id AS interaction_id, decoy FROM FEATURE_SCORED WHERE qvalue < %s ORDER BY qvalue ASC;' % (self.max_qvalue), con)
         else:
             sys.exit("Mode for interaction plotting not supported.")
 
@@ -232,7 +232,7 @@ class plot_features:
         else:
             table = 'NODE_LEVEL'
 
-        df = pd.read_sql('SELECT DISTINCT bait_id, min(pvalue) as pvalue FROM %s WHERE pvalue_adjusted < %s GROUP BY bait_id;' % (table, self.bait_qvalue), con)
+        df = pd.read_sql('SELECT DISTINCT bait_id, min(pvalue) as pvalue FROM %s WHERE pvalue_adjusted < %s AND log2fx >= %s GROUP BY bait_id;' % (table, self.max_qvalue, self.min_log2fx), con)
 
         con.close()
 
