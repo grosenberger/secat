@@ -50,9 +50,12 @@ class quantitative_matrix:
             peptide_total = df.groupby(['peptide_id'])['peptide_intensity'].sum().reset_index()
             peptide_total.columns = ['peptide_id','total_peptide_intensity']
 
-             # Summarize monomer peptide intensities
-            peptide_mono = df[df['sec_id'] >= df['monomer_sec_id']].groupby(['peptide_id'])['peptide_intensity'].sum().reset_index()
-            peptide_mono.columns = ['peptide_id','peptide_intensity']
+            # Summarize monomer peptide intensities
+            if df[df['sec_id'] >= df['monomer_sec_id']].shape[0] > 0:
+                peptide_mono = df[df['sec_id'] >= df['monomer_sec_id']].groupby(['peptide_id'])['peptide_intensity'].sum().reset_index()
+                peptide_mono.columns = ['peptide_id','peptide_intensity']
+            else:
+                peptide_mono = pd.DataFrame({'peptide_id': df['peptide_id'].unique(), 'peptide_intensity': 0})
 
             peptide = pd.merge(peptide_mono, peptide_total, on='peptide_id')
 
@@ -62,7 +65,7 @@ class quantitative_matrix:
                 peptide = aggregate(peptide)
 
                 # Aggregate to protein level
-                protein = pd.DataFrame({'monomer_intensity': [np.mean(np.log2(peptide['peptide_intensity'].values))], 'fractional_monomer_intensity': [np.mean(peptide['peptide_intensity'].values / peptide['total_peptide_intensity'].values)], 'total_intensity': [np.mean(np.log2(peptide['total_peptide_intensity'].values))]})
+                protein = pd.DataFrame({'monomer_intensity': [np.mean(np.log2(peptide['peptide_intensity'].values+1))], 'fractional_monomer_intensity': [np.mean(peptide['peptide_intensity'].values / peptide['total_peptide_intensity'].values)], 'total_intensity': [np.mean(np.log2(peptide['total_peptide_intensity'].values+1))]})
 
                 return protein
 
@@ -107,7 +110,7 @@ class quantitative_matrix:
                     peptide = peptide.groupby(['is_bait']).apply(aggregate).reset_index(level=['is_bait'])
 
                     # Aggregate to protein level
-                    protein = pd.DataFrame({'bait_intensity': [np.mean(np.log2(peptide[peptide['is_bait']]['peptide_intensity'].values))], 'fractional_bait_intensity': [np.mean(peptide[peptide['is_bait']]['peptide_intensity'].values / peptide[peptide['is_bait']]['total_peptide_intensity'].values)], 'prey_intensity': [np.mean(np.log2(peptide[~peptide['is_bait']]['peptide_intensity'].values))], 'fractional_prey_intensity': [np.mean(peptide[~peptide['is_bait']]['peptide_intensity'].values) / np.mean(peptide[~peptide['is_bait']]['total_peptide_intensity'].values)]})
+                    protein = pd.DataFrame({'bait_intensity': [np.mean(np.log2(peptide[peptide['is_bait']]['peptide_intensity'].values+1))], 'fractional_bait_intensity': [np.mean(peptide[peptide['is_bait']]['peptide_intensity'].values / peptide[peptide['is_bait']]['total_peptide_intensity'].values)], 'prey_intensity': [np.mean(np.log2(peptide[~peptide['is_bait']]['peptide_intensity'].values+1))], 'fractional_prey_intensity': [np.mean(peptide[~peptide['is_bait']]['peptide_intensity'].values) / np.mean(peptide[~peptide['is_bait']]['total_peptide_intensity'].values)]})
 
                     protein['complex_intensity'] = np.mean([protein['prey_intensity'], protein['bait_intensity']])
                     protein['fractional_complex_intensity'] = np.mean([protein['fractional_prey_intensity'], protein['fractional_bait_intensity']])
