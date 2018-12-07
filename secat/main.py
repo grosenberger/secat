@@ -253,13 +253,13 @@ def quantify(infile, outfile, maximum_interaction_qvalue, minimum_peptides, maxi
         outfile = outfile
 
 
-    click.echo("Info: Prepare quantitative matrix")
-    qm = quantitative_matrix(outfile, maximum_interaction_qvalue, minimum_peptides, maximum_peptides)
+    # click.echo("Info: Prepare quantitative matrix")
+    # qm = quantitative_matrix(outfile, maximum_interaction_qvalue, minimum_peptides, maximum_peptides)
 
-    con = sqlite3.connect(outfile)
-    qm.monomer.to_sql('MONOMER_QM', con, index=False, if_exists='replace')
-    qm.complex.to_sql('COMPLEX_QM', con, index=False, if_exists='replace')
-    con.close()
+    # con = sqlite3.connect(outfile)
+    # qm.monomer.to_sql('MONOMER_QM', con, index=False, if_exists='replace')
+    # qm.complex.to_sql('COMPLEX_QM', con, index=False, if_exists='replace')
+    # con.close()
 
     click.echo("Info: Assess differential features")
     qt = quantitative_test(outfile)
@@ -269,6 +269,7 @@ def quantify(infile, outfile, maximum_interaction_qvalue, minimum_peptides, maxi
     qt.edge_level.to_sql('EDGE_LEVEL', con, index=False, if_exists='replace')
     qt.node.to_sql('NODE', con, index=False, if_exists='replace')
     qt.node_level.to_sql('NODE_LEVEL', con, index=False, if_exists='replace')
+    qt.protein_level.to_sql('PROTEIN_LEVEL', con, index=False, if_exists='replace')
     con.close()
 
 # SECAT export features
@@ -285,6 +286,7 @@ def export(infile):
     outfile_nodes_level = os.path.splitext(infile)[0] + "_differential_nodes_level.csv"
     outfile_edges = os.path.splitext(infile)[0] + "_differential_edges.csv"
     outfile_edges_level = os.path.splitext(infile)[0] + "_differential_edges_level.csv"
+    outfile_proteins_level = os.path.splitext(infile)[0] + "_differential_proteins_level.csv"
 
     con = sqlite3.connect(infile)
 
@@ -306,6 +308,9 @@ def export(infile):
     if check_sqlite_table(con, 'EDGE_LEVEL'):
         edge_level_data = pd.read_sql('SELECT * FROM EDGE_LEVEL;' , con)
         edge_level_data.sort_values(by=['pvalue']).to_csv(outfile_edges_level, index=False)
+    if check_sqlite_table(con, 'PROTEIN_LEVEL'):
+        protein_level_data = pd.read_sql('SELECT * FROM PROTEIN_LEVEL;' , con)
+        protein_level_data.sort_values(by=['pvalue']).to_csv(outfile_proteins_level, index=False)
     con.close()
 
 

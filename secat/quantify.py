@@ -155,7 +155,7 @@ class quantitative_test:
         self.monomer_qm, self.complex_qm = self.read()
 
         self.tests = self.compare()
-        self.edge_level, self.edge, self.node_level, self.node = self.integrate()
+        self.edge_level, self.edge, self.node_level, self.node, self.protein_level = self.integrate()
 
     def contrast(self):
         con = sqlite3.connect(self.outfile)
@@ -236,6 +236,11 @@ class quantitative_test:
 
                     return qmt.loc[level]
 
+        def replace_inf(x):
+            x.loc[np.isposinf(x['log2fx']),'log2fx'] = x[np.isfinite(x['log2fx'])]['log2fx'].max()
+            x.loc[np.isneginf(x['log2fx']),'log2fx'] = x[np.isfinite(x['log2fx'])]['log2fx'].min()
+            return x
+
         # compute number of replicates
         experimental_design = df[['condition_id','replicate_id']].drop_duplicates()
 
@@ -243,6 +248,9 @@ class quantitative_test:
         df_test['condition_1'] = condition_1
         df_test['condition_2'] = condition_2
         df_test['level'] = level
+
+        # Replace -inf and inf log2fx values with numerical minimum and maximum
+        df_test = df_test.groupby(['level']).apply(replace_inf)
 
         return df_test[['condition_1','condition_2','level','bait_id','prey_id']+[c for c in df_test.columns if c.startswith("quantitative_")]+['pvalue','log2fx']]
 
@@ -259,6 +267,7 @@ class quantitative_test:
 
         df_edge_level = self.tests[self.tests['bait_id'] != self.tests['prey_id']]
         df_edge = df_edge_level.sort_values('pvalue').groupby(['condition_1','condition_2','bait_id','prey_id']).head(1).reset_index()
+        df_protein = self.tests[self.tests['bait_id'] == self.tests['prey_id']]
 
         # Append reverse interactions; the full list contains monomers only once
         df_edge_level_rev = self.tests.rename(index=str, columns={"bait_id": "prey_id", "prey_id": "bait_id"})
@@ -272,7 +281,7 @@ class quantitative_test:
         df_edge_level_rev.loc[df_edge_level_rev['level'] == 'fractional_prey_intensity_new', 'level'] = 'fractional_prey_intensity'
         df_edge_level_rev.loc[df_edge_level_rev['level'] == 'fractional_bait_intensity_new', 'level'] = 'fractional_bait_intensity'
 
-        df_edge_full = pd.concat([self.tests, df_edge_level_rev])
+        df_edge_full = pd.concat([self.tests, df_edge_level_rev], sort=False)
 
         df_node_level = df_edge_full.groupby(['condition_1', 'condition_2','level','bait_id']).apply(collapse).reset_index()
         df_node_level = df_node_level.groupby(['condition_1', 'condition_2','level']).apply(mtcorrect).reset_index()
@@ -290,4 +299,4 @@ class quantitative_test:
             click.echo("%s (at FDR < 0.05)" % (df_node_level[(df_node_level['level'] == level) & (df_node_level['pvalue_adjusted'] < 0.05)][['bait_id']].drop_duplicates().shape[0]))
             click.echo("%s (at FDR < 0.1)" % (df_node_level[(df_node_level['level'] == level) & (df_node_level['pvalue_adjusted'] < 0.1)][['bait_id']].drop_duplicates().shape[0]))
 
-        return df_edge_level[['condition_1','condition_2','level','bait_id','prey_id','log2fx','pvalue','pvalue_adjusted'] + [c for c in df_edge_level.columns if c.startswith("quantitative_")]], df_edge[['condition_1','condition_2','level','bait_id','prey_id','log2fx','pvalue','pvalue_adjusted']], df_node_level[['condition_1','condition_2','level','bait_id','log2fx','pvalue','pvalue_adjusted']], df_node[['condition_1','condition_2','level','bait_id','log2fx','pvalue','pvalue_adjusted']]
+        return df_edge_level[['condition_1','condition_2','level','bait_id','prey_id','log2fx','pvalue','pvalue_adjusted'] + [c for c in df_edge_level.columns if c.startswith("quantitative_")]], df_edge[['condition_1','condition_2','level','bait_id','prey_id','log2fx','pvalue','pvalue_adjusted']], df_node_level[['condition_1','condition_2','level','bait_id','log2fx','pvalue','pvalue_adjusted']], df_node[['condition_1','condition_2','level','bait_id','log2fx','pvalue','pvalue_adjusted']], df_protein[['condition_1','condition_2','level','bait_id','log2fx','pvalue','pvalue_adjusted'] + [c for c in df_protein.columns if c.startswith("quantitative_")]]
