@@ -191,11 +191,12 @@ def interaction(df):
     return(res)
 
 class scoring:
-    def __init__(self, outfile, chunck_size, minimum_peptides, maximum_peptides):
+    def __init__(self, outfile, chunck_size, minimum_peptides, maximum_peptides, peakpicking):
         self.outfile = outfile
         self.chunck_size = chunck_size
         self.minimum_peptides = minimum_peptides
         self.maximum_peptides = maximum_peptides
+        self.peakpicking = peakpicking
 
         self.sec_boundaries = self.read_sec_boundaries()
 
@@ -224,6 +225,28 @@ class scoring:
             peptide_mean = np.mean(np.append(x['peptide_intensity'], np.zeros(len(self.sec_boundaries['sec_id'].unique())-x.shape[0])))
             return x[x['peptide_intensity'] > peptide_mean][['sec_id','peptide_intensity','monomer_sec_id']]
 
+        def protein_pick(x):
+            xpep = x.groupby(['peptide_id','sec_id'])['peptide_intensity'].mean().reset_index()
+            xprot = xpep.groupby(['sec_id'])['peptide_intensity'].mean().reset_index()
+
+            xall = pd.merge(self.sec_boundaries, xprot[['sec_id','peptide_intensity']], on='sec_id', how='left').sort_values(['sec_id'])
+            xall['peptide_intensity'] = np.nan_to_num(xall['peptide_intensity'].values) # Replace missing values with zeros
+
+            peaks, _ = find_peaks(xall['peptide_intensity'], width=[3,])
+            boundaries = peak_widths(xall['peptide_intensity'], peaks, rel_height=0.9)
+
+            left_boundaries = np.floor(boundaries[2])
+            right_boundaries = np.ceil(boundaries[3])
+
+            sec_list = None
+            for peak in list(zip(left_boundaries, right_boundaries)):
+                if sec_list is None:
+                    sec_list = np.arange(peak[0],peak[1]+1)
+                else:
+                    sec_list = np.append(sec_list, np.arange(peak[0],peak[1]+1))
+
+            return x[x['sec_id'].isin(np.unique(sec_list))]
+
         # Report statistics before filtering
         click.echo("Info: %s unique peptides before filtering." % len(df['peptide_id'].unique()))
         click.echo("Info: %s peptide chromatograms before filtering." % df[['condition_id','replicate_id','protein_id','peptide_id']].drop_duplicates().shape[0])
@@ -232,8 +255,12 @@ class scoring:
         # Filter monomers for detrending
         df = df[df['sec_id'] <= df['monomer_sec_id']]
 
-        # # Remove constant trends from peptides
-        # df = df.groupby(['condition_id','replicate_id','protein_id','peptide_id']).apply(peptide_detrend).reset_index(level=['condition_id','replicate_id','protein_id','peptide_id'])
+        if self.peakpicking == "detrend":
+            # Remove constant trends from peptides
+            df = df.groupby(['condition_id','replicate_id','protein_id','peptide_id']).apply(peptide_detrend).reset_index(level=['condition_id','replicate_id','protein_id','peptide_id'])
+        elif self.peakpicking == "localmax":
+            # Protein-level peakpicking
+            df = df.groupby(['condition_id','protein_id']).apply(protein_pick)
 
         # Report statistics after filtering
         click.echo("Info: %s unique peptides after filtering." % len(df['peptide_id'].unique()))
