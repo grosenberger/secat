@@ -6,6 +6,7 @@ import sys
 import os
 
 from lxml import etree
+import itertools
 
 from pandas.api.types import is_numeric_dtype
 
@@ -146,8 +147,8 @@ class preppi:
         return df
 
 class net:
-    def __init__(self, netfile, uniprot):
-        self.formats = ['mitab','stringdb','bioplex','preppi']
+    def __init__(self, netfile, uniprot, meta):
+        self.formats = ['mitab','stringdb','bioplex','preppi','none']
         self.format = self.identify(netfile)
 
         if self.format == 'mitab':
@@ -158,6 +159,12 @@ class net:
             network = bioplex(netfile).df
         elif self.format == 'preppi':
             network = preppi(netfile).df
+        elif self.format == 'none':
+            protein_ids = sorted(list(meta.protein_meta['protein_id'].unique()))
+            full_queries = list(itertools.combinations(protein_ids, 2))
+            click.echo("Info: Assessing all %s potential interactions of the %s proteins." % (len(full_queries), len(protein_ids)))
+            network = pd.DataFrame(full_queries, columns=['bait_id', 'prey_id'])
+            network['interaction_confidence'] = 1
 
         # Ensure that interactions are unique
         df = self.unique_interactions(network)
@@ -168,6 +175,9 @@ class net:
         self.df = df
 
     def identify(self, netfile):
+        if netfile == None:
+            return self.formats[4]
+
         header = pd.read_table(netfile, sep=None, nrows=1, engine='python')
 
         columns = list(header.columns.values)

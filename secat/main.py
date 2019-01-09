@@ -30,7 +30,7 @@ def cli():
 @click.option('--out', 'outfile', required=True, type=click.Path(exists=False), help='Output SECAT file.')
 # Reference files
 @click.option('--sec', 'secfile', required=True, type=click.Path(exists=True), help='The input SEC calibration file.')
-@click.option('--net', 'netfile', required=True, type=click.Path(exists=True), help='Reference binary protein-protein interaction file in STRING-DB or HUPO-PSI MITAB (2.5-2.7) format.')
+@click.option('--net', 'netfile', required=False, type=click.Path(exists=True), help='Reference binary protein-protein interaction file in STRING-DB or HUPO-PSI MITAB (2.5-2.7) format.')
 @click.option('--posnet', 'posnetfile', required=False, type=click.Path(exists=True), help='Reference binary positive protein-protein interaction file in STRING-DB or HUPO-PSI MITAB (2.5-2.7) format.')
 @click.option('--negnet', 'negnetfile', required=False, type=click.Path(exists=True), help='Reference binary negative protein-protein interaction file in STRING-DB or HUPO-PSI MITAB (2.5-2.7) format.')
 @click.option('--uniprot', 'uniprotfile', required=True, type=click.Path(exists=True), help='Reference molecular weights file in UniProt XML format.')
@@ -58,32 +58,6 @@ def preprocess(infiles, outfile, secfile, netfile, posnetfile, negnetfile, unipr
 
     con = sqlite3.connect(outfile)
 
-    # Generate UniProt table
-    click.echo("Info: Parsing UniProt XML file %s." % uniprotfile)
-    uniprot_data = uniprot(uniprotfile)
-    uniprot_data.to_df().to_sql('PROTEIN', con, index=False)
-
-    # Generate Network table
-    click.echo("Info: Parsing network file %s." % netfile)
-    net_data = net(netfile, uniprot_data)
-    net_data.to_df().to_sql('NETWORK', con, index=False)
-
-    # Generate Positive Network table
-    if posnetfile != None:
-        click.echo("Info: Parsing positive network file %s." % posnetfile)
-        posnet_data = net(posnetfile, uniprot_data)
-        posnet_data.to_df().to_sql('POSITIVE_NETWORK', con, index=False)
-    else:
-        posnet_data = None
-
-    # Generate Negative Network table
-    if negnetfile != None:
-        click.echo("Info: Parsing negative network file %s." % negnetfile)
-        negnet_data = net(negnetfile, uniprot_data)
-        negnet_data.to_df().to_sql('NEGATIVE_NETWORK', con, index=False)
-    else:
-        negnet_data = None
-
     # Generate SEC definition table
     click.echo("Info: Parsing SEC definition file %s." % secfile)
     sec_data = sec(secfile, columns)
@@ -102,6 +76,35 @@ def preprocess(infiles, outfile, secfile, netfile, posnetfile, negnetfile, unipr
     meta_data = meta(quantification_data, sec_data, decoy_intensity_bins, decoy_left_sec_bins, decoy_right_sec_bins)
     meta_data.peptide_meta.to_sql('PEPTIDE_META', con, index=False)
     meta_data.protein_meta.to_sql('PROTEIN_META', con, index=False)
+
+    # Generate UniProt table
+    click.echo("Info: Parsing UniProt XML file %s." % uniprotfile)
+    uniprot_data = uniprot(uniprotfile)
+    uniprot_data.to_df().to_sql('PROTEIN', con, index=False)
+
+    # Generate Network table
+    if netfile != None:
+        click.echo("Info: Parsing network file %s." % netfile)
+    else:
+        click.echo("Info: No reference network file was provided.")
+    net_data = net(netfile, uniprot_data, meta_data)
+    net_data.to_df().to_sql('NETWORK', con, index=False)
+
+    # Generate Positive Network table
+    if posnetfile != None:
+        click.echo("Info: Parsing positive network file %s." % posnetfile)
+        posnet_data = net(posnetfile, uniprot_data, meta_data)
+        posnet_data.to_df().to_sql('POSITIVE_NETWORK', con, index=False)
+    else:
+        posnet_data = None
+
+    # Generate Negative Network table
+    if negnetfile != None:
+        click.echo("Info: Parsing negative network file %s." % negnetfile)
+        negnet_data = net(negnetfile, uniprot_data, meta_data)
+        negnet_data.to_df().to_sql('NEGATIVE_NETWORK', con, index=False)
+    else:
+        negnet_data = None
 
     # Generate interaction query data
     click.echo("Info: Generating interaction query data.")
