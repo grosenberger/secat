@@ -11,7 +11,7 @@ import itertools
 from scipy.stats import mannwhitneyu, ttest_ind
 
 from statsmodels.stats.multitest import multipletests
-
+from gseapy.algorithm import gsea_compute_tensor
 
 class quantitative_matrix:
     def __init__(self, outfile, maximum_interaction_qvalue, minimum_peptides, maximum_peptides):
@@ -300,3 +300,82 @@ class quantitative_test:
             click.echo("%s (at FDR < 0.1)" % (df_node_level[(df_node_level['level'] == level) & (df_node_level['pvalue_adjusted'] < 0.1)][['bait_id']].drop_duplicates().shape[0]))
 
         return df_edge_level[['condition_1','condition_2','level','bait_id','prey_id','log2fx','pvalue','pvalue_adjusted'] + [c for c in df_edge_level.columns if c.startswith("quantitative_")]], df_edge[['condition_1','condition_2','level','bait_id','prey_id','log2fx','pvalue','pvalue_adjusted']], df_node_level[['condition_1','condition_2','level','bait_id','log2fx','pvalue','pvalue_adjusted']], df_node[['condition_1','condition_2','level','bait_id','log2fx','pvalue','pvalue_adjusted']], df_protein[['condition_1','condition_2','level','bait_id','log2fx','pvalue','pvalue_adjusted'] + [c for c in df_protein.columns if c.startswith("quantitative_")]]
+
+class enrichment_test(quantitative_test):
+    def __init__(self, outfile, enrichment_permutations, threads):
+        self.outfile = outfile
+        self.enrichment_permutations = enrichment_permutations
+        self.threads = threads
+        self.levels = ['monomer_intensity','complex_intensity','total_intensity']
+        self.comparisons = self.contrast()
+
+        self.monomer_qm, self.complex_qm = self.read()
+
+        self.tests = self.compare()
+        self.enode_level, self.enode = self.integrate()
+
+    def compare(self):
+        dfs = []
+        for level in self.levels:
+            for comparison in self.comparisons:
+                for state in [self.monomer_qm, self.complex_qm]:
+                    if level in state.columns:
+                        # Generate matrix
+                        dat = state[state[level] > 0].copy()
+
+                        baits = dat[['bait_id']].drop_duplicates().head(100)
+                        dat = pd.merge(dat, baits, on='bait_id')
+
+                        dat['query_id'] = dat['bait_id'] + '_' + dat['prey_id']
+                        dat['run_id'] = dat['condition_id'] + '_' + dat['replicate_id']
+                        data_mx = dat.pivot_table(index='query_id', columns='run_id', values=level, fill_value=0)
+                        data_mx += 1
+
+                        # Generate class index
+                        class_index = []
+                        for idx in data_mx.columns:
+                            if comparison[0] in idx:
+                                class_index.append(comparison[0])
+                            elif comparison[1] in idx:
+                                class_index.append(comparison[1])
+
+                        # Generate subunit set
+                        query_set = dat[['prey_id','query_id']]
+                        query_set.columns = ['bait_id','query_id']
+                        query_set = pd.concat([dat[['bait_id','query_id']], query_set[['bait_id','query_id']]], sort=False).drop_duplicates()
+                        subunit_set = query_set.groupby(['bait_id'])['query_id'].apply(lambda x: x.unique().tolist()).to_dict()
+
+                        # Conduct GSEA
+                        gsea_results, hit_ind, rank_ES, subsets = gsea_compute_tensor(data=data_mx, gmt=subunit_set, n=self.enrichment_permutations, weighted_score_type=1, permutation_type='phenotype', method='ratio_of_classes', pheno_pos=comparison[0], pheno_neg=comparison[1], classes=class_index, ascending=False, processes=self.threads, seed=None, single=False, scale=False)
+
+                        results = pd.DataFrame(list(gsea_results), columns=['es','nes','pvalue','fdr'])
+                        results['bait_id'] = subunit_set.keys()
+                        results['condition_1'] = comparison[0]
+                        results['condition_2'] = comparison[1]
+                        results['level'] = level
+
+                        dfs.append(results[['condition_1','condition_2','level','bait_id','es','nes','pvalue','fdr']])
+
+        return pd.concat(dfs, ignore_index=True, sort=True).sort_values(by='pvalue', ascending=True, na_position='last')
+
+    def integrate(self):
+        def mtcorrect(x):
+                x['pvalue_adjusted'] = multipletests(pvals=x['pvalue'].values, method="fdr_bh")[1]
+                return(x)
+
+        df_node_level = self.tests
+        df_node_level = df_node_level.groupby(['condition_1', 'condition_2','level']).apply(mtcorrect).reset_index()
+        df_node = df_node_level.sort_values('pvalue_adjusted').groupby(['condition_1','condition_2','bait_id']).head(1).reset_index()
+
+        click.echo("Info: Total dysregulated proteins detected:")
+        click.echo("%s (at FDR < 0.01)" % (df_node[df_node['pvalue_adjusted'] < 0.01][['bait_id']].drop_duplicates().shape[0]))
+        click.echo("%s (at FDR < 0.05)" % (df_node[df_node['pvalue_adjusted'] < 0.05][['bait_id']].drop_duplicates().shape[0]))
+        click.echo("%s (at FDR < 0.1)" % (df_node[df_node['pvalue_adjusted'] < 0.1][['bait_id']].drop_duplicates().shape[0]))
+
+        for level in self.levels:
+            click.echo("Info: Dysregulated (%s-mode) proteins detected:" % (level))
+            click.echo("%s (at FDR < 0.01)" % (df_node_level[(df_node_level['level'] == level) & (df_node_level['pvalue_adjusted'] < 0.01)][['bait_id']].drop_duplicates().shape[0]))
+            click.echo("%s (at FDR < 0.05)" % (df_node_level[(df_node_level['level'] == level) & (df_node_level['pvalue_adjusted'] < 0.05)][['bait_id']].drop_duplicates().shape[0]))
+            click.echo("%s (at FDR < 0.1)" % (df_node_level[(df_node_level['level'] == level) & (df_node_level['pvalue_adjusted'] < 0.1)][['bait_id']].drop_duplicates().shape[0]))
+
+        return df_node_level[['condition_1','condition_2','level','bait_id','es','nes','pvalue','pvalue_adjusted','fdr']], df_node[['condition_1','condition_2','level','bait_id','es','nes','pvalue','pvalue_adjusted','fdr']]
