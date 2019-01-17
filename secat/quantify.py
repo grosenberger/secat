@@ -323,9 +323,6 @@ class enrichment_test(quantitative_test):
                         # Generate matrix
                         dat = state[state[level] > 0].copy()
 
-                        baits = dat[['bait_id']].drop_duplicates().head(100)
-                        dat = pd.merge(dat, baits, on='bait_id')
-
                         dat['query_id'] = dat['bait_id'] + '_' + dat['prey_id']
                         dat['run_id'] = dat['condition_id'] + '_' + dat['replicate_id']
                         data_mx = dat.pivot_table(index='query_id', columns='run_id', values=level, fill_value=0)
