@@ -244,10 +244,10 @@ def learn(infile, outfile, minimum_monomer_delta, minimum_mass_ratio, maximum_se
 @click.option('--maximum_interaction_qvalue', default=0.1, show_default=True, type=float, help='Maximum q-value to consider interactions for quantification.')
 @click.option('--minimum_peptides', 'minimum_peptides', default=1, show_default=True, type=int, help='Minimum number of peptides required to quantify an interaction.')
 @click.option('--maximum_peptides', 'maximum_peptides', default=3, show_default=True, type=int, help='Maximum number of peptides used to quantify an interaction.')
-@click.option('--statistics', default='enrichment', show_default=True, type=click.Choice(['quantitative','enrichment']), help='Either "quantitative" or "enrichment"; the method for statistical testing of the hypotheses.')
+@click.option('--integration', default='enrichment', show_default=True, type=click.Choice(['quantitative','enrichment']), help='Either "quantitative" or "enrichment"; the method for statistical testing of the hypotheses.')
 @click.option('--enrichment_permutations', 'enrichment_permutations', default=100, show_default=True, type=int, help='Number of permutations for enrichment testing.')
 @click.option('--threads', 'threads', default=1, show_default=True, type=int, help='Number of threads used for parallel processing of enrichment tests. -1 means all available CPUs.')
-def quantify(infile, outfile, maximum_interaction_qvalue, minimum_peptides, maximum_peptides, statistics, enrichment_permutations, threads):
+def quantify(infile, outfile, maximum_interaction_qvalue, minimum_peptides, maximum_peptides, integration, enrichment_permutations, threads):
     """
     Quantify protein and interaction features in SEC data.
     """
@@ -260,16 +260,18 @@ def quantify(infile, outfile, maximum_interaction_qvalue, minimum_peptides, maxi
         outfile = outfile
 
 
-    # click.echo("Info: Prepare quantitative matrix")
-    # qm = quantitative_matrix(outfile, maximum_interaction_qvalue, minimum_peptides, maximum_peptides)
+    click.echo("Info: Prepare quantitative matrices.")
+    qm = quantitative_matrix(outfile, maximum_interaction_qvalue, minimum_peptides, maximum_peptides)
 
-    # con = sqlite3.connect(outfile)
-    # qm.monomer.to_sql('MONOMER_QM', con, index=False, if_exists='replace')
-    # qm.complex.to_sql('COMPLEX_QM', con, index=False, if_exists='replace')
-    # con.close()
+    con = sqlite3.connect(outfile)
+    qm.monomer_peptide.to_sql('MONOMER_PEPTIDE_QM', con, index=False, if_exists='replace')
+    qm.monomer_protein.to_sql('MONOMER_QM', con, index=False, if_exists='replace')
+    qm.complex_peptide.to_sql('COMPLEX_PEPTIDE_QM', con, index=False, if_exists='replace')
+    qm.complex_protein.to_sql('COMPLEX_QM', con, index=False, if_exists='replace')
+    con.close()
 
-    if statistics == 'quantitative':
-        click.echo("Info: Assess differential features by quantitative test")
+    if integration == 'quantitative':
+        click.echo("Info: Assess differential features by quantitative test.")
         qt = quantitative_test(outfile)
 
         con = sqlite3.connect(outfile)
@@ -279,8 +281,8 @@ def quantify(infile, outfile, maximum_interaction_qvalue, minimum_peptides, maxi
         qt.node_level.to_sql('NODE_LEVEL', con, index=False, if_exists='replace')
         qt.protein_level.to_sql('PROTEIN_LEVEL', con, index=False, if_exists='replace')
         con.close()
-    elif statistics == 'enrichment':
-        click.echo("Info: Assess differential features by enrichment test")
+    elif integration == 'enrichment':
+        click.echo("Info: Assess differential features by enrichment test.")
         et = enrichment_test(outfile, enrichment_permutations, threads)
 
         con = sqlite3.connect(outfile)
