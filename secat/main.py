@@ -245,7 +245,7 @@ def learn(infile, outfile, minimum_monomer_delta, minimum_mass_ratio, maximum_se
 @click.option('--minimum_peptides', 'minimum_peptides', default=1, show_default=True, type=int, help='Minimum number of peptides required to quantify an interaction.')
 @click.option('--maximum_peptides', 'maximum_peptides', default=3, show_default=True, type=int, help='Maximum number of peptides used to quantify an interaction.')
 @click.option('--integration', default='enrichment', show_default=True, type=click.Choice(['quantitative','enrichment']), help='Either "quantitative" or "enrichment"; the method for statistical testing of the hypotheses.')
-@click.option('--enrichment_permutations', 'enrichment_permutations', default=100, show_default=True, type=int, help='Number of permutations for enrichment testing.')
+@click.option('--enrichment_permutations', 'enrichment_permutations', default=1000, show_default=True, type=int, help='Number of permutations for enrichment testing.')
 @click.option('--threads', 'threads', default=1, show_default=True, type=int, help='Number of threads used for parallel processing of enrichment tests. -1 means all available CPUs.')
 def quantify(infile, outfile, maximum_interaction_qvalue, minimum_peptides, maximum_peptides, integration, enrichment_permutations, threads):
     """
