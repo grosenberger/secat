@@ -260,15 +260,15 @@ def quantify(infile, outfile, maximum_interaction_qvalue, minimum_peptides, maxi
         outfile = outfile
 
 
-    # click.echo("Info: Prepare quantitative matrices.")
-    # qm = quantitative_matrix(outfile, maximum_interaction_qvalue, minimum_peptides, maximum_peptides)
+    click.echo("Info: Prepare quantitative matrices.")
+    qm = quantitative_matrix(outfile, maximum_interaction_qvalue, minimum_peptides, maximum_peptides)
 
-    # con = sqlite3.connect(outfile)
-    # qm.monomer_peptide.to_sql('MONOMER_PEPTIDE_QM', con, index=False, if_exists='replace')
-    # qm.monomer_protein.to_sql('MONOMER_QM', con, index=False, if_exists='replace')
-    # qm.complex_peptide.to_sql('COMPLEX_PEPTIDE_QM', con, index=False, if_exists='replace')
-    # qm.complex_protein.to_sql('COMPLEX_QM', con, index=False, if_exists='replace')
-    # con.close()
+    con = sqlite3.connect(outfile)
+    qm.monomer_peptide.to_sql('MONOMER_PEPTIDE_QM', con, index=False, if_exists='replace')
+    qm.monomer_protein.to_sql('MONOMER_QM', con, index=False, if_exists='replace')
+    qm.complex_peptide.to_sql('COMPLEX_PEPTIDE_QM', con, index=False, if_exists='replace')
+    qm.complex_protein.to_sql('COMPLEX_QM', con, index=False, if_exists='replace')
+    con.close()
 
     if integration == 'quantitative':
         click.echo("Info: Assess differential features by quantitative test.")
