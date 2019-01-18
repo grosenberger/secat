@@ -102,6 +102,8 @@ class pyprophet:
         # We need to generate a score that selects for the very best interactions heterodimers of similar size: perfect shape, co-elution and identical mass
         df['main_var_kickstart'] = (df['var_xcorr_shape'] * df['var_mass_ratio']) / (df['var_xcorr_shift'] + 1)
 
+        df = df.drop(columns=['var_xcorr_shift'])
+
         return df
 
     def read_global_abundance(self):

@@ -242,7 +242,7 @@ def learn(infile, outfile, minimum_monomer_delta, minimum_mass_ratio, maximum_se
 @click.option('--in', 'infile', required=True, type=click.Path(exists=True), help='Input SECAT file.')
 @click.option('--out', 'outfile', required=False, type=click.Path(exists=False), help='Output SECAT file.')
 @click.option('--maximum_interaction_qvalue', default=0.1, show_default=True, type=float, help='Maximum q-value to consider interactions for quantification.')
-@click.option('--minimum_peptides', 'minimum_peptides', default=1, show_default=True, type=int, help='Minimum number of peptides required to quantify an interaction.')
+@click.option('--minimum_peptides', 'minimum_peptides', default=3, show_default=True, type=int, help='Minimum number of peptides required to quantify an interaction.')
 @click.option('--maximum_peptides', 'maximum_peptides', default=3, show_default=True, type=int, help='Maximum number of peptides used to quantify an interaction.')
 @click.option('--integration', default='enrichment', show_default=True, type=click.Choice(['quantitative','enrichment']), help='Either "quantitative" or "enrichment"; the method for statistical testing of the hypotheses.')
 @click.option('--enrichment_permutations', 'enrichment_permutations', default=1000, show_default=True, type=int, help='Number of permutations for enrichment testing.')
@@ -260,35 +260,31 @@ def quantify(infile, outfile, maximum_interaction_qvalue, minimum_peptides, maxi
         outfile = outfile
 
 
-    click.echo("Info: Prepare quantitative matrices.")
-    qm = quantitative_matrix(outfile, maximum_interaction_qvalue, minimum_peptides, maximum_peptides)
+    # click.echo("Info: Prepare quantitative matrices.")
+    # qm = quantitative_matrix(outfile, maximum_interaction_qvalue, minimum_peptides, maximum_peptides)
 
-    con = sqlite3.connect(outfile)
-    qm.monomer_peptide.to_sql('MONOMER_PEPTIDE_QM', con, index=False, if_exists='replace')
-    qm.monomer_protein.to_sql('MONOMER_QM', con, index=False, if_exists='replace')
-    qm.complex_peptide.to_sql('COMPLEX_PEPTIDE_QM', con, index=False, if_exists='replace')
-    qm.complex_protein.to_sql('COMPLEX_QM', con, index=False, if_exists='replace')
-    con.close()
+    # con = sqlite3.connect(outfile)
+    # qm.monomer_peptide.to_sql('MONOMER_PEPTIDE_QM', con, index=False, if_exists='replace')
+    # qm.monomer_protein.to_sql('MONOMER_QM', con, index=False, if_exists='replace')
+    # qm.complex_peptide.to_sql('COMPLEX_PEPTIDE_QM', con, index=False, if_exists='replace')
+    # qm.complex_protein.to_sql('COMPLEX_QM', con, index=False, if_exists='replace')
+    # con.close()
 
     if integration == 'quantitative':
         click.echo("Info: Assess differential features by quantitative test.")
         qt = quantitative_test(outfile)
 
-        con = sqlite3.connect(outfile)
-        qt.edge.to_sql('EDGE', con, index=False, if_exists='replace')
-        qt.edge_level.to_sql('EDGE_LEVEL', con, index=False, if_exists='replace')
-        qt.node.to_sql('NODE', con, index=False, if_exists='replace')
-        qt.node_level.to_sql('NODE_LEVEL', con, index=False, if_exists='replace')
-        qt.protein_level.to_sql('PROTEIN_LEVEL', con, index=False, if_exists='replace')
-        con.close()
     elif integration == 'enrichment':
         click.echo("Info: Assess differential features by enrichment test.")
-        et = enrichment_test(outfile, enrichment_permutations, threads)
+        qt = enrichment_test(outfile, enrichment_permutations, threads)
 
-        con = sqlite3.connect(outfile)
-        et.enode.to_sql('ENODE', con, index=False, if_exists='replace')
-        et.enode_level.to_sql('ENODE_LEVEL', con, index=False, if_exists='replace')
-        con.close()
+    con = sqlite3.connect(outfile)
+    qt.edge.to_sql('EDGE', con, index=False, if_exists='replace')
+    qt.edge_level.to_sql('EDGE_LEVEL', con, index=False, if_exists='replace')
+    qt.node.to_sql('NODE', con, index=False, if_exists='replace')
+    qt.node_level.to_sql('NODE_LEVEL', con, index=False, if_exists='replace')
+    qt.protein_level.to_sql('PROTEIN_LEVEL', con, index=False, if_exists='replace')
+    con.close()
 
 # SECAT export features
 @cli.command()
@@ -322,12 +318,6 @@ def export(infile):
     if check_sqlite_table(con, 'NODE_LEVEL'):
         node_level_data = pd.read_sql('SELECT * FROM NODE_LEVEL;' , con)
         node_level_data.sort_values(by=['pvalue']).to_csv(outfile_nodes_level, index=False)
-    if check_sqlite_table(con, 'ENODE'):
-        enode_data = pd.read_sql('SELECT * FROM ENODE;' , con)
-        enode_data.sort_values(by=['pvalue']).to_csv(outfile_enodes, index=False)
-    if check_sqlite_table(con, 'ENODE_LEVEL'):
-        enode_level_data = pd.read_sql('SELECT * FROM ENODE_LEVEL;' , con)
-        enode_level_data.sort_values(by=['pvalue']).to_csv(outfile_enodes_level, index=False)
     if check_sqlite_table(con, 'EDGE'):
         edge_data = pd.read_sql('SELECT * FROM EDGE;' , con)
         edge_data.sort_values(by=['pvalue']).to_csv(outfile_edges, index=False)
