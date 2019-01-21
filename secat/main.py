@@ -180,6 +180,7 @@ def score(infile, outfile, monomer_threshold_factor, minimum_peptides, maximum_p
 @cli.command()
 @click.option('--in', 'infile', required=True, type=click.Path(exists=True), help='Input SECAT file.')
 @click.option('--out', 'outfile', required=False, type=click.Path(exists=False), help='Output SECAT file.')
+@click.option('--apply_model', 'apply_model', required=False, type=click.Path(exists=False), help='Apply pretrained SECAT model')
 # Prefiltering
 @click.option('--minimum_monomer_delta', 'minimum_monomer_delta', default=3, show_default=True, type=float, help='Minimum number of delta fractions from the expected monomer fraction required to score an interaction.')
 @click.option('--minimum_mass_ratio', 'minimum_mass_ratio', default=0.1, show_default=True, type=float, help='Minimum mass ratio required to score an interaction.')
@@ -207,7 +208,7 @@ def score(infile, outfile, monomer_threshold_factor, minimum_peptides, maximum_p
 @click.option('--lfdr_eps', default=np.power(10.0,-8), show_default=True, type=float, help='Numeric value that is threshold for the tails of the empirical p-value distribution.')
 @click.option('--threads', 'threads', default=1, show_default=True, type=int, help='Number of threads used for parallel processing of SEC runs. -1 means all available CPUs.')
 @click.option('--test/--no-test', default=False, show_default=True, help='Run in test mode with fixed seed.')
-def learn(infile, outfile, minimum_monomer_delta, minimum_mass_ratio, maximum_sec_shift, minimum_peptides, maximum_peptides, cb_decoys, xeval_fraction, xeval_num_iter, ss_initial_fdr, ss_iteration_fdr, ss_num_iter, parametric, pfdr, pi0_lambda, pi0_method, pi0_smooth_df, pi0_smooth_log_pi0, lfdr_truncate, lfdr_monotone, lfdr_transformation, lfdr_adj, lfdr_eps, threads, test):
+def learn(infile, outfile, apply_model, minimum_monomer_delta, minimum_mass_ratio, maximum_sec_shift, minimum_peptides, maximum_peptides, cb_decoys, xeval_fraction, xeval_num_iter, ss_initial_fdr, ss_iteration_fdr, ss_num_iter, parametric, pfdr, pi0_lambda, pi0_method, pi0_smooth_df, pi0_smooth_log_pi0, lfdr_truncate, lfdr_monotone, lfdr_transformation, lfdr_adj, lfdr_eps, threads, test):
     """
     Learn true/false interaction features in SEC data.
     """
@@ -222,7 +223,7 @@ def learn(infile, outfile, minimum_monomer_delta, minimum_mass_ratio, maximum_se
     # Run PyProphet training
     click.echo("Info: Running PyProphet.")
 
-    scored_data = pyprophet(outfile, minimum_monomer_delta, minimum_mass_ratio, maximum_sec_shift, minimum_peptides, maximum_peptides, cb_decoys, xeval_fraction, xeval_num_iter, ss_initial_fdr, ss_iteration_fdr, ss_num_iter, parametric, pfdr, pi0_lambda, pi0_method, pi0_smooth_df, pi0_smooth_log_pi0, lfdr_truncate, lfdr_monotone, lfdr_transformation, lfdr_adj, lfdr_eps, threads, test)
+    scored_data = pyprophet(outfile, apply_model, minimum_monomer_delta, minimum_mass_ratio, maximum_sec_shift, minimum_peptides, maximum_peptides, cb_decoys, xeval_fraction, xeval_num_iter, ss_initial_fdr, ss_iteration_fdr, ss_num_iter, parametric, pfdr, pi0_lambda, pi0_method, pi0_smooth_df, pi0_smooth_log_pi0, lfdr_truncate, lfdr_monotone, lfdr_transformation, lfdr_adj, lfdr_eps, threads, test)
 
     con = sqlite3.connect(outfile)
     scored_data.df.to_sql('FEATURE_SCORED', con, index=False, if_exists='replace')

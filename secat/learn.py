@@ -3,6 +3,7 @@ import numpy as np
 import scipy as sp
 import click
 import sqlite3
+import pickle
 import os
 import sys
 
@@ -24,9 +25,10 @@ from pyprophet.stats import pemp, qvalue, pi0est
 from hyperopt import hp
 
 class pyprophet:
-    def __init__(self, outfile, minimum_monomer_delta, minimum_mass_ratio, maximum_sec_shift, minimum_peptides, maximum_peptides, cb_decoys, xeval_fraction, xeval_num_iter, ss_initial_fdr, ss_iteration_fdr, ss_num_iter, parametric, pfdr, pi0_lambda, pi0_method, pi0_smooth_df, pi0_smooth_log_pi0, lfdr_truncate, lfdr_monotone, lfdr_transformation, lfdr_adj, lfdr_eps, threads, test):
+    def __init__(self, outfile, apply_model, minimum_monomer_delta, minimum_mass_ratio, maximum_sec_shift, minimum_peptides, maximum_peptides, cb_decoys, xeval_fraction, xeval_num_iter, ss_initial_fdr, ss_iteration_fdr, ss_num_iter, parametric, pfdr, pi0_lambda, pi0_method, pi0_smooth_df, pi0_smooth_log_pi0, lfdr_truncate, lfdr_monotone, lfdr_transformation, lfdr_adj, lfdr_eps, threads, test):
 
         self.outfile = outfile
+        self.apply_model = apply_model
         self.classifier = 'XGBoost'
 
         self.xgb_hyperparams = {'autotune': False, 'autotune_num_rounds': 10, 'num_boost_round': 100, 'early_stopping_rounds': 10, 'test_size': 0.33}
@@ -66,19 +68,30 @@ class pyprophet:
         data = self.read_data(global_abundance)
 
         if data[data['learning'] == 1].shape[0] > 0:
-            # Learn model
-            if self.cb_decoys:
-                click.echo("Info: Using decoys from same confidence bin for learning.")
-                self.weights = self.learn(data[(data['learning'] == 1)])
+            if self.apply_model == None:
+                # Learn model
+                if self.cb_decoys:
+                    click.echo("Info: Using decoys from same confidence bin for learning.")
+                    self.weights = self.learn(data[(data['learning'] == 1)])
+                else:
+                    self.weights = self.learn(data[(data['learning'] == 1) | (data['decoy'] == 1)])
             else:
-                self.weights = self.learn(data[(data['learning'] == 1) | (data['decoy'] == 1)])
+                # Apply pretrained model
+                self.weights = self.load_model()
             # Apply model
             self.df = data[data['learning'] == 0].groupby('confidence_bin').apply(self.apply)
         else:
-            # Learn model
-            self.weights = self.learn(data[data['confidence_bin'] == data['confidence_bin'].max()])
+            if self.apply_model == None:
+                # Learn model
+                self.weights = self.learn(data[data['confidence_bin'] == data['confidence_bin'].max()])
+            else:
+                # Apply pretrained model
+                self.weights = self.load_model()
             # Apply model
             self.df = data.groupby('confidence_bin').apply(self.apply)
+
+        # Store model
+        self.store_model()
 
     def read_data(self, global_abundance):
         con = sqlite3.connect(self.outfile)
@@ -118,6 +131,32 @@ class pyprophet:
         self.plot_scores(result.scored_tables, "learning")
 
         return weights
+
+    def store_model(self):
+        con = sqlite3.connect(self.outfile)
+        c = con.cursor()
+        c.execute('SELECT count(name) FROM sqlite_master WHERE type="table" AND name="PYPROPHET_XGB";')
+        if c.fetchone()[0] == 1:
+            c.execute('DELETE FROM PYPROPHET_XGB')
+        else:
+            c.execute('CREATE TABLE PYPROPHET_XGB (xgb BLOB)')
+
+        c.execute('INSERT INTO PYPROPHET_XGB VALUES(?)', [pickle.dumps(self.weights)])
+        con.commit()
+        con.close()
+
+    def load_model(self):
+        try:
+            con = sqlite3.connect(self.apply_model)
+
+            data = con.execute("SELECT xgb FROM PYPROPHET_XGB").fetchone()
+            con.close()
+        except Exception:
+            import traceback
+            traceback.print_exc()
+            raise
+
+        return pickle.loads(data[0])
 
     def apply(self, detecting_data):
         (result, scorer, weights) = PyProphet(self.classifier, self.xgb_hyperparams, self.xgb_params, self.xgb_params_space, self.xeval_fraction, self.xeval_num_iter, self.ss_initial_fdr, self.ss_iteration_fdr, self.ss_num_iter, self.group_id, self.parametric, self.pfdr, self.pi0_lambda, self.pi0_method, self.pi0_smooth_df, self.pi0_smooth_log_pi0, self.lfdr_truncate, self.lfdr_monotone, self.lfdr_transformation, self.lfdr_adj, self.lfdr_eps, False, self.threads, self.test).apply_weights(detecting_data, self.weights)
