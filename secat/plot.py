@@ -27,12 +27,14 @@ def check_sqlite_table(con, table):
     return(table_present)
 
 class plot_features:
-    def __init__(self, infile, level, id, max_qvalue, min_log2fx, mode, combined, peptide_rank):
+    def __init__(self, infile, level, id, max_qvalue, min_log2fx, min_nes, min_dnes, mode, combined, peptide_rank):
         self.infile = infile
         self.level = level
         self.id = id
         self.max_qvalue = max_qvalue
         self.min_log2fx = min_log2fx
+        self.min_nes = min_nes
+        self.min_dnes = min_dnes
         self.mode = mode
         self.combined = combined
         self.peptide_rank = peptide_rank
@@ -169,8 +171,10 @@ class plot_features:
         else:
             table = 'EDGE_LEVEL'
 
-        if check_sqlite_table(con, 'EDGE') and self.mode == 'quantification':
+        if check_sqlite_table(con, 'EDGE') and self.mode == 'quantitative':
             df = pd.read_sql('SELECT DISTINCT bait_id || "_" || prey_id AS interaction_id, 0 as decoy FROM %s WHERE pvalue_adjusted < %s AND log2fx >= %s ORDER BY pvalue ASC;' % (table, self.max_qvalue, self.min_log2fx), con)
+        if check_sqlite_table(con, 'EDGE') and self.mode == 'enrichment':
+            df = pd.read_sql('SELECT DISTINCT bait_id || "_" || prey_id AS interaction_id, 0 as decoy FROM %s WHERE pvalue_adjusted < %s AND abs(nes) >= %s AND abs(dnes) >= %s ORDER BY pvalue ASC;' % (table, self.max_qvalue, self.min_nes, self.min_dnes), con)
         elif self.mode == 'detection_integrated':
             df = pd.read_sql('SELECT DISTINCT bait_id || "_" || prey_id AS interaction_id, decoy FROM FEATURE_SCORED_COMBINED WHERE qvalue < %s GROUP BY bait_id, prey_id ORDER BY qvalue ASC;' % (self.max_qvalue), con)
         elif self.mode == 'detection_separate':
@@ -185,7 +189,7 @@ class plot_features:
     def read_interactions_dmeta(self):
         con = sqlite3.connect(self.infile)
 
-        if check_sqlite_table(con, 'COMPLEX_QM') and self.mode == 'quantification':
+        if check_sqlite_table(con, 'COMPLEX_QM') and (self.mode in ['quantitative','enrichment']):
             df = pd.read_sql('SELECT FEATURE_SCORED_COMBINED.bait_id AS bait_id, FEATURE_SCORED_COMBINED.prey_id AS prey_id, FEATURE_SCORED_COMBINED.bait_id || "_" || FEATURE_SCORED_COMBINED.prey_id AS interaction_id, BAIT_META.protein_name AS bait_name, PREY_META.protein_name AS prey_name, min(FEATURE_SCORED_COMBINED.pvalue) AS pvalue, min(FEATURE_SCORED_COMBINED.qvalue) AS qvalue FROM FEATURE_SCORED_COMBINED INNER JOIN (SELECT * FROM PROTEIN) AS BAIT_META ON FEATURE_SCORED_COMBINED.bait_id = BAIT_META.protein_id INNER JOIN (SELECT * FROM PROTEIN) AS PREY_META ON FEATURE_SCORED_COMBINED.prey_id = PREY_META.protein_id INNER JOIN (SELECT DISTINCT bait_id, prey_id FROM COMPLEX_QM) AS COMPLEX_QM ON FEATURE_SCORED_COMBINED.bait_id = COMPLEX_QM.bait_id AND FEATURE_SCORED_COMBINED.prey_id = COMPLEX_QM.prey_id GROUP BY FEATURE_SCORED_COMBINED.bait_id, FEATURE_SCORED_COMBINED.prey_id;', con)
         elif self.mode == 'detection_integrated':
             df = pd.read_sql('SELECT FEATURE_SCORED_COMBINED.bait_id AS bait_id, FEATURE_SCORED_COMBINED.prey_id AS prey_id, FEATURE_SCORED_COMBINED.bait_id || "_" || FEATURE_SCORED_COMBINED.prey_id AS interaction_id, BAIT_META.protein_name AS bait_name, PREY_META.protein_name AS prey_name, min(FEATURE_SCORED_COMBINED.pvalue) AS pvalue, min(FEATURE_SCORED_COMBINED.qvalue) AS qvalue FROM FEATURE_SCORED_COMBINED INNER JOIN (SELECT * FROM PROTEIN) AS BAIT_META ON FEATURE_SCORED_COMBINED.bait_id = BAIT_META.protein_id INNER JOIN (SELECT * FROM PROTEIN) AS PREY_META ON FEATURE_SCORED_COMBINED.prey_id = PREY_META.protein_id GROUP BY FEATURE_SCORED_COMBINED.bait_id, FEATURE_SCORED_COMBINED.prey_id;', con)
@@ -232,7 +236,10 @@ class plot_features:
         else:
             table = 'NODE_LEVEL'
 
-        df = pd.read_sql('SELECT DISTINCT bait_id, min(pvalue) as pvalue FROM %s WHERE pvalue_adjusted < %s AND log2fx >= %s GROUP BY bait_id;' % (table, self.max_qvalue, self.min_log2fx), con)
+        if self.mode == 'quantitative':
+            df = pd.read_sql('SELECT DISTINCT bait_id, min(pvalue) as pvalue FROM %s WHERE pvalue_adjusted < %s AND log2fx >= %s GROUP BY bait_id;' % (table, self.max_qvalue, self.min_log2fx), con)
+        if self.mode == 'enrichment':
+            df = pd.read_sql('SELECT DISTINCT bait_id, min(pvalue) as pvalue FROM %s WHERE pvalue_adjusted < %s AND ABS(nes) >= %s AND ABS(dnes) >= %s GROUP BY bait_id;' % (table, self.max_qvalue, self.min_nes, self.min_dnes), con)
 
         con.close()
 
