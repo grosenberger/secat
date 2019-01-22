@@ -146,7 +146,7 @@ def preprocess(infiles, outfile, secfile, netfile, posnetfile, negnetfile, unipr
 @click.option('--monomer_threshold_factor', 'monomer_threshold_factor', default=2.0, show_default=True, type=float, help='Factor threshold to consider a feature a complex rather than a monomer.')
 @click.option('--minimum_peptides', 'minimum_peptides', default=1, show_default=True, type=int, help='Minimum number of peptides required to score an interaction.')
 @click.option('--maximum_peptides', 'maximum_peptides', default=3, show_default=True, type=int, help='Maximum number of peptides used to score an interaction.')
-@click.option('--peakpicking', default='none', show_default=True, type=click.Choice(['none', 'detrend', 'localmax']), help='Either "none", "detrend" or "localmax"; the method for peakpicking of the peptide chromatograms.')
+@click.option('--peakpicking', default='none', show_default=True, type=click.Choice(['none', 'detrend', 'localmax_conditions', 'localmax_replicates']), help='Either "none", "detrend" or "localmax"; the method for peakpicking of the peptide chromatograms.')
 @click.option('--chunck_size', 'chunck_size', default=50000, show_default=True, type=int, help='Chunck size for processing.')
 def score(infile, outfile, monomer_threshold_factor, minimum_peptides, maximum_peptides, peakpicking, chunck_size):
     """
@@ -244,7 +244,7 @@ def learn(infile, outfile, apply_model, minimum_monomer_delta, minimum_mass_rati
 @click.option('--out', 'outfile', required=False, type=click.Path(exists=False), help='Output SECAT file.')
 @click.option('--maximum_interaction_qvalue', default=0.1, show_default=True, type=float, help='Maximum q-value to consider interactions for quantification.')
 @click.option('--minimum_peptides', 'minimum_peptides', default=3, show_default=True, type=int, help='Minimum number of peptides required to quantify an interaction.')
-@click.option('--maximum_peptides', 'maximum_peptides', default=3, show_default=True, type=int, help='Maximum number of peptides used to quantify an interaction.')
+@click.option('--maximum_peptides', 'maximum_peptides', default=30, show_default=True, type=int, help='Maximum number of peptides used to quantify an interaction.')
 @click.option('--integration', default='enrichment', show_default=True, type=click.Choice(['quantitative','enrichment']), help='Either "quantitative" or "enrichment"; the method for statistical testing of the hypotheses.')
 @click.option('--enrichment_permutations', 'enrichment_permutations', default=1000, show_default=True, type=int, help='Number of permutations for enrichment testing.')
 @click.option('--threads', 'threads', default=1, show_default=True, type=int, help='Number of threads used for parallel processing of enrichment tests. -1 means all available CPUs.')

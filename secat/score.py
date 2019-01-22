@@ -258,9 +258,12 @@ class scoring:
         if self.peakpicking == "detrend":
             # Remove constant trends from peptides
             df = df.groupby(['condition_id','replicate_id','protein_id','peptide_id']).apply(peptide_detrend).reset_index(level=['condition_id','replicate_id','protein_id','peptide_id'])
-        elif self.peakpicking == "localmax":
+        elif self.peakpicking == "localmax_conditions":
             # Protein-level peakpicking
             df = df.groupby(['condition_id','protein_id']).apply(protein_pick)
+        elif self.peakpicking == "localmax_replicates":
+            # Protein-level peakpicking
+            df = df.groupby(['condition_id','replicate_id','protein_id']).apply(protein_pick)
 
         # Report statistics after filtering
         click.echo("Info: %s unique peptides after filtering." % len(df['peptide_id'].unique()))
