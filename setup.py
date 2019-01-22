@@ -34,7 +34,7 @@ setup(
     ],
     packages=find_packages(exclude=['contrib', 'docs', 'tests']),
     include_package_data=True,
-    install_requires=['Click','lxml','joblib','numpy','scipy','pandas','sklearn','pyprophet','minepy','gseapy','matplotlib'],
+    install_requires=['Click','lxml','joblib','numpy','scipy','pandas','sklearn','pyprophet','minepy','rpy2','matplotlib'],
     # extras_require={  # Optional
     #     'dev': ['check-manifest'],
     #     'test': ['coverage'],

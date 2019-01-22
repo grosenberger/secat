@@ -284,7 +284,6 @@ def quantify(infile, outfile, maximum_interaction_qvalue, minimum_peptides, maxi
     qt.edge_level.to_sql('EDGE_LEVEL', con, index=False, if_exists='replace')
     qt.node.to_sql('NODE', con, index=False, if_exists='replace')
     qt.node_level.to_sql('NODE_LEVEL', con, index=False, if_exists='replace')
-    qt.protein_level.to_sql('PROTEIN_LEVEL', con, index=False, if_exists='replace')
     con.close()
 
 # SECAT export features
