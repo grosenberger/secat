@@ -174,8 +174,9 @@ class quantitative_matrix:
         return pd.merge(detected_complexes, self.complex_peptide, on=['condition_id','replicate_id','bait_id','prey_id'], how='left'), pd.merge(detected_complexes, self.complex_protein, on=['condition_id','replicate_id','bait_id','prey_id'], how='left')
 
 class quantitative_test:
-    def __init__(self, outfile):
+    def __init__(self, outfile, control_condition):
         self.outfile = outfile
+        self.control_condition = control_condition
         self.levels = ['score','total_intensity','monomer_intensity','fractional_monomer_intensity','complex_intensity','fractional_complex_intensity','complex_ratio','fractional_complex_ratio']
         self.comparisons = self.contrast()
 
@@ -194,10 +195,10 @@ class quantitative_test:
 
         comparisons = []
         # prepare single-sample comparisons
-        if 'control' in conditions:
-            conditions.remove('control')
+        if self.control_condition in conditions:
+            conditions.remove(self.control_condition)
             for condition in conditions:
-                comparisons.append([condition, 'control'])
+                comparisons.append([condition, self.control_condition])
         # prepare multi-sample comparisons
         else:
             comparisons = list(itertools.combinations(conditions, 2))
@@ -329,19 +330,20 @@ class quantitative_test:
         return df_edge_level[['condition_1','condition_2','level','bait_id','prey_id','log2fx','pvalue','pvalue_adjusted'] + [c for c in df_edge_level.columns if c.startswith("quantitative_")]], df_edge[['condition_1','condition_2','level','bait_id','prey_id','log2fx','pvalue','pvalue_adjusted']], df_node_level[['condition_1','condition_2','level','bait_id','log2fx','pvalue','pvalue_adjusted']], df_node[['condition_1','condition_2','level','bait_id','log2fx','pvalue','pvalue_adjusted']], df_protein[['condition_1','condition_2','level','bait_id','log2fx','pvalue','pvalue_adjusted'] + [c for c in df_protein.columns if c.startswith("quantitative_")]]
 
 class enrichment_test(quantitative_test):
-    def __init__(self, outfile, enrichment_permutations, threads):
+    def __init__(self, outfile, control_condition, enrichment_permutations, threads):
         self.outfile = outfile
+        self.control_condition = control_condition
         self.enrichment_permutations = enrichment_permutations
         self.threads = threads
         self.levels = ['monomer_intensity','complex_intensity','total_intensity']
         self.comparisons = self.contrast()
 
-        self.monomer_qm, self.monomer_protein_qm, self.complex_qm, self.complex_protein_qm = self.read()
+        self.monomer_qm, self.complex_qm = self.read()
 
         self.tests = self.compare()
-        self.edge_level, self.edge, self.node_level, self.node = self.integrate()
+        self.edge_level, self.edge, self.node_level, self.node, self.protein_level = self.integrate()
 
-    def viper(self, data_mx, subunit_set, comparison):
+    def viper(self, data_mx, subunit_set):
         from rpy2 import robjects
         from rpy2.rinterface import RRuntimeError
         from rpy2.robjects import r, pandas2ri, numpy2ri
@@ -372,136 +374,137 @@ class enrichment_test(quantitative_test):
         r_network = robjects.ListVector(zip(subunit_set.keys(), regulons))
 
         # Generate R matrix
-        condition_1_ix = [i for i, s in enumerate(data_mx.columns) if comparison[0] in s]
-        mx_nr_condition_1, mx_nc_condition_1 = data_mx.iloc[:,condition_1_ix].shape
-        mx_vec_condition_1 = robjects.FloatVector(data_mx.iloc[:,condition_1_ix].values.transpose().reshape((data_mx.iloc[:,condition_1_ix].size)))
-        r_mx_condition_1 = robjects.r.matrix(mx_vec_condition_1, nrow=mx_nr_condition_1, ncol=mx_nc_condition_1)
-        r_mx_condition_1.rownames = robjects.StrVector(data_mx.iloc[:,condition_1_ix].index)
+        mx_nr, mx_nc = data_mx.shape
+        mx_vec = robjects.FloatVector(data_mx.values.transpose().reshape((data_mx.size)))
+        r_mx = robjects.r.matrix(mx_vec, nrow=mx_nr, ncol=mx_nc)
+        r_mx.rownames = robjects.StrVector(data_mx.index)
+        r_mx.colnames = robjects.StrVector(data_mx.columns)
+        reference_ix = [i+1 for i, s in enumerate(r_mx.colnames) if self.control_condition in s] # R index
+        if len(reference_ix) < 3:
+            sys.exit("Error: Only %s control samples were specified. SECAT requires at least three controls." % (len(reference_ix)))
 
-        condition_2_ix = [i for i, s in enumerate(data_mx.columns) if comparison[1] in s]
-        mx_nr_condition_2, mx_nc_condition_2 = data_mx.iloc[:,condition_2_ix].shape
-        mx_vec_condition_2 = robjects.FloatVector(data_mx.iloc[:,condition_2_ix].values.transpose().reshape((data_mx.iloc[:,condition_2_ix].size)))
-        r_mx_condition_2 = robjects.r.matrix(mx_vec_condition_2, nrow=mx_nr_condition_2, ncol=mx_nc_condition_2)
-        r_mx_condition_2.rownames = robjects.StrVector(data_mx.iloc[:,condition_2_ix].index)
+        # Compute VIPER profile
+        vpres = vp.viper(r_mx, r_network, verbose = False, minsize = 1, cores = self.threads)
+        vpsig = vp.viperSignature(vpres, vpres.rx(True, robjects.IntVector(reference_ix)), per = self.enrichment_permutations).rx2('signature')
+        
+        # # msVIPER
+        # condition_1_ix = [i for i, s in enumerate(data_mx.columns) if comparison[0] in s]
+        # mx_nr_condition_1, mx_nc_condition_1 = data_mx.iloc[:,condition_1_ix].shape
+        # mx_vec_condition_1 = robjects.FloatVector(data_mx.iloc[:,condition_1_ix].values.transpose().reshape((data_mx.iloc[:,condition_1_ix].size)))
+        # r_mx_condition_1 = robjects.r.matrix(mx_vec_condition_1, nrow=mx_nr_condition_1, ncol=mx_nc_condition_1)
+        # r_mx_condition_1.rownames = robjects.StrVector(data_mx.iloc[:,condition_1_ix].index)
 
-        signature = vp.rowTtest(r_mx_condition_1, r_mx_condition_2)
+        # condition_2_ix = [i for i, s in enumerate(data_mx.columns) if comparison[1] in s]
+        # mx_nr_condition_2, mx_nc_condition_2 = data_mx.iloc[:,condition_2_ix].shape
+        # mx_vec_condition_2 = robjects.FloatVector(data_mx.iloc[:,condition_2_ix].values.transpose().reshape((data_mx.iloc[:,condition_2_ix].size)))
+        # r_mx_condition_2 = robjects.r.matrix(mx_vec_condition_2, nrow=mx_nr_condition_2, ncol=mx_nc_condition_2)
+        # r_mx_condition_2.rownames = robjects.StrVector(data_mx.iloc[:,condition_2_ix].index)
 
-        zscore = robjects.r('function(signature) (qnorm(signature$p.value/2, lower.tail = FALSE) * sign(signature$statistic))[, 1]')
+        # signature = vp.rowTtest(r_mx_condition_1, r_mx_condition_2)
 
-        signature = zscore(signature)
+        # zscore = robjects.r('function(signature) (qnorm(signature$p.value/2, lower.tail = FALSE) * sign(signature$statistic))[, 1]')
 
-        nullmodel = vp.ttestNull(r_mx_condition_1, r_mx_condition_2, per = self.enrichment_permutations)
+        # signature = zscore(signature)
 
-        vpres = vp.msviper(signature, r_network, nullmodel, verbose = False, minsize = 1, cores = self.threads)
+        # nullmodel = vp.ttestNull(r_mx_condition_1, r_mx_condition_2, per = self.enrichment_permutations)
 
-        report = robjects.r('function(vpres) data.frame("query_id"=names(vpres$es$nes), "nes"=vpres$es$nes, "pvalue"=vpres$es$p.value)')
+        # vpres = vp.msviper(signature, r_network, nullmodel, verbose = False, minsize = 1, cores = self.threads)
 
-        results = report(vpres)
+        # report = robjects.r('function(vpres) data.frame("query_id"=names(vpres$es$nes), "nes"=vpres$es$nes, "pvalue"=vpres$es$p.value)')
 
-        return(pandas2ri.ri2py(results))
+        # results = report(vpres)
+
+        pd_mx = pd.DataFrame(pandas2ri.ri2py(vpsig), columns = vpsig.colnames)
+        pd_mx['query_id'] = vpsig.rownames
+        return(pd_mx)
 
     def read(self):
         con = sqlite3.connect(self.outfile)
 
         monomer_qm = pd.read_sql('SELECT * FROM MONOMER_PEPTIDE_QM;' , con)
-        monomer_protein_qm = pd.read_sql('SELECT *, bait_id || "_" || prey_id AS query_id, "quantitative_" || condition_id || "_" || replicate_id AS quantification_id FROM MONOMER_QM;' , con)
         complex_qm = pd.read_sql('SELECT * FROM COMPLEX_PEPTIDE_QM;' , con)
-        complex_protein_qm = pd.read_sql('SELECT *, bait_id || "_" || prey_id AS query_id, "quantitative_" || condition_id || "_" || replicate_id AS quantification_id FROM COMPLEX_QM;' , con)
 
         con.close()
 
-        return monomer_qm, monomer_protein_qm, complex_qm, complex_protein_qm
+        return monomer_qm, complex_qm
 
     def compare(self):
         def collapse(x):
-            nes_max = x[x['nes']==np.max(x['nes'])].iloc[0]
-            nes_min = x[x['nes']==np.min(x['nes'])].iloc[0]
-            dnes = (nes_max['nes']*(1-nes_max['pvalue'])-nes_min['nes']*(1-nes_min['pvalue']))/(np.sum(np.array([(1-nes_max['pvalue']), (1-nes_min['pvalue'])])))
+            qm = x[[c for c in x.columns if c.startswith("viper_")]]
 
-            quantitative_averages = np.average(x[[c for c in x.columns if c.startswith("quantitative_")]], axis=0, weights=1-x['pvalue'])
-            quantitative_averages = pd.Series(quantitative_averages, index = [c for c in x.columns if c.startswith("quantitative_")])
+            result = pd.concat([pd.Series({'nes': np.mean(np.abs(x['nes'])), 'dnes': np.diff(x['nes'])[0], 'pvalue': EmpiricalBrownsMethod(qm.values, x['pvalue'].values)}), qm.mean(axis=0)])
 
-            return pd.concat([pd.Series({'pvalue': EmpiricalBrownsMethod(x[[c for c in x.columns if c.startswith("quantitative_")]].values, x['pvalue'].values), 'nes': np.average(x['nes'], weights=1-x['pvalue']), 'dnes': dnes}), quantitative_averages])
+            return(result)
 
         dfs = []
         for level in self.levels:
-            for comparison in self.comparisons:
-                for state in [self.monomer_qm, self.complex_qm]:
-                    if level in state.columns:
-                        # Generate matrix
-                        dat = state[state[level] > 0].copy()
+            for state in [self.monomer_qm, self.complex_qm]:
+                if level in state.columns:
+                    # Generate matrix
+                    dat = state[state[level] > 0].copy()
+                    dat['query_id'] = dat['bait_id'] + '_' + dat['prey_id']
+                    dat['query_peptide_id'] = dat['bait_id'] + '_' + dat['prey_id'] + '_' + dat['peptide_id']
+                    dat['quantification_id'] = 'viper_' + dat['condition_id'] + '_' + dat['replicate_id']
+                    dat['run_id'] = dat['condition_id'] + '_' + dat['replicate_id']
+                    data_mx = dat.pivot_table(index='query_peptide_id', columns='quantification_id', values=level, fill_value=0)
 
-                        dat['query_id'] = dat['bait_id'] + '_' + dat['prey_id']
-                        dat['query_peptide_id'] = dat['bait_id'] + '_' + dat['prey_id'] + '_' + dat['peptide_id']
-                        dat['quantification_id'] = 'quantitative_' + dat['condition_id'] + '_' + dat['replicate_id']
-                        dat['run_id'] = dat['condition_id'] + '_' + dat['replicate_id']
-                        data_mx = dat.pivot_table(index='query_peptide_id', columns='run_id', values=level, fill_value=0)
+                    qm_ids = dat[['quantification_id','condition_id','replicate_id']].drop_duplicates()
 
-                        # Generate class index
-                        class_index = []
-                        for idx in data_mx.columns:
-                            if comparison[0] in idx:
-                                class_index.append(comparison[0])
-                            elif comparison[1] in idx:
-                                class_index.append(comparison[1])
+                    # Generate subunit set
+                    if level == "complex_intensity":
+                        # We analyse baits and preys separately
+                        query_set = dat[['query_id','is_bait','query_peptide_id']].copy()
+                        query_set['query_id'] = query_set['query_id'] + "+" + query_set['is_bait'].astype(int).astype(str)
+                    else:
+                        query_set = dat[['query_id','query_peptide_id']].copy()
+                    subunit_set = query_set.groupby(['query_id'])['query_peptide_id'].apply(lambda x: x.unique().tolist()).to_dict()
 
-                        # Generate subunit set
-                        if level == "complex_intensity":
-                            # We analyse baits and preys separately
-                            query_set = dat[['query_id','is_bait','query_peptide_id']]
-                            query_set.loc[query_set['is_bait']==True,'query_id'] += "+1"
-                            query_set.loc[query_set['is_bait']==False,'query_id'] += "+0"
-                        else:
-                            query_set = dat[['query_id','query_peptide_id']]
-                        subunit_set = query_set.groupby(['query_id'])['query_peptide_id'].apply(lambda x: x.unique().tolist()).to_dict()
+                    # Run VIPER
+                    results = self.viper(data_mx, subunit_set)
 
-                        # Run VIPER
-                        results = self.viper(data_mx, subunit_set, comparison)
-                        if level == "complex_intensity":
-                            # Revert data structure for baits and preys
-                            results[['query_id','is_bait']] = results['query_id'].str.split("+", expand=True)
-                            results['is_bait'] = results['is_bait'].astype('int')
+                    if level == "complex_intensity":
+                        # Revert data structure for baits and preys
+                        results[['query_id','is_bait']] = results['query_id'].str.split("+", expand=True)
+                        results['is_bait'] = results['is_bait'].astype('int')
+                    else:
+                        results['is_bait'] = 1
+                    results['level'] = level
+
+                    for comparison in self.comparisons:
                         results['condition_1'] = comparison[0]
                         results['condition_2'] = comparison[1]
-                        results['level'] = level
+
+                        # Conduct statistical test
+                        results_pvalue = results.groupby(['query_id','is_bait']).apply(lambda x: pd.Series({"nes": np.mean(x[qm_ids[qm_ids['condition_id']==comparison[0]]['quantification_id'].values].values[0]), "dnes": np.nan, "pvalue": ttest_ind(x[qm_ids[qm_ids['condition_id']==comparison[0]]['quantification_id'].values].values[0], x[qm_ids[qm_ids['condition_id']==comparison[1]]['quantification_id'].values].values[0], equal_var=False)[1]})).reset_index()
 
                         # Append meta information
-                        results = pd.merge(results, dat[['query_id','bait_id','prey_id']].drop_duplicates(), on='query_id')
+                        results = pd.merge(pd.merge(results, results_pvalue, on=["query_id","is_bait"]), dat[['query_id','bait_id','prey_id']].drop_duplicates(), on='query_id')
 
                         # Integrate complex data
                         if level == "complex_intensity":
-                            quant_mx_bait = self.complex_protein_qm.pivot_table(index='query_id', columns='quantification_id', values='bait_intensity', fill_value=0)
-                            quant_mx_bait['is_bait'] = True
-                            quant_mx_prey = self.complex_protein_qm.pivot_table(index='query_id', columns='quantification_id', values='prey_intensity', fill_value=0)
-                            quant_mx_prey['is_bait'] = False
-                            quant_mx_complex = pd.concat([quant_mx_bait, quant_mx_prey])
-                            results = pd.merge(results, quant_mx_complex, on=['query_id','is_bait'])
-
                             results = results.groupby(['condition_1', 'condition_2','level','query_id','bait_id','prey_id']).apply(collapse).reset_index()
-                        # Append quantitative information for monomer and total abundance data
-                        elif level in (self.monomer_protein_qm.columns):
-                            quant_mx = self.monomer_protein_qm.pivot_table(index='query_id', columns='quantification_id', values=level, fill_value=0)
-                            results = pd.merge(results, quant_mx, on='query_id')
-                            results['dnes'] = np.nan
 
-                        dfs.append(results[['condition_1','condition_2','level','bait_id','prey_id','nes','dnes','pvalue']+[c for c in results.columns if c.startswith("quantitative_")]])
+                        dfs.append(results[['condition_1','condition_2','level','bait_id','prey_id','nes','dnes','pvalue']+[c for c in results.columns if c.startswith("viper_")]])
 
         return pd.concat(dfs, ignore_index=True, sort=True).sort_values(by='pvalue', ascending=True, na_position='last')
 
     def integrate(self):
         def collapse(x):
             if x.shape[0] > 1:
-                return pd.Series({'pvalue': EmpiricalBrownsMethod(x[[c for c in x.columns if c.startswith("quantitative_")]].values, x['pvalue'].values), 'nes': np.mean(np.abs(x['nes'])), 'dnes': np.mean(np.abs(x['dnes']))})
+                result = pd.Series({'nes': np.average(np.abs(x['nes'].values), weights=1-x['pvalue'].values), 'dnes': np.average(np.abs(x['dnes'].values), weights=1-x['pvalue'].values), 'pvalue': EmpiricalBrownsMethod(x[[c for c in x.columns if c.startswith("viper_")]].values, x['pvalue'].values)})
             elif x.shape[0] == 1:
-                return pd.Series({'pvalue': x['pvalue'].values[0], 'nes': np.mean(np.abs(x['nes'])), 'dnes': np.mean(np.abs(x['dnes']))})
+                result = pd.Series({'nes': x['nes'].values[0], 'dnes': x['dnes'].values[0], 'pvalue': x['pvalue'].values[0]})
+            return(result)
 
         def mtcorrect(x):
-                x['pvalue_adjusted'] = multipletests(pvals=x['pvalue'].values, method="fdr_bh")[1]
-                return(x)
+            x['pvalue_adjusted'] = multipletests(pvals=x['pvalue'].values, method="fdr_bh")[1]
+            return(x)
 
         df_edge_level = self.tests[self.tests['bait_id'] != self.tests['prey_id']]
         df_edge_level = df_edge_level.groupby(['condition_1', 'condition_2','level']).apply(mtcorrect).reset_index()
         df_edge = df_edge_level.sort_values('pvalue').groupby(['condition_1','condition_2','bait_id','prey_id']).head(1).reset_index()
+        df_protein = self.tests[self.tests['bait_id'] == self.tests['prey_id']]
+        df_protein = df_protein.groupby(['condition_1', 'condition_2','level']).apply(mtcorrect).reset_index()
 
         # Append reverse interactions; the full list contains monomers only once
         df_edge_level_rev = self.tests.rename(index=str, columns={"bait_id": "prey_id", "prey_id": "bait_id"})
@@ -523,4 +526,5 @@ class enrichment_test(quantitative_test):
             click.echo("%s (at FDR < 0.05)" % (df_node_level[(df_node_level['level'] == level) & (df_node_level['pvalue_adjusted'] < 0.05)][['bait_id']].drop_duplicates().shape[0]))
             click.echo("%s (at FDR < 0.1)" % (df_node_level[(df_node_level['level'] == level) & (df_node_level['pvalue_adjusted'] < 0.1)][['bait_id']].drop_duplicates().shape[0]))
 
-        return df_edge_level[['condition_1','condition_2','level','bait_id','prey_id','nes','dnes','pvalue','pvalue_adjusted']], df_edge[['condition_1','condition_2','level','bait_id','prey_id','nes','dnes','pvalue','pvalue_adjusted']], df_node_level[['condition_1','condition_2','level','bait_id','nes','dnes','pvalue','pvalue_adjusted']], df_node[['condition_1','condition_2','level','bait_id','nes','dnes','pvalue','pvalue_adjusted']]
+        return df_edge_level[['condition_1','condition_2','level','bait_id','prey_id','nes','dnes','pvalue','pvalue_adjusted']+[c for c in df_edge_level.columns if c.startswith("viper_")]], df_edge[['condition_1','condition_2','level','bait_id','prey_id','nes','dnes','pvalue','pvalue_adjusted']], df_node_level[['condition_1','condition_2','level','bait_id','nes','dnes','pvalue','pvalue_adjusted']], df_node[['condition_1','condition_2','level','bait_id','nes','dnes','pvalue','pvalue_adjusted']], df_protein[['condition_1','condition_2','level','bait_id','nes','pvalue','pvalue_adjusted'] + [c for c in df_protein.columns if c.startswith("viper_")]]
+

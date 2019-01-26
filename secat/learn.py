@@ -128,7 +128,7 @@ class pyprophet:
         (result, scorer, weights) = PyProphet(self.classifier, self.xgb_hyperparams, self.xgb_params, self.xgb_params_space, self.xeval_fraction, self.xeval_num_iter, self.ss_initial_fdr, self.ss_iteration_fdr, self.ss_num_iter, self.group_id, self.parametric, self.pfdr, self.pi0_lambda, self.pi0_method, self.pi0_smooth_df, self.pi0_smooth_log_pi0, self.lfdr_truncate, self.lfdr_monotone, self.lfdr_transformation, self.lfdr_adj, self.lfdr_eps, False, self.threads, self.test).learn_and_apply(learning_data)
 
         self.plot(result, scorer.pi0, "learning")
-        self.plot_scores(result.scored_tables, "learning")
+        # self.plot_scores(result.scored_tables, "learning")
 
         return weights
 
@@ -165,7 +165,7 @@ class pyprophet:
         df.columns = ['condition_id','replicate_id','bait_id','prey_id','decoy','confidence_bin','score','pvalue','qvalue','pep']
 
         self.plot(result, scorer.pi0, "detecting_" + str(detecting_data['confidence_bin'].values[0]))
-        self.plot_scores(result.scored_tables, "detecting_" + str(detecting_data['confidence_bin'].values[0]))
+        # self.plot_scores(result.scored_tables, "detecting_" + str(detecting_data['confidence_bin'].values[0]))
 
         return df
 

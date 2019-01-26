@@ -53,19 +53,15 @@ class plot_features:
 
         self.monomer_qmeta = self.read_monomer_qmeta()
 
-
-        if self.level is 'interaction' and self.id is not None:
-            self.plot_interaction(id)
-
-        if self.level is 'bait' and self.id is not None:
-            self.plot_bait(id, 0)
-
-        if self.level is 'interaction' and self.id is None and self.max_qvalue is not None:
+        if self.level == 'interaction' and self.id is not None:
+            self.plot_interaction(self.id)
+        elif self.level == 'bait' and self.id is not None:
+            self.plot_bait(self.id, 0)
+        elif self.level == 'interaction' and self.id is None and self.max_qvalue is not None:
             interaction_ids, result_ids, decoys = self.read_interactions()
             for interaction_id, result_id, decoy in zip(interaction_ids, result_ids, decoys):
                 self.plot_interaction(interaction_id, result_id, decoy)
-
-        if self.level is 'bait' and self.id is None and self.max_qvalue is not None:
+        elif self.level == 'bait' and self.id is None and self.max_qvalue is not None:
             bait_ids, result_ids = self.read_baits()
             for bait_id, result_id in zip(bait_ids, result_ids):
                 self.plot_bait(bait_id, result_id)
