@@ -27,12 +27,11 @@ def check_sqlite_table(con, table):
     return(table_present)
 
 class plot_features:
-    def __init__(self, infile, level, id, max_qvalue, min_log2fx, min_nes, min_dnes, mode, combined, peptide_rank):
+    def __init__(self, infile, level, id, max_qvalue, min_nes, min_dnes, mode, combined, peptide_rank):
         self.infile = infile
         self.level = level
         self.id = id
         self.max_qvalue = max_qvalue
-        self.min_log2fx = min_log2fx
         self.min_nes = min_nes
         self.min_dnes = min_dnes
         self.mode = mode
@@ -167,8 +166,6 @@ class plot_features:
         else:
             table = 'EDGE_LEVEL'
 
-        if check_sqlite_table(con, 'EDGE') and self.mode == 'quantitative':
-            df = pd.read_sql('SELECT DISTINCT bait_id || "_" || prey_id AS interaction_id, 0 as decoy FROM %s WHERE pvalue_adjusted < %s AND log2fx >= %s ORDER BY pvalue ASC;' % (table, self.max_qvalue, self.min_log2fx), con)
         if check_sqlite_table(con, 'EDGE') and self.mode == 'enrichment':
             df = pd.read_sql('SELECT DISTINCT bait_id || "_" || prey_id AS interaction_id, 0 as decoy FROM %s WHERE pvalue_adjusted < %s AND abs(nes) >= %s AND abs(dnes) >= %s ORDER BY pvalue ASC;' % (table, self.max_qvalue, self.min_nes, self.min_dnes), con)
         elif self.mode == 'detection_integrated':
@@ -232,8 +229,6 @@ class plot_features:
         else:
             table = 'NODE_LEVEL'
 
-        if self.mode == 'quantitative':
-            df = pd.read_sql('SELECT DISTINCT bait_id, min(pvalue) as pvalue FROM %s WHERE pvalue_adjusted < %s AND log2fx >= %s GROUP BY bait_id;' % (table, self.max_qvalue, self.min_log2fx), con)
         if self.mode == 'enrichment':
             df = pd.read_sql('SELECT DISTINCT bait_id, min(pvalue) as pvalue FROM %s WHERE pvalue_adjusted < %s AND ABS(nes) >= %s AND ABS(dnes) >= %s GROUP BY bait_id;' % (table, self.max_qvalue, self.min_nes, self.min_dnes), con)
 

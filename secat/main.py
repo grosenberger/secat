@@ -10,7 +10,7 @@ import numpy as np
 from .preprocess import uniprot, net, sec, quantification, meta, query
 from .score import monomer, scoring
 from .learn import pyprophet, combine
-from .quantify import quantitative_matrix, quantitative_test, enrichment_test
+from .quantify import quantitative_matrix, enrichment_test
 from .plot import plot_features, check_sqlite_table
 
 from pyprophet.data_handling import transform_pi0_lambda
@@ -246,10 +246,9 @@ def learn(infile, outfile, apply_model, minimum_monomer_delta, minimum_mass_rati
 @click.option('--maximum_interaction_qvalue', default=0.05, show_default=True, type=float, help='Maximum q-value to consider interactions for quantification.')
 @click.option('--minimum_peptides', 'minimum_peptides', default=1, show_default=True, type=int, help='Minimum number of peptides required to quantify an interaction.')
 @click.option('--maximum_peptides', 'maximum_peptides', default=30, show_default=True, type=int, help='Maximum number of peptides used to quantify an interaction.')
-@click.option('--integration', default='enrichment', show_default=True, type=click.Choice(['quantitative','enrichment']), help='Either "quantitative" or "enrichment"; the method for statistical testing of the hypotheses.')
 @click.option('--enrichment_permutations', 'enrichment_permutations', default=1000, show_default=True, type=int, help='Number of permutations for enrichment testing.')
 @click.option('--threads', 'threads', default=1, show_default=True, type=int, help='Number of threads used for parallel processing of enrichment tests. -1 means all available CPUs.')
-def quantify(infile, outfile, control_condition, maximum_interaction_qvalue, minimum_peptides, maximum_peptides, integration, enrichment_permutations, threads):
+def quantify(infile, outfile, control_condition, maximum_interaction_qvalue, minimum_peptides, maximum_peptides, enrichment_permutations, threads):
     """
     Quantify protein and interaction features in SEC data.
     """
@@ -266,26 +265,19 @@ def quantify(infile, outfile, control_condition, maximum_interaction_qvalue, min
     qm = quantitative_matrix(outfile, maximum_interaction_qvalue, minimum_peptides, maximum_peptides)
 
     con = sqlite3.connect(outfile)
-    qm.monomer_peptide.to_sql('MONOMER_PEPTIDE_QM', con, index=False, if_exists='replace')
-    qm.monomer_protein.to_sql('MONOMER_QM', con, index=False, if_exists='replace')
-    qm.complex_peptide.to_sql('COMPLEX_PEPTIDE_QM', con, index=False, if_exists='replace')
-    qm.complex_protein.to_sql('COMPLEX_QM', con, index=False, if_exists='replace')
+    qm.monomer_peptide.to_sql('MONOMER_QM', con, index=False, if_exists='replace')
+    qm.complex_peptide.to_sql('COMPLEX_QM', con, index=False, if_exists='replace')
     con.close()
 
-    if integration == 'quantitative':
-        click.echo("Info: Assess differential features by quantitative test.")
-        qt = quantitative_test(outfile, control_condition)
-
-    elif integration == 'enrichment':
-        click.echo("Info: Assess differential features by enrichment test.")
-        qt = enrichment_test(outfile, control_condition, enrichment_permutations, threads)
+    click.echo("Info: Assess differential features by enrichment test.")
+    et = enrichment_test(outfile, control_condition, enrichment_permutations, threads)
 
     con = sqlite3.connect(outfile)
-    qt.edge.to_sql('EDGE', con, index=False, if_exists='replace')
-    qt.edge_level.to_sql('EDGE_LEVEL', con, index=False, if_exists='replace')
-    qt.node.to_sql('NODE', con, index=False, if_exists='replace')
-    qt.node_level.to_sql('NODE_LEVEL', con, index=False, if_exists='replace')
-    qt.protein_level.to_sql('PROTEIN_LEVEL', con, index=False, if_exists='replace')
+    et.edge.to_sql('EDGE', con, index=False, if_exists='replace')
+    et.edge_level.to_sql('EDGE_LEVEL', con, index=False, if_exists='replace')
+    et.node.to_sql('NODE', con, index=False, if_exists='replace')
+    et.node_level.to_sql('NODE_LEVEL', con, index=False, if_exists='replace')
+    et.protein_level.to_sql('PROTEIN_LEVEL', con, index=False, if_exists='replace')
 
     con.close()
 
@@ -339,15 +331,14 @@ def export(infile):
 @click.option('--level', default='bait', show_default=True, type=click.Choice(['bait', 'interaction']), help='Plot either all interactions of bait proteins or individual interactions')
 @click.option('--id', required=False, type=str, help='Plot specific UniProt bait_id (Q10000) or interaction_id (Q10000_P10000)')
 @click.option('--max_qvalue', default=0.01, show_default=True, type=float, help='Maximum q-value to plot baits or interactions.')
-@click.option('--min_log2fx', default=2.0, show_default=True, type=float, help='Minimum log2fx to plot baits or interactions.')
 @click.option('--min_nes', default=1.0, show_default=True, type=float, help='Minimum abs(nes) to plot baits or interactions.')
 @click.option('--min_dnes', default=0, show_default=True, type=float, help='Minimum dnes to plot baits or interactions.')
-@click.option('--mode', default='enrichment', show_default=True, type=click.Choice(['quantitative', 'enrichment', 'detection_integrated', 'detection_separate']), help='Select mode to order interaction plots by. Note: detection_separate will also report decoys')
+@click.option('--mode', default='enrichment', show_default=True, type=click.Choice(['enrichment', 'detection_integrated', 'detection_separate']), help='Select mode to order interaction plots by. Note: detection_separate will also report decoys')
 @click.option('--combined/--no-combined', default=False, show_default=True, help='Select interactions and baits according to combined q-values.')
 @click.option('--peptide_rank', default=6, show_default=True, type=int, help='Number of most intense peptides to plot.')
-def plot(infile, level, id, max_qvalue, min_log2fx, min_nes, min_dnes, mode, combined, peptide_rank):
+def plot(infile, level, id, max_qvalue, min_nes, min_dnes, mode, combined, peptide_rank):
     """
     Plot SECAT results
     """
 
-    pf = plot_features(infile, level, id, max_qvalue, min_log2fx, min_nes, min_dnes, mode, combined, peptide_rank)
+    pf = plot_features(infile, level, id, max_qvalue, min_nes, min_dnes, mode, combined, peptide_rank)

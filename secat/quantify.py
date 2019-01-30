@@ -20,9 +20,8 @@ class quantitative_matrix:
         self.maximum_peptides = maximum_peptides
 
         self.interactions, self.detections, self.chromatograms, self.peaks = self.read()
-        self.monomer_peptide, self.monomer_protein = self.quantify_monomers()
-        self.complex_peptide, self.complex_protein = self.quantify_complexes()
-        self.complex_peptide, self.complex_protein = self.detect_complexes()
+        self.monomer_peptide = self.quantify_monomers()
+        self.complex_peptide = self.quantify_complexes()
 
     def read(self):
         con = sqlite3.connect(self.outfile)
@@ -74,12 +73,6 @@ class quantitative_matrix:
 
             return peptide
 
-        def protein_summarize(df):
-            # Aggregate to protein level
-            protein = pd.DataFrame({'monomer_intensity': [np.mean(np.log2(df['peptide_intensity'].values+1))], 'fractional_monomer_intensity': [np.mean(df['peptide_intensity'].values / df['total_peptide_intensity'].values)], 'total_intensity': [np.mean(np.log2(df['total_peptide_intensity'].values+1))]})
-
-            return protein
-
         # Quantify monomers
         monomers = self.chromatograms.copy()
         monomers['bait_id'] = monomers['protein_id']
@@ -87,9 +80,8 @@ class quantitative_matrix:
 
         monomers_sec = monomers.groupby(['condition_id','replicate_id','bait_id','prey_id']).apply(sec_summarize).reset_index(level=['condition_id','replicate_id','bait_id','prey_id'])
         monomers_peptides = peptide_summarize(monomers_sec)
-        monomers_proteins = monomers_sec.groupby(['condition_id','replicate_id','bait_id','prey_id']).apply(protein_summarize).reset_index(level=['condition_id','replicate_id','bait_id','prey_id'])
 
-        return monomers_peptides, monomers_proteins
+        return monomers_peptides
 
     def quantify_complexes(self):
         def sec_summarize(df):
@@ -131,18 +123,6 @@ class quantitative_matrix:
 
             return peptide
 
-        def protein_summarize(df):
-            # Aggregate to protein level
-            protein = pd.DataFrame({'bait_intensity': [np.mean(np.log2(df[df['is_bait']]['peptide_intensity'].values+1))], 'fractional_bait_intensity': [np.mean(df[df['is_bait']]['peptide_intensity'].values / df[df['is_bait']]['total_peptide_intensity'].values)], 'prey_intensity': [np.mean(np.log2(df[~df['is_bait']]['peptide_intensity'].values+1))], 'fractional_prey_intensity': [np.mean(df[~df['is_bait']]['peptide_intensity'].values) / np.mean(df[~df['is_bait']]['total_peptide_intensity'].values)]})
-
-            protein['complex_intensity'] = np.mean([protein['prey_intensity'], protein['bait_intensity']])
-            protein['fractional_complex_intensity'] = np.mean([protein['fractional_prey_intensity'], protein['fractional_bait_intensity']])
-
-            protein['complex_ratio'] = protein['prey_intensity'] / protein['bait_intensity']
-            protein['fractional_complex_ratio'] = protein['fractional_prey_intensity'] / protein['fractional_bait_intensity']
-
-            return protein
-
         # Restrict chromatographic data to selected peaks only
         chromatograms = pd.merge(self.chromatograms, self.peaks, on=['condition_id','replicate_id','protein_id','sec_id'])
 
@@ -159,25 +139,15 @@ class quantitative_matrix:
 
         complexes_peptides = peptide_summarize(complexes_sec)
 
-        complexes_proteins = complexes_sec.groupby(['condition_id','replicate_id','bait_id','prey_id']).apply(protein_summarize).reset_index(level=['condition_id','replicate_id','bait_id','prey_id'])
+        return complexes_peptides
 
-        return complexes_peptides, complexes_proteins
-
-    def detect_complexes(self):
-        interactions = self.detections[['bait_id','prey_id']].drop_duplicates().reset_index()
-        interactions['id'] = 1
-        experimental_design = self.detections[['condition_id','replicate_id']].drop_duplicates().reset_index()
-        experimental_design['id'] = 1
-
-        detected_complexes = pd.merge(pd.merge(interactions, experimental_design, on='id')[['condition_id','replicate_id','bait_id','prey_id']], self.detections, on=['condition_id','replicate_id','bait_id','prey_id'], how='left').fillna(0)
-
-        return pd.merge(detected_complexes, self.complex_peptide, on=['condition_id','replicate_id','bait_id','prey_id'], how='left'), pd.merge(detected_complexes, self.complex_protein, on=['condition_id','replicate_id','bait_id','prey_id'], how='left')
-
-class quantitative_test:
-    def __init__(self, outfile, control_condition):
+class enrichment_test:
+    def __init__(self, outfile, control_condition, enrichment_permutations, threads):
         self.outfile = outfile
         self.control_condition = control_condition
-        self.levels = ['score','total_intensity','monomer_intensity','fractional_monomer_intensity','complex_intensity','fractional_complex_intensity','complex_ratio','fractional_complex_ratio']
+        self.enrichment_permutations = enrichment_permutations
+        self.threads = threads
+        self.levels = ['monomer_intensity','complex_intensity','total_intensity']
         self.comparisons = self.contrast()
 
         self.monomer_qm, self.complex_qm = self.read()
@@ -204,144 +174,6 @@ class quantitative_test:
             comparisons = list(itertools.combinations(conditions, 2))
 
         return comparisons
-
-    def read(self):
-        con = sqlite3.connect(self.outfile)
-
-        monomer_qm = pd.read_sql('SELECT * FROM MONOMER_QM;' , con)
-        complex_qm = pd.read_sql('SELECT * FROM COMPLEX_QM;' , con)
-
-        con.close()
-
-        return monomer_qm, complex_qm
-
-    def compare(self):
-        dfs = []
-        for level in self.levels:
-            for comparison in self.comparisons:
-                for state in [self.monomer_qm, self.complex_qm]:
-                    if level in state.columns:
-                        df = self.test(state[['condition_id','replicate_id','bait_id','prey_id',level]], level, comparison[0], comparison[1])
-
-                        # Drop missing values from tests
-                        df = df.dropna(subset=['pvalue'])
-
-                        # Multiple testing correction via q-value
-                        df['pvalue_adjusted'] = multipletests(pvals=df['pvalue'].values, method="fdr_bh")[1]
-                        dfs.append(df)
-
-        return pd.concat(dfs, sort=True).sort_values(by='pvalue', ascending=True, na_position='last')
-
-    def test(self, df, level, condition_1, condition_2):
-        def stat(x, experimental_design):
-            x.set_index('condition_id')
-            if condition_1 in x['condition_id'].values and condition_2 in x['condition_id'].values:
-                if x['condition_id'].value_counts()[condition_1] > 0 and x['condition_id'].value_counts()[condition_2] > 0:
-                    qm = pd.merge(experimental_design, x, how='left')
-
-                    qmt = qm.transpose()
-                    qmt.columns = "quantitative" + "_" + experimental_design["condition_id"] + "_" + experimental_design["replicate_id"]
-                    qv_condition_1 = qm[qm['condition_id'] == condition_1][level].dropna().values
-                    qv_condition_2 = qm[qm['condition_id'] == condition_2][level].dropna().values
-                    if len(qv_condition_1) > 0 and len(qv_condition_2) > 0: # both conditions need at least one quantitative value
-                        if (np.var(qm[level].dropna().values) > 1e-10): # all values are too similar
-                            if level in ['score']:
-                                qmt.loc[level,'pvalue'] = mannwhitneyu(qv_condition_1, qv_condition_2)[1]
-                            else:
-                                qmt.loc[level,'pvalue'] = ttest_ind(qv_condition_1, qv_condition_2, equal_var=False)[1]
-                            if level in ['total_intensity','monomer_intensity','complex_intensity']:
-                                qmt.loc[level,'log2fx'] = np.log2(np.mean(np.exp2(qv_condition_2)) / np.mean(np.exp2(qv_condition_1)))
-                            elif level in ['fractional_monomer_intensity','fractional_complex_intensity','complex_ratio','fractional_complex_ratio']:
-                                qmt.loc[level,'log2fx'] = np.log2(np.mean(qv_condition_2) / np.mean(qv_condition_1))
-                            else:
-                                qmt.loc[level,'log2fx'] = np.nan
-                        else:
-                            qmt.loc[level,'pvalue'] = 1
-                            qmt.loc[level,'log2fx'] = 0
-                    else:
-                        qmt.loc[level,'pvalue'] = np.nan
-                        qmt.loc[level,'log2fx'] = np.nan
-
-                    return qmt.loc[level]
-
-        def replace_inf(x):
-            x.loc[np.isposinf(x['log2fx']),'log2fx'] = x[np.isfinite(x['log2fx'])]['log2fx'].max()
-            x.loc[np.isneginf(x['log2fx']),'log2fx'] = x[np.isfinite(x['log2fx'])]['log2fx'].min()
-            return x
-
-        # compute number of replicates
-        experimental_design = df[['condition_id','replicate_id']].drop_duplicates()
-
-        df_test = df.groupby(['bait_id','prey_id']).apply(lambda x: stat(x, experimental_design)).reset_index()
-        df_test['condition_1'] = condition_1
-        df_test['condition_2'] = condition_2
-        df_test['level'] = level
-
-        # Replace -inf and inf log2fx values with numerical minimum and maximum
-        df_test = df_test.groupby(['level']).apply(replace_inf)
-
-        return df_test[['condition_1','condition_2','level','bait_id','prey_id']+[c for c in df_test.columns if c.startswith("quantitative_")]+['pvalue','log2fx']]
-
-    def integrate(self):
-        def collapse(x):
-            if x.shape[0] > 1:
-                return pd.Series({'pvalue': EmpiricalBrownsMethod(x[[c for c in x.columns if c.startswith("quantitative_")]].values, x['pvalue'].values), 'log2fx': np.mean(np.abs(x['log2fx']))})
-            elif x.shape[0] == 1:
-                return pd.Series({'pvalue': x['pvalue'].values[0], 'log2fx': np.mean(np.abs(x['log2fx']))})
-
-        def mtcorrect(x):
-                x['pvalue_adjusted'] = multipletests(pvals=x['pvalue'].values, method="fdr_bh")[1]
-                return(x)
-
-        df_edge_level = self.tests[self.tests['bait_id'] != self.tests['prey_id']]
-        df_edge = df_edge_level.sort_values('pvalue').groupby(['condition_1','condition_2','bait_id','prey_id']).head(1).reset_index()
-        df_protein = self.tests[self.tests['bait_id'] == self.tests['prey_id']]
-
-        # Append reverse interactions; the full list contains monomers only once
-        df_edge_level_rev = self.tests.rename(index=str, columns={"bait_id": "prey_id", "prey_id": "bait_id"})
-        df_edge_level_rev.loc[df_edge_level_rev['level'] == 'bait_intensity', 'level'] = 'prey_intensity_new'
-        df_edge_level_rev.loc[df_edge_level_rev['level'] == 'prey_intensity', 'level'] = 'bait_intensity_new'
-        df_edge_level_rev.loc[df_edge_level_rev['level'] == 'fractional_bait_intensity', 'level'] = 'fractional_prey_intensity_new'
-        df_edge_level_rev.loc[df_edge_level_rev['level'] == 'fractional_prey_intensity', 'level'] = 'fractional_bait_intensity_new'
-
-        df_edge_level_rev.loc[df_edge_level_rev['level'] == 'prey_intensity_new', 'level'] = 'prey_intensity'
-        df_edge_level_rev.loc[df_edge_level_rev['level'] == 'bait_intensity_new', 'level'] = 'bait_intensity'
-        df_edge_level_rev.loc[df_edge_level_rev['level'] == 'fractional_prey_intensity_new', 'level'] = 'fractional_prey_intensity'
-        df_edge_level_rev.loc[df_edge_level_rev['level'] == 'fractional_bait_intensity_new', 'level'] = 'fractional_bait_intensity'
-
-        df_edge_full = pd.concat([self.tests, df_edge_level_rev], sort=False)
-
-        df_node_level = df_edge_full.groupby(['condition_1', 'condition_2','level','bait_id']).apply(collapse).reset_index()
-        df_node_level = df_node_level.groupby(['condition_1', 'condition_2','level']).apply(mtcorrect).reset_index()
-
-        df_node = df_node_level.sort_values('pvalue_adjusted').groupby(['condition_1','condition_2','bait_id']).head(1).reset_index()
-
-        click.echo("Info: Total dysregulated proteins detected:")
-        click.echo("%s (at FDR < 0.01)" % (df_node[df_node['pvalue_adjusted'] < 0.01][['bait_id']].drop_duplicates().shape[0]))
-        click.echo("%s (at FDR < 0.05)" % (df_node[df_node['pvalue_adjusted'] < 0.05][['bait_id']].drop_duplicates().shape[0]))
-        click.echo("%s (at FDR < 0.1)" % (df_node[df_node['pvalue_adjusted'] < 0.1][['bait_id']].drop_duplicates().shape[0]))
-
-        for level in self.levels:
-            click.echo("Info: Dysregulated (%s-mode) proteins detected:" % (level))
-            click.echo("%s (at FDR < 0.01)" % (df_node_level[(df_node_level['level'] == level) & (df_node_level['pvalue_adjusted'] < 0.01)][['bait_id']].drop_duplicates().shape[0]))
-            click.echo("%s (at FDR < 0.05)" % (df_node_level[(df_node_level['level'] == level) & (df_node_level['pvalue_adjusted'] < 0.05)][['bait_id']].drop_duplicates().shape[0]))
-            click.echo("%s (at FDR < 0.1)" % (df_node_level[(df_node_level['level'] == level) & (df_node_level['pvalue_adjusted'] < 0.1)][['bait_id']].drop_duplicates().shape[0]))
-
-        return df_edge_level[['condition_1','condition_2','level','bait_id','prey_id','log2fx','pvalue','pvalue_adjusted'] + [c for c in df_edge_level.columns if c.startswith("quantitative_")]], df_edge[['condition_1','condition_2','level','bait_id','prey_id','log2fx','pvalue','pvalue_adjusted']], df_node_level[['condition_1','condition_2','level','bait_id','log2fx','pvalue','pvalue_adjusted']], df_node[['condition_1','condition_2','level','bait_id','log2fx','pvalue','pvalue_adjusted']], df_protein[['condition_1','condition_2','level','bait_id','log2fx','pvalue','pvalue_adjusted'] + [c for c in df_protein.columns if c.startswith("quantitative_")]]
-
-class enrichment_test(quantitative_test):
-    def __init__(self, outfile, control_condition, enrichment_permutations, threads):
-        self.outfile = outfile
-        self.control_condition = control_condition
-        self.enrichment_permutations = enrichment_permutations
-        self.threads = threads
-        self.levels = ['monomer_intensity','complex_intensity','total_intensity']
-        self.comparisons = self.contrast()
-
-        self.monomer_qm, self.complex_qm = self.read()
-
-        self.tests = self.compare()
-        self.edge_level, self.edge, self.node_level, self.node, self.protein_level = self.integrate()
 
     def viper(self, data_mx, subunit_set):
         from rpy2 import robjects
@@ -421,8 +253,8 @@ class enrichment_test(quantitative_test):
     def read(self):
         con = sqlite3.connect(self.outfile)
 
-        monomer_qm = pd.read_sql('SELECT * FROM MONOMER_PEPTIDE_QM;' , con)
-        complex_qm = pd.read_sql('SELECT * FROM COMPLEX_PEPTIDE_QM;' , con)
+        monomer_qm = pd.read_sql('SELECT * FROM MONOMER_QM;' , con)
+        complex_qm = pd.read_sql('SELECT * FROM COMPLEX_QM;' , con)
 
         con.close()
 
@@ -475,7 +307,7 @@ class enrichment_test(quantitative_test):
                         results['condition_2'] = comparison[1]
 
                         # Conduct statistical test
-                        results_pvalue = results.groupby(['query_id','is_bait']).apply(lambda x: pd.Series({"nes": np.mean(x[qm_ids[qm_ids['condition_id']==comparison[0]]['quantification_id'].values].values[0]), "dnes": np.nan, "pvalue": ttest_ind(x[qm_ids[qm_ids['condition_id']==comparison[0]]['quantification_id'].values].values[0], x[qm_ids[qm_ids['condition_id']==comparison[1]]['quantification_id'].values].values[0], equal_var=False)[1]})).reset_index()
+                        results_pvalue = results.groupby(['query_id','is_bait']).apply(lambda x: pd.Series({"nes": np.mean(x[qm_ids[qm_ids['condition_id']==comparison[0]]['quantification_id'].values].values[0]), "dnes": np.nan, "pvalue": ttest_ind(x[qm_ids[qm_ids['condition_id']==comparison[0]]['quantification_id'].values].values[0], x[qm_ids[qm_ids['condition_id']==comparison[1]]['quantification_id'].values].values[0], equal_var=True)[1]})).reset_index()
 
                         # Append meta information
                         results = pd.merge(pd.merge(results, results_pvalue, on=["query_id","is_bait"]), dat[['query_id','bait_id','prey_id']].drop_duplicates(), on='query_id')
@@ -491,29 +323,30 @@ class enrichment_test(quantitative_test):
     def integrate(self):
         def collapse(x):
             if x.shape[0] > 1:
-                result = pd.Series({'nes': np.average(np.abs(x['nes'].values), weights=1-x['pvalue'].values), 'dnes': np.average(np.abs(x['dnes'].values), weights=1-x['pvalue'].values), 'pvalue': EmpiricalBrownsMethod(x[[c for c in x.columns if c.startswith("viper_")]].values, x['pvalue'].values)})
+                result = pd.Series({'nes': np.mean(np.abs(x['nes'].values)), 'dnes': np.mean(np.abs(x['dnes'].values)), 'pvalue': EmpiricalBrownsMethod(x[[c for c in x.columns if c.startswith("viper_")]].values, x['pvalue'].values)})
             elif x.shape[0] == 1:
                 result = pd.Series({'nes': x['nes'].values[0], 'dnes': x['dnes'].values[0], 'pvalue': x['pvalue'].values[0]})
             return(result)
 
         def mtcorrect(x):
             x['pvalue_adjusted'] = multipletests(pvals=x['pvalue'].values, method="fdr_bh")[1]
+
             return(x)
 
         df_edge_level = self.tests[self.tests['bait_id'] != self.tests['prey_id']]
-        df_edge_level = df_edge_level.groupby(['condition_1', 'condition_2','level']).apply(mtcorrect).reset_index()
-        df_edge = df_edge_level.sort_values('pvalue').groupby(['condition_1','condition_2','bait_id','prey_id']).head(1).reset_index()
-        df_protein = self.tests[self.tests['bait_id'] == self.tests['prey_id']]
-        df_protein = df_protein.groupby(['condition_1', 'condition_2','level']).apply(mtcorrect).reset_index()
 
         # Append reverse interactions; the full list contains monomers only once
-        df_edge_level_rev = self.tests.rename(index=str, columns={"bait_id": "prey_id", "prey_id": "bait_id"})
-        df_edge_full = pd.concat([self.tests, df_edge_level_rev], sort=False)
-
+        df_edge_level_rev = df_edge_level.rename(index=str, columns={"bait_id": "prey_id", "prey_id": "bait_id"})
+        df_protein_level = self.tests[self.tests['bait_id'] == self.tests['prey_id']]
+        df_edge_full = pd.concat([df_protein_level, df_edge_level, df_edge_level_rev], sort=False)
         df_node_level = df_edge_full.groupby(['condition_1', 'condition_2','level','bait_id']).apply(collapse).reset_index()
-        df_node_level = df_node_level.groupby(['condition_1', 'condition_2','level']).apply(mtcorrect).reset_index()
 
-        df_node = df_node_level.sort_values('pvalue_adjusted').groupby(['condition_1','condition_2','bait_id']).head(1).reset_index()
+        # Multi-testing correction and pooling
+        df_protein_level = df_protein_level.groupby(['condition_1', 'condition_2','level']).apply(mtcorrect).reset_index()
+        df_edge_level = df_edge_level.groupby(['condition_1', 'condition_2','level']).apply(mtcorrect).reset_index()
+        df_edge = df_edge_level.sort_values('pvalue').groupby(['condition_1','condition_2','bait_id','prey_id']).head(1).reset_index()
+        df_node_level = df_node_level.groupby(['condition_1', 'condition_2','level']).apply(mtcorrect).reset_index()
+        df_node = df_node_level.sort_values('pvalue').groupby(['condition_1','condition_2','bait_id']).head(1).reset_index()
 
         click.echo("Info: Total dysregulated proteins detected:")
         click.echo("%s (at FDR < 0.01)" % (df_node[df_node['pvalue_adjusted'] < 0.01][['bait_id']].drop_duplicates().shape[0]))
@@ -526,5 +359,5 @@ class enrichment_test(quantitative_test):
             click.echo("%s (at FDR < 0.05)" % (df_node_level[(df_node_level['level'] == level) & (df_node_level['pvalue_adjusted'] < 0.05)][['bait_id']].drop_duplicates().shape[0]))
             click.echo("%s (at FDR < 0.1)" % (df_node_level[(df_node_level['level'] == level) & (df_node_level['pvalue_adjusted'] < 0.1)][['bait_id']].drop_duplicates().shape[0]))
 
-        return df_edge_level[['condition_1','condition_2','level','bait_id','prey_id','nes','dnes','pvalue','pvalue_adjusted']+[c for c in df_edge_level.columns if c.startswith("viper_")]], df_edge[['condition_1','condition_2','level','bait_id','prey_id','nes','dnes','pvalue','pvalue_adjusted']], df_node_level[['condition_1','condition_2','level','bait_id','nes','dnes','pvalue','pvalue_adjusted']], df_node[['condition_1','condition_2','level','bait_id','nes','dnes','pvalue','pvalue_adjusted']], df_protein[['condition_1','condition_2','level','bait_id','nes','pvalue','pvalue_adjusted'] + [c for c in df_protein.columns if c.startswith("viper_")]]
+        return df_edge_level[['condition_1','condition_2','level','bait_id','prey_id','nes','dnes','pvalue','pvalue_adjusted']+[c for c in df_edge_level.columns if c.startswith("viper_")]], df_edge[['condition_1','condition_2','level','bait_id','prey_id','nes','dnes','pvalue','pvalue_adjusted']], df_node_level[['condition_1','condition_2','level','bait_id','nes','dnes','pvalue','pvalue_adjusted']], df_node[['condition_1','condition_2','level','bait_id','nes','dnes','pvalue','pvalue_adjusted']], df_protein_level[['condition_1','condition_2','level','bait_id','nes','pvalue','pvalue_adjusted'] + [c for c in df_protein_level.columns if c.startswith("viper_")]]
 
