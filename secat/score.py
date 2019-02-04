@@ -6,25 +6,17 @@ import sqlite3
 import os
 import sys
 
-from joblib import Parallel, delayed
+import multiprocessing
+from functools import partial
+from tqdm import tqdm
 
 from scipy.signal import find_peaks, peak_widths
 from minepy import cstats
 
-np.seterr(divide='ignore', invalid='ignore')
+# np.seterr(divide='ignore', invalid='ignore')
+np.seterr(all='raise')
 
-def split(dfm, chunk_size):
-    def index_marks(nrows, chunk_size):
-        return range(1 * chunk_size, (nrows // chunk_size + 1) * chunk_size, chunk_size)
-
-    indices = index_marks(dfm.shape[0], chunk_size)
-    return np.split(dfm, indices)
-
-def applyParallel(dfGrouped, func):
-    # retLst = Parallel(n_jobs=multiprocessing.cpu_count(), verbose=3)(delayed(func)(group) for name, group in dfGrouped)
-    retLst = Parallel(n_jobs=8, verbose=3)(delayed(func)(group) for name, group in dfGrouped)
-    return pd.concat(retLst)
-
+# Find Monomer Threshold
 class monomer:
     def __init__(self, outfile, monomer_threshold_factor):
         self.outfile = outfile
@@ -48,7 +40,18 @@ class monomer:
 
         return protein_sec_thresholds[['condition_id','replicate_id','protein_id','sec_id']]
 
-def interaction(df):
+def score_chunk(queries, qm, run):
+    scores = []
+    for query_ix, query in queries.iterrows():
+        score = score_interaction(qm.xs(query['bait_id'], level='protein_id').values, qm.xs(query['prey_id'], level='protein_id').values)
+        if score is not None:
+            score['condition_id'] = run['condition_id']
+            score['replicate_id'] = run['replicate_id']
+            score = {**score, **query}
+            scores.append(score)
+    return(scores)
+
+def score_interaction(bait, prey):
     def longest_intersection(arr):
         # Compute longest continuous stretch
         n = len(arr)
@@ -111,89 +114,53 @@ def interaction(df):
 
         return mass_ratio
 
-    # Workaround for parallelization
-    minimum_peptides = df['minimum_peptides'].min()
-    sec_boundaries = pd.DataFrame({'sec_id': range(df['lower_sec_boundaries'].min(), df['upper_sec_boundaries'].max()+1)})
 
-    # Require minimum overlap
-    intersection = list(set(df[df['is_bait']]['sec_id'].unique()) & set(df[~df['is_bait']]['sec_id'].unique()))
-    bait_overlap = len(df[df['is_bait']]['sec_id'].unique())
-    prey_overlap = len(df[~df['is_bait']]['sec_id'].unique())
-    delta_overlap = abs(bait_overlap-prey_overlap)
-    longest_overlap = longest_intersection(intersection)
+    # Compute bait and prey intersection
+    intersection = (np.nansum(bait, axis=0) > 0) & (np.nansum(prey, axis=0) > 0)
+    total_overlap = np.count_nonzero(intersection)
+    if total_overlap > 0:
+        longest_overlap = longest_intersection(intersection.nonzero()[0])
 
-    # Require minimum peptides
-    num_bait_peptides = len(df[df['sec_id'].isin(intersection) & df['is_bait']]['peptide_id'].unique())
-    num_prey_peptides = len(df[df['sec_id'].isin(intersection) & ~df['is_bait']]['peptide_id'].unique())
+        # Require at least three overlapping data points
+        if longest_overlap > 2:
+            # Compute overlap scores
+            bait_overlap = np.sum(np.nansum(bait, axis=0) > 0)
+            prey_overlap = np.sum(np.nansum(prey, axis=0) > 0)
+            delta_overlap = abs(bait_overlap-prey_overlap)
 
-    if num_bait_peptides >= minimum_peptides and num_prey_peptides >= minimum_peptides:
-        # Compute bait SEC boundaries
-        bait_sec_boundaries = sec_boundaries.copy()
-        bait_sec_boundaries['peptide_id'] = df[df['is_bait']]['peptide_id'].unique()[0]
+            # Remove non-overlapping segments
+            bait[:,~intersection] = np.nan
+            prey[:,~intersection] = np.nan
 
-        # Compute bait peptide matrix over intersection
-        bpi = pd.merge(df[df['sec_id'].isin(intersection) & df['is_bait']], bait_sec_boundaries, on=['peptide_id','sec_id'], how='outer').sort_values(['sec_id']).pivot(index='peptide_id', columns='sec_id', values='peptide_intensity')
-        bpi_ix = bpi.sum(axis=1, skipna=True) > 0 # Remove completely empty peptides
-        bmi = np.nan_to_num(bpi.loc[bpi_ix].values) # Replace missing values with zeros
+            # Remove completely empty peptides
+            bait = bait[(np.nansum(bait,axis=1) > 0),:]
+            prey = prey[(np.nansum(prey,axis=1) > 0),:]
 
-        # Compute prey SEC boundaries
-        prey_sec_boundaries = sec_boundaries.copy()
-        prey_sec_boundaries['peptide_id'] = df[~df['is_bait']]['peptide_id'].unique()[0]
+            # Require at least two remaining peptide for bait and prey
+            if (bait.shape[0] > 1) and (prey.shape[0] > 1):
+                # Replace nan with 0
+                bait = np.nan_to_num(bait)
+                prey = np.nan_to_num(prey)
 
-        # Compute prey peptide matrix over intersection
-        ppi = pd.merge(df[df['sec_id'].isin(intersection) & ~df['is_bait']], prey_sec_boundaries, on=['peptide_id','sec_id'], how='outer').sort_values(['sec_id']).pivot(index='peptide_id', columns='sec_id', values='peptide_intensity')
-        ppi_ix = ppi.sum(axis=1, skipna=True) > 0 # Remove completely empty peptides
-        pmi = np.nan_to_num(ppi.loc[ppi_ix].values) # Replace missing values with zeros
+                # Compute cross-correlation scores
+                xcorr_shape, xcorr_shift, xcorr_apex = sec_xcorr(bait, prey)
 
-        # Cross-correlation scores
-        xcorr_shape, xcorr_shift, xcorr_apex = sec_xcorr(bmi, pmi)
+                # Compute MIC/TIC scores
+                mic_stat, tic_stat = cstats(bait[:,intersection], prey[:,intersection], est="mic_e")
+                mic = mic_stat.mean(axis=0).mean() # Axis 0: summary for prey peptides / Axis 1: summary for bait peptides
+                tic = tic_stat.mean(axis=0).mean() # Axis 0: summary for prey peptides / Axis 1: summary for bait peptides
 
-        # MIC/TIC scores
-        mic_stat, tic_stat = cstats(bpi[intersection].values, ppi[intersection].values, est="mic_e")
-        mic = mic_stat.mean(axis=0).mean() # Axis 0: summary for prey peptides / Axis 1: summary for bait peptides
-        tic = tic_stat.mean(axis=0).mean() # Axis 0: summary for prey peptides / Axis 1: summary for bait peptides
+                # Compute mass similarity score
+                mass_ratio = mass_similarity(bait, prey)
 
-        # Mass similarity score
-        mass_ratio = mass_similarity(bmi, pmi)
+                return({'var_xcorr_shape': xcorr_shape, 'var_xcorr_shift': xcorr_shift, 'var_mic': mic, 'var_tic': tic, 'var_mass_ratio': mass_ratio, 'var_intersection': longest_overlap, 'var_delta_intersection': delta_overlap, 'var_total_intersection': total_overlap})
 
-        # Monomer delta score
-        monomer_delta = np.min(np.array([df[df['is_bait']]['monomer_sec_id'].min() - xcorr_apex, df[~df['is_bait']]['monomer_sec_id'].min() - xcorr_apex]))
-
-        res = df[['condition_id','replicate_id','bait_id','prey_id','decoy','confidence_bin','learning']].drop_duplicates()
-        res['var_xcorr_shape'] = xcorr_shape
-        res['var_xcorr_shift'] = xcorr_shift
-        res['var_mic'] = mic
-        res['var_tic'] = tic
-        res['var_mass_ratio'] = mass_ratio
-        res['var_monomer_delta'] = monomer_delta
-        # res['var_sec_apex'] = xcorr_apex
-        # res['var_sec_left'] = min(intersection)
-        # res['var_sec_right'] = max(intersection)
-        res['var_intersection'] = longest_overlap
-        res['var_delta_intersection'] = delta_overlap
-        res['var_total_intersection'] = len(intersection)
-
-    else:
-        res = df[['condition_id','replicate_id','bait_id','prey_id','decoy','confidence_bin','learning']].drop_duplicates()
-        res['var_xcorr_shape'] = np.nan
-        res['var_xcorr_shift'] = np.nan
-        res['var_mic'] = np.nan
-        res['var_tic'] = np.nan
-        res['var_mass_ratio'] = np.nan
-        res['var_monomer_delta'] = np.nan
-        # res['var_sec_apex'] = np.nan
-        # res['var_sec_left'] = np.nan
-        # res['var_sec_right'] = np.nan
-        res['var_intersection'] = np.nan
-        res['var_delta_intersection'] = np.nan
-        res['var_total_intersection'] = np.nan
-
-    return(res)
-
+# Scoring
 class scoring:
-    def __init__(self, outfile, chunck_size, minimum_peptides, maximum_peptides, peakpicking):
+    def __init__(self, outfile, chunck_size, threads, minimum_peptides, maximum_peptides, peakpicking):
         self.outfile = outfile
         self.chunck_size = chunck_size
+        self.threads = threads
         self.minimum_peptides = minimum_peptides
         self.maximum_peptides = maximum_peptides
         self.peakpicking = peakpicking
@@ -252,7 +219,7 @@ class scoring:
         click.echo("Info: %s peptide chromatograms before filtering." % df[['condition_id','replicate_id','protein_id','peptide_id']].drop_duplicates().shape[0])
         click.echo("Info: %s data points before filtering." % df.shape[0])
 
-        # Filter monomers for detrending
+        # Filter monomers
         df = df[df['sec_id'] <= df['monomer_sec_id']]
 
         if self.peakpicking == "detrend":
@@ -293,38 +260,37 @@ class scoring:
 
         return pd.DataFrame({'sec_id': range(df['min_sec_id'].values[0], df['max_sec_id'].values[0]+1)})
 
+    def split_chunks(self, dfm):
+        def index_marks(nrows, chunck_size):
+            return range(1 * chunck_size, (nrows // chunck_size + 1) * chunck_size, chunck_size)
+
+        indices = index_marks(dfm.shape[0], self.chunck_size)
+        return np.split(dfm, indices)
+
     def compare(self):
         # Obtain experimental design
-        exp_design = self.chromatograms[['condition_id','replicate_id','protein_id']].drop_duplicates().sort_values(['condition_id','replicate_id','protein_id'])
-        comparisons = pd.merge(pd.merge(self.queries, exp_design, left_on='bait_id', right_on='protein_id')[['condition_id','replicate_id','bait_id','prey_id','decoy','confidence_bin','learning']], exp_design, left_on=['condition_id','replicate_id','prey_id'], right_on=['condition_id','replicate_id','protein_id'])[['condition_id','replicate_id','bait_id','prey_id','decoy','confidence_bin','learning']]
+        exp_design = self.chromatograms[['condition_id','replicate_id']].drop_duplicates()
 
-        # Split data into chunks for parallel processing
-        comparisons_chunks = split(comparisons, self.chunck_size)
-        click.echo("Info: Total number of queries: %s. Split into %s chuncks." % (comparisons.shape[0], len(comparisons_chunks)))
+        scores = []
+        # Iterate over experimental design
+        for exp_ix, run in exp_design.iterrows():
+            chromatograms = self.chromatograms[(self.chromatograms['condition_id']==run['condition_id']) & (self.chromatograms['replicate_id']==run['replicate_id'])]
+            qm = chromatograms.pivot_table(index=['protein_id','peptide_id'], columns='sec_id', values='peptide_intensity')
 
-        chunck_data = []
-        for chunck_it, comparison_chunk in enumerate(comparisons_chunks):
-            click.echo("Info: Processing chunck %s out of %s chuncks." % (chunck_it+1, len(comparisons_chunks)))
-            # Generate long list
-            baits = pd.merge(comparison_chunk, self.chromatograms, left_on=['condition_id','replicate_id','bait_id'], right_on=['condition_id','replicate_id','protein_id']).drop(columns=['protein_id'])
-            baits['is_bait'] = True
+            # Ensure that all queries are covered by chromatograms
+            proteins = chromatograms['protein_id'].unique()
+            queries = self.queries[self.queries['bait_id'].isin(proteins) & self.queries['prey_id'].isin(proteins)]
 
-            preys = pd.merge(comparison_chunk, self.chromatograms, left_on=['condition_id','replicate_id','prey_id'], right_on=['condition_id','replicate_id','protein_id']).drop(columns=['protein_id'])
-            preys['is_bait'] = False
+            # Split data into chunks for parallel processing
+            queries_chunks = self.split_chunks(queries)
+            click.echo("Info: Total number of queries for condition %s and replicate %s: %s. Split into %s chuncks." % (run['condition_id'], run['replicate_id'], queries.shape[0], len(queries_chunks)))
+            
+            # Initialize multiprocessing
+            pool = multiprocessing.Pool(processes=self.threads)
 
-            data_pd = pd.concat([baits, preys]).reset_index()
+            with tqdm(total=len(queries_chunks)) as pbar:
+                for i, result in tqdm(enumerate(pool.imap_unordered(partial(score_chunk, qm=qm, run=run), queries_chunks))):
+                    pbar.update()
+                    scores.extend(result)
 
-            # Workaround for parallelization
-            data_pd['minimum_peptides'] = self.minimum_peptides
-            data_pd['lower_sec_boundaries'] = self.sec_boundaries['sec_id'].min()
-            data_pd['upper_sec_boundaries'] = self.sec_boundaries['sec_id'].max()
-
-            # Single threaded implementation
-            # data = data_pd.groupby(['condition_id','replicate_id','bait_id','prey_id','decoy','confidence_bin','learning']).apply(interaction)
-            # Multi threaded implementation
-            data = applyParallel(data_pd.groupby(['condition_id','replicate_id','bait_id','prey_id','decoy','confidence_bin','learning']), interaction)
-
-            # Require passing of mass ratio and SEC lag thresholds
-            chunck_data.append(data)
-
-        return pd.concat(chunck_data)
+        return(pd.DataFrame(scores))

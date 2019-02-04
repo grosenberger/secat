@@ -27,13 +27,12 @@ def check_sqlite_table(con, table):
     return(table_present)
 
 class plot_features:
-    def __init__(self, infile, level, id, max_qvalue, min_nes, min_dnes, mode, combined, peptide_rank):
+    def __init__(self, infile, level, id, max_qvalue, min_nes, mode, combined, peptide_rank):
         self.infile = infile
         self.level = level
         self.id = id
         self.max_qvalue = max_qvalue
         self.min_nes = min_nes
-        self.min_dnes = min_dnes
         self.mode = mode
         self.combined = combined
         self.peptide_rank = peptide_rank
@@ -167,7 +166,7 @@ class plot_features:
             table = 'EDGE_LEVEL'
 
         if check_sqlite_table(con, 'EDGE') and self.mode == 'enrichment':
-            df = pd.read_sql('SELECT DISTINCT bait_id || "_" || prey_id AS interaction_id, 0 as decoy FROM %s WHERE pvalue_adjusted < %s AND abs(nes) >= %s AND abs(dnes) >= %s ORDER BY pvalue ASC;' % (table, self.max_qvalue, self.min_nes, self.min_dnes), con)
+            df = pd.read_sql('SELECT DISTINCT bait_id || "_" || prey_id AS interaction_id, 0 as decoy FROM %s WHERE pvalue_adjusted < %s AND abs(nes) >= %s ORDER BY pvalue ASC;' % (table, self.max_qvalue, self.min_nes), con)
         elif self.mode == 'detection_integrated':
             df = pd.read_sql('SELECT DISTINCT bait_id || "_" || prey_id AS interaction_id, decoy FROM FEATURE_SCORED_COMBINED WHERE qvalue < %s GROUP BY bait_id, prey_id ORDER BY qvalue ASC;' % (self.max_qvalue), con)
         elif self.mode == 'detection_separate':
@@ -230,7 +229,7 @@ class plot_features:
             table = 'NODE_LEVEL'
 
         if self.mode == 'enrichment':
-            df = pd.read_sql('SELECT DISTINCT bait_id, min(pvalue) as pvalue FROM %s WHERE pvalue_adjusted < %s AND ABS(nes) >= %s AND ABS(dnes) >= %s GROUP BY bait_id;' % (table, self.max_qvalue, self.min_nes, self.min_dnes), con)
+            df = pd.read_sql('SELECT DISTINCT bait_id, min(pvalue) as pvalue FROM %s WHERE pvalue_adjusted < %s AND ABS(nes) >= %s GROUP BY bait_id;' % (table, self.max_qvalue, self.min_nes), con)
 
         con.close()
 

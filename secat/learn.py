@@ -25,7 +25,7 @@ from pyprophet.stats import pemp, qvalue, pi0est
 from hyperopt import hp
 
 class pyprophet:
-    def __init__(self, outfile, apply_model, minimum_monomer_delta, minimum_mass_ratio, maximum_sec_shift, minimum_peptides, maximum_peptides, cb_decoys, xeval_fraction, xeval_num_iter, ss_initial_fdr, ss_iteration_fdr, ss_num_iter, parametric, pfdr, pi0_lambda, pi0_method, pi0_smooth_df, pi0_smooth_log_pi0, lfdr_truncate, lfdr_monotone, lfdr_transformation, lfdr_adj, lfdr_eps, threads, test):
+    def __init__(self, outfile, apply_model, minimum_mass_ratio, maximum_sec_shift, cb_decoys, xeval_fraction, xeval_num_iter, ss_initial_fdr, ss_iteration_fdr, ss_num_iter, parametric, pfdr, pi0_lambda, pi0_method, pi0_smooth_df, pi0_smooth_log_pi0, lfdr_truncate, lfdr_monotone, lfdr_transformation, lfdr_adj, lfdr_eps, threads, test):
 
         self.outfile = outfile
         self.apply_model = apply_model
@@ -37,11 +37,8 @@ class pyprophet:
 
         self.xgb_params_space = {'eta': hp.uniform('eta', 0.5, 1.0), 'gamma': hp.uniform('gamma', 0.0, 0.5), 'max_depth': hp.quniform('max_depth', 2, 8, 1), 'min_child_weight': hp.quniform('min_child_weight', 1, 5, 1), 'subsample': hp.uniform('subsample', 0.5, 1.0), 'colsample_bytree': 1.0, 'colsample_bylevel': 1.0, 'colsample_bynode': 1.0, 'lambda': hp.uniform('lambda', 0.0, 1.0), 'alpha': hp.uniform('alpha', 0.0, 1.0), 'scale_pos_weight': 1.0, 'silent': 1, 'objective': 'binary:logitraw', 'nthread': 1, 'eval_metric': 'auc'}
 
-        self.minimum_monomer_delta = minimum_monomer_delta
         self.minimum_mass_ratio = minimum_mass_ratio
         self.maximum_sec_shift = maximum_sec_shift
-        self.minimum_peptides = minimum_peptides
-        self.maximum_peptides = maximum_peptides
         self.cb_decoys = cb_decoys
         self.xeval_fraction = xeval_fraction
         self.xeval_num_iter = xeval_num_iter
@@ -106,20 +103,23 @@ class pyprophet:
         df = pd.merge(df, dfa, on=['condition_id','replicate_id','bait_id','prey_id'])
 
         # Filter according to boundaries
-        df_filter = df.groupby(["bait_id","prey_id","decoy"])[["var_monomer_delta","var_xcorr_shift","var_mass_ratio","var_total_mass_ratio"]].mean().dropna().reset_index(level=["bait_id","prey_id","decoy"])
+        df_filter = df.groupby(["bait_id","prey_id","decoy"])[["var_xcorr_shift","var_mass_ratio","var_total_mass_ratio"]].mean().dropna().reset_index(level=["bait_id","prey_id","decoy"])
 
-        df_filter = df_filter[(df_filter['var_monomer_delta'] >= self.minimum_monomer_delta) & (df_filter['var_xcorr_shift'] <= self.maximum_sec_shift) & (df_filter['var_mass_ratio'] >= self.minimum_mass_ratio) & (df_filter['var_total_mass_ratio'] >= self.minimum_mass_ratio)]
+        df_filter = df_filter[(df_filter['var_xcorr_shift'] <= self.maximum_sec_shift) & (df_filter['var_mass_ratio'] >= self.minimum_mass_ratio) & (df_filter['var_total_mass_ratio'] >= self.minimum_mass_ratio)]
 
         df = pd.merge(df, df_filter[["bait_id","prey_id","decoy"]], on=["bait_id","prey_id","decoy"]).dropna()
 
         # We need to generate a score that selects for the very best interactions heterodimers of similar size: perfect shape, co-elution and identical mass
         df['main_var_kickstart'] = (df['var_xcorr_shape'] * df['var_mass_ratio']) / (df['var_xcorr_shift'] + 1)
 
+        df.to_csv("test.csv")
+        sys.exit()
+
         return df
 
     def read_global_abundance(self):
         con = sqlite3.connect(self.outfile)
-        df = pd.read_sql('SELECT condition_id, replicate_id, QUANTIFICATION.protein_id, QUANTIFICATION.peptide_id, sum(peptide_intensity) as peptide_intensity FROM QUANTIFICATION INNER JOIN SEC ON QUANTIFICATION.run_id = SEC.run_id INNER JOIN PEPTIDE_META ON QUANTIFICATION.peptide_id = PEPTIDE_META.peptide_id INNER JOIN PROTEIN_META ON QUANTIFICATION.protein_id = PROTEIN_META.protein_id WHERE peptide_count >= %s AND peptide_rank <= %s GROUP BY condition_id, replicate_id, QUANTIFICATION.protein_id, QUANTIFICATION.peptide_id;' % (self.minimum_peptides, self.maximum_peptides), con)
+        df = pd.read_sql('SELECT condition_id, replicate_id, QUANTIFICATION.protein_id, QUANTIFICATION.peptide_id, sum(peptide_intensity) as peptide_intensity FROM QUANTIFICATION INNER JOIN SEC ON QUANTIFICATION.run_id = SEC.run_id INNER JOIN PEPTIDE_META ON QUANTIFICATION.peptide_id = PEPTIDE_META.peptide_id INNER JOIN PROTEIN_META ON QUANTIFICATION.protein_id = PROTEIN_META.protein_id GROUP BY condition_id, replicate_id, QUANTIFICATION.protein_id, QUANTIFICATION.peptide_id;', con)
         con.close()
 
         return df.groupby(['condition_id','replicate_id','protein_id'])['peptide_intensity'].mean().reset_index()

@@ -13,7 +13,9 @@ from .learn import pyprophet, combine
 from .quantify import quantitative_matrix, enrichment_test
 from .plot import plot_features, check_sqlite_table
 
-from pyprophet.data_handling import transform_pi0_lambda
+from pyprophet.data_handling import transform_threads, transform_pi0_lambda
+
+# import cProfile
 
 @click.group(chain=True)
 @click.version_option()
@@ -144,11 +146,12 @@ def preprocess(infiles, outfile, secfile, netfile, posnetfile, negnetfile, unipr
 @click.option('--in', 'infile', required=True, type=click.Path(exists=True), help='Input SECAT file.')
 @click.option('--out', 'outfile', required=False, type=click.Path(exists=False), help='Output SECAT file.')
 @click.option('--monomer_threshold_factor', 'monomer_threshold_factor', default=2.0, show_default=True, type=float, help='Factor threshold to consider a feature a complex rather than a monomer.')
-@click.option('--minimum_peptides', 'minimum_peptides', default=1, show_default=True, type=int, help='Minimum number of peptides required to score an interaction.')
-@click.option('--maximum_peptides', 'maximum_peptides', default=3, show_default=True, type=int, help='Maximum number of peptides used to score an interaction.')
+@click.option('--minimum_peptides', 'minimum_peptides', default=2, show_default=True, type=int, help='Minimum number of peptides required to score an interaction.')
+@click.option('--maximum_peptides', 'maximum_peptides', default=5, show_default=True, type=int, help='Maximum number of peptides used to score an interaction.')
 @click.option('--peakpicking', default='none', show_default=True, type=click.Choice(['none', 'detrend', 'localmax_conditions', 'localmax_replicates']), help='Either "none", "detrend" or "localmax"; the method for peakpicking of the peptide chromatograms.')
 @click.option('--chunck_size', 'chunck_size', default=50000, show_default=True, type=int, help='Chunck size for processing.')
-def score(infile, outfile, monomer_threshold_factor, minimum_peptides, maximum_peptides, peakpicking, chunck_size):
+@click.option('--threads', default=1, show_default=True, type=int, help='Number of threads used for parallel processing. -1 means all available CPUs.', callback=transform_threads)
+def score(infile, outfile, monomer_threshold_factor, minimum_peptides, maximum_peptides, peakpicking, chunck_size, threads):
     """
     Score interaction features in SEC data.
     """
@@ -170,7 +173,8 @@ def score(infile, outfile, monomer_threshold_factor, minimum_peptides, maximum_p
 
     # Signal processing
     click.echo("Info: Signal processing.")
-    feature_data = scoring(outfile, chunck_size, minimum_peptides, maximum_peptides, peakpicking)
+    feature_data = scoring(outfile, chunck_size, threads, minimum_peptides, maximum_peptides, peakpicking)
+    # cProfile.runctx('scoring(outfile, chunck_size, minimum_peptides, maximum_peptides, peakpicking)', globals(), locals = {'outfile': outfile, 'chunck_size': chunck_size, 'minimum_peptides': minimum_peptides, 'maximum_peptides': maximum_peptides, 'peakpicking': peakpicking}, filename="score_performance.cprof")
 
     con = sqlite3.connect(outfile)
     feature_data.df.to_sql('FEATURE', con, index=False, if_exists='replace')
@@ -182,11 +186,8 @@ def score(infile, outfile, monomer_threshold_factor, minimum_peptides, maximum_p
 @click.option('--out', 'outfile', required=False, type=click.Path(exists=False), help='Output SECAT file.')
 @click.option('--apply_model', 'apply_model', required=False, type=click.Path(exists=False), help='Apply pretrained SECAT model')
 # Prefiltering
-@click.option('--minimum_monomer_delta', 'minimum_monomer_delta', default=3, show_default=True, type=float, help='Minimum number of delta fractions from the expected monomer fraction required to score an interaction.')
 @click.option('--minimum_mass_ratio', 'minimum_mass_ratio', default=0.1, show_default=True, type=float, help='Minimum mass ratio required to score an interaction.')
 @click.option('--maximum_sec_shift', 'maximum_sec_shift', default=10, show_default=True, type=float, help='Maximum lag in SEC units between interactions and subunits.')
-@click.option('--minimum_peptides', 'minimum_peptides', default=1, show_default=True, type=int, help='Minimum number of peptides required to quantify an interaction.')
-@click.option('--maximum_peptides', 'maximum_peptides', default=3, show_default=True, type=int, help='Maximum number of peptides used to score an interaction.')
 @click.option('--cb_decoys/--no-cb_decoys', default=False, show_default=True, help='Use only decoys from same confidence bin instead of full set for learning.')
 # Semi-supervised learning
 @click.option('--xeval_fraction', default=0.5, show_default=True, type=float, help='Data fraction used for cross-validation of semi-supervised learning step.')
@@ -206,9 +207,9 @@ def score(infile, outfile, monomer_threshold_factor, minimum_peptides, maximum_p
 @click.option('--lfdr_transformation', default='probit', show_default=True, type=click.Choice(['probit', 'logit']), help='Either a "probit" or "logit" transformation is applied to the p-values so that a local FDR estimate can be formed that does not involve edge effects of the [0,1] interval in which the p-values lie.')
 @click.option('--lfdr_adj', default=1.5, show_default=True, type=float, help='Numeric value that is applied as a multiple of the smoothing bandwidth used in the density estimation.')
 @click.option('--lfdr_eps', default=np.power(10.0,-8), show_default=True, type=float, help='Numeric value that is threshold for the tails of the empirical p-value distribution.')
-@click.option('--threads', 'threads', default=1, show_default=True, type=int, help='Number of threads used for parallel processing of SEC runs. -1 means all available CPUs.')
+@click.option('--threads', default=1, show_default=True, type=int, help='Number of threads used for parallel processing. -1 means all available CPUs.', callback=transform_threads)
 @click.option('--test/--no-test', default=False, show_default=True, help='Run in test mode with fixed seed.')
-def learn(infile, outfile, apply_model, minimum_monomer_delta, minimum_mass_ratio, maximum_sec_shift, minimum_peptides, maximum_peptides, cb_decoys, xeval_fraction, xeval_num_iter, ss_initial_fdr, ss_iteration_fdr, ss_num_iter, parametric, pfdr, pi0_lambda, pi0_method, pi0_smooth_df, pi0_smooth_log_pi0, lfdr_truncate, lfdr_monotone, lfdr_transformation, lfdr_adj, lfdr_eps, threads, test):
+def learn(infile, outfile, apply_model, minimum_mass_ratio, maximum_sec_shift, cb_decoys, xeval_fraction, xeval_num_iter, ss_initial_fdr, ss_iteration_fdr, ss_num_iter, parametric, pfdr, pi0_lambda, pi0_method, pi0_smooth_df, pi0_smooth_log_pi0, lfdr_truncate, lfdr_monotone, lfdr_transformation, lfdr_adj, lfdr_eps, threads, test):
     """
     Learn true/false interaction features in SEC data.
     """
@@ -223,7 +224,7 @@ def learn(infile, outfile, apply_model, minimum_monomer_delta, minimum_mass_rati
     # Run PyProphet training
     click.echo("Info: Running PyProphet.")
 
-    scored_data = pyprophet(outfile, apply_model, minimum_monomer_delta, minimum_mass_ratio, maximum_sec_shift, minimum_peptides, maximum_peptides, cb_decoys, xeval_fraction, xeval_num_iter, ss_initial_fdr, ss_iteration_fdr, ss_num_iter, parametric, pfdr, pi0_lambda, pi0_method, pi0_smooth_df, pi0_smooth_log_pi0, lfdr_truncate, lfdr_monotone, lfdr_transformation, lfdr_adj, lfdr_eps, threads, test)
+    scored_data = pyprophet(outfile, apply_model, minimum_mass_ratio, maximum_sec_shift, cb_decoys, xeval_fraction, xeval_num_iter, ss_initial_fdr, ss_iteration_fdr, ss_num_iter, parametric, pfdr, pi0_lambda, pi0_method, pi0_smooth_df, pi0_smooth_log_pi0, lfdr_truncate, lfdr_monotone, lfdr_transformation, lfdr_adj, lfdr_eps, threads, test)
 
     con = sqlite3.connect(outfile)
     scored_data.df.to_sql('FEATURE_SCORED', con, index=False, if_exists='replace')
@@ -244,10 +245,10 @@ def learn(infile, outfile, apply_model, minimum_monomer_delta, minimum_mass_rati
 @click.option('--out', 'outfile', required=False, type=click.Path(exists=False), help='Output SECAT file.')
 @click.option('--control_condition', default='control', type=str, help='Plot specific UniProt bait_id (Q10000) or interaction_id (Q10000_P10000)')
 @click.option('--maximum_interaction_qvalue', default=0.05, show_default=True, type=float, help='Maximum q-value to consider interactions for quantification.')
-@click.option('--minimum_peptides', 'minimum_peptides', default=1, show_default=True, type=int, help='Minimum number of peptides required to quantify an interaction.')
-@click.option('--maximum_peptides', 'maximum_peptides', default=30, show_default=True, type=int, help='Maximum number of peptides used to quantify an interaction.')
+@click.option('--minimum_peptides', 'minimum_peptides', default=2, show_default=True, type=int, help='Minimum number of peptides required to quantify an interaction.')
+@click.option('--maximum_peptides', 'maximum_peptides', default=5, show_default=True, type=int, help='Maximum number of peptides used to quantify an interaction.')
 @click.option('--enrichment_permutations', 'enrichment_permutations', default=1000, show_default=True, type=int, help='Number of permutations for enrichment testing.')
-@click.option('--threads', 'threads', default=1, show_default=True, type=int, help='Number of threads used for parallel processing of enrichment tests. -1 means all available CPUs.')
+@click.option('--threads', default=1, show_default=True, type=int, help='Number of threads used for parallel processing. -1 means all available CPUs.', callback=transform_threads)
 def quantify(infile, outfile, control_condition, maximum_interaction_qvalue, minimum_peptides, maximum_peptides, enrichment_permutations, threads):
     """
     Quantify protein and interaction features in SEC data.
@@ -332,13 +333,12 @@ def export(infile):
 @click.option('--id', required=False, type=str, help='Plot specific UniProt bait_id (Q10000) or interaction_id (Q10000_P10000)')
 @click.option('--max_qvalue', default=0.01, show_default=True, type=float, help='Maximum q-value to plot baits or interactions.')
 @click.option('--min_nes', default=1.0, show_default=True, type=float, help='Minimum abs(nes) to plot baits or interactions.')
-@click.option('--min_dnes', default=0, show_default=True, type=float, help='Minimum dnes to plot baits or interactions.')
 @click.option('--mode', default='enrichment', show_default=True, type=click.Choice(['enrichment', 'detection_integrated', 'detection_separate']), help='Select mode to order interaction plots by. Note: detection_separate will also report decoys')
 @click.option('--combined/--no-combined', default=False, show_default=True, help='Select interactions and baits according to combined q-values.')
 @click.option('--peptide_rank', default=6, show_default=True, type=int, help='Number of most intense peptides to plot.')
-def plot(infile, level, id, max_qvalue, min_nes, min_dnes, mode, combined, peptide_rank):
+def plot(infile, level, id, max_qvalue, min_nes, mode, combined, peptide_rank):
     """
     Plot SECAT results
     """
 
-    pf = plot_features(infile, level, id, max_qvalue, min_nes, min_dnes, mode, combined, peptide_rank)
+    pf = plot_features(infile, level, id, max_qvalue, min_nes, mode, combined, peptide_rank)

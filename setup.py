@@ -25,8 +25,6 @@ setup(
         'Intended Audience :: Science/Research',
         'Topic :: Scientific/Engineering :: Bio-Informatics',
         'Topic :: Scientific/Engineering :: Chemistry',
-        'Programming Language :: Python :: 2',
-        'Programming Language :: Python :: 2.7',
         'Programming Language :: Python :: 3',
         'Programming Language :: Python :: 3.4',
         'Programming Language :: Python :: 3.5',
@@ -34,7 +32,7 @@ setup(
     ],
     packages=find_packages(exclude=['contrib', 'docs', 'tests']),
     include_package_data=True,
-    install_requires=['Click','lxml','joblib','numpy','scipy','pandas','sklearn','pyprophet','minepy','rpy2','matplotlib'],
+    install_requires=['Click','tqdm','lxml','multiprocessing','numpy','scipy','pandas','sklearn','pyprophet','minepy','rpy2','matplotlib'],
     # extras_require={  # Optional
     #     'dev': ['check-manifest'],
     #     'test': ['coverage'],
