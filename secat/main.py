@@ -146,8 +146,8 @@ def preprocess(infiles, outfile, secfile, netfile, posnetfile, negnetfile, unipr
 @click.option('--in', 'infile', required=True, type=click.Path(exists=True), help='Input SECAT file.')
 @click.option('--out', 'outfile', required=False, type=click.Path(exists=False), help='Output SECAT file.')
 @click.option('--monomer_threshold_factor', 'monomer_threshold_factor', default=2.0, show_default=True, type=float, help='Factor threshold to consider a feature a complex rather than a monomer.')
-@click.option('--minimum_peptides', 'minimum_peptides', default=2, show_default=True, type=int, help='Minimum number of peptides required to score an interaction.')
-@click.option('--maximum_peptides', 'maximum_peptides', default=5, show_default=True, type=int, help='Maximum number of peptides used to score an interaction.')
+@click.option('--minimum_peptides', 'minimum_peptides', default=3, show_default=True, type=int, help='Minimum number of peptides required to score an interaction.')
+@click.option('--maximum_peptides', 'maximum_peptides', default=3, show_default=True, type=int, help='Maximum number of peptides used to score an interaction.')
 @click.option('--peakpicking', default='none', show_default=True, type=click.Choice(['none', 'detrend', 'localmax_conditions', 'localmax_replicates']), help='Either "none", "detrend" or "localmax"; the method for peakpicking of the peptide chromatograms.')
 @click.option('--chunck_size', 'chunck_size', default=50000, show_default=True, type=int, help='Chunck size for processing.')
 @click.option('--threads', default=1, show_default=True, type=int, help='Number of threads used for parallel processing. -1 means all available CPUs.', callback=transform_threads)
@@ -244,8 +244,8 @@ def learn(infile, outfile, apply_model, minimum_mass_ratio, maximum_sec_shift, c
 @click.option('--in', 'infile', required=True, type=click.Path(exists=True), help='Input SECAT file.')
 @click.option('--out', 'outfile', required=False, type=click.Path(exists=False), help='Output SECAT file.')
 @click.option('--control_condition', default='control', type=str, help='Plot specific UniProt bait_id (Q10000) or interaction_id (Q10000_P10000)')
-@click.option('--maximum_interaction_qvalue', default=0.05, show_default=True, type=float, help='Maximum q-value to consider interactions for quantification.')
-@click.option('--minimum_peptides', 'minimum_peptides', default=2, show_default=True, type=int, help='Minimum number of peptides required to quantify an interaction.')
+@click.option('--maximum_interaction_qvalue', default=0.01, show_default=True, type=float, help='Maximum q-value to consider interactions for quantification.')
+@click.option('--minimum_peptides', 'minimum_peptides', default=3, show_default=True, type=int, help='Minimum number of peptides required to quantify an interaction.')
 @click.option('--maximum_peptides', 'maximum_peptides', default=5, show_default=True, type=int, help='Maximum number of peptides used to quantify an interaction.')
 @click.option('--enrichment_permutations', 'enrichment_permutations', default=1000, show_default=True, type=int, help='Number of permutations for enrichment testing.')
 @click.option('--threads', default=1, show_default=True, type=int, help='Number of threads used for parallel processing. -1 means all available CPUs.', callback=transform_threads)
@@ -294,8 +294,6 @@ def export(infile):
     outfile_network = os.path.splitext(infile)[0] + "_network.csv"
     outfile_nodes = os.path.splitext(infile)[0] + "_differential_nodes.csv"
     outfile_nodes_level = os.path.splitext(infile)[0] + "_differential_nodes_level.csv"
-    outfile_enodes = os.path.splitext(infile)[0] + "_differential_enodes.csv"
-    outfile_enodes_level = os.path.splitext(infile)[0] + "_differential_enodes_level.csv"
     outfile_edges = os.path.splitext(infile)[0] + "_differential_edges.csv"
     outfile_edges_level = os.path.splitext(infile)[0] + "_differential_edges_level.csv"
     outfile_proteins_level = os.path.splitext(infile)[0] + "_differential_proteins_level.csv"

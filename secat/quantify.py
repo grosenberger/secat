@@ -116,7 +116,7 @@ class quantitative_matrix:
         def peptide_summarize(df):
             # Aggregate to peptide level
             peptide = df[['condition_id','replicate_id','bait_id','prey_id','is_bait','peptide_id']].copy()
-            peptide['partition_intensity'] = np.log2(df['peptide_intensity']+1)
+            peptide['fraction_intensity'] = np.log2(df['peptide_intensity']+1)
 
             return peptide
 
@@ -144,7 +144,7 @@ class enrichment_test:
         self.control_condition = control_condition
         self.enrichment_permutations = enrichment_permutations
         self.threads = threads
-        self.levels = ['partition_intensity','monomer_intensity','total_intensity']
+        self.levels = ['fraction_intensity','monomer_intensity','total_intensity']
         self.comparisons = self.contrast()
 
         self.monomer_qm, self.complex_qm = self.read()
@@ -226,9 +226,6 @@ class enrichment_test:
         monomer_qm = pd.read_sql('SELECT * FROM MONOMER_QM;' , con)
         complex_qm = pd.read_sql('SELECT * FROM COMPLEX_QM;' , con)
 
-        monomer_qm = pd.merge(monomer_qm, monomer_qm[['bait_id']].drop_duplicates().head(100), on='bait_id')
-        complex_qm = pd.merge(complex_qm, complex_qm[['bait_id']].drop_duplicates().head(10), on='bait_id')
-
         con.close()
 
         return monomer_qm, complex_qm
@@ -242,12 +239,12 @@ class enrichment_test:
             complex_ratio = qm.diff(axis=0).iloc[1]
             complex_ratio['level'] = 'complex_ratio'
 
-            baits = pd.concat([pd.DataFrame(complex_intensity), pd.DataFrame(complex_ratio)])
+            baits = pd.DataFrame([complex_intensity,complex_ratio],index=[0,1])
             baits['is_bait'] = True
             preys = baits.copy()
             preys['is_bait'] = False
 
-            return(pd.concat([baits, preys], axis=1, ignore_index=True).transpose())
+            return(pd.concat([baits, preys]))
 
         dfs = []
         for level in self.levels:
@@ -280,9 +277,9 @@ class enrichment_test:
                         results['condition_2'] = comparison[1]
 
                         # Append aggregated bait and prey metrics per query
-                        if level == "partition_intensity":
+                        if level == "fraction_intensity":
                             results_aggregated = results.groupby(['condition_1','condition_2','query_id']).apply(collapse).reset_index(level=['condition_1','condition_2','query_id'])
-                            results = pd.concat([results, results_aggregated])
+                            results = pd.concat([results, results_aggregated], sort=False)
 
                         # Conduct statistical test
                         results_pvalue = results.groupby(['query_id','is_bait','level']).apply(lambda x: pd.Series({"nes": np.mean(x[qm_ids[qm_ids['condition_id']==comparison[0]]['quantification_id'].values].values[0]) - np.mean(x[qm_ids[qm_ids['condition_id']==comparison[1]]['quantification_id'].values].values[0]), "pvalue": ttest_ind(x[qm_ids[qm_ids['condition_id']==comparison[0]]['quantification_id'].values].values[0], x[qm_ids[qm_ids['condition_id']==comparison[1]]['quantification_id'].values].values[0], equal_var=True)[1]})).reset_index()

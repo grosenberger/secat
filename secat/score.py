@@ -14,7 +14,7 @@ from scipy.signal import find_peaks, peak_widths
 from minepy import cstats
 
 # np.seterr(divide='ignore', invalid='ignore')
-np.seterr(all='raise')
+# np.seterr(all='raise')
 
 # Find Monomer Threshold
 class monomer:
@@ -43,7 +43,7 @@ class monomer:
 def score_chunk(queries, qm, run):
     scores = []
     for query_ix, query in queries.iterrows():
-        score = score_interaction(qm.xs(query['bait_id'], level='protein_id').values, qm.xs(query['prey_id'], level='protein_id').values)
+        score = score_interaction(qm.xs(query['bait_id'], level='protein_id').values.copy(), qm.xs(query['prey_id'], level='protein_id').values.copy())
         if score is not None:
             score['condition_id'] = run['condition_id']
             score['replicate_id'] = run['replicate_id']
@@ -115,18 +115,21 @@ def score_interaction(bait, prey):
         return mass_ratio
 
 
+   # Compute bait and prey overlap
+    overlap = (np.nansum(bait, axis=0) > 0) | (np.nansum(prey, axis=0) > 0)
+    total_overlap = np.count_nonzero(overlap)
+
     # Compute bait and prey intersection
     intersection = (np.nansum(bait, axis=0) > 0) & (np.nansum(prey, axis=0) > 0)
-    total_overlap = np.count_nonzero(intersection)
-    if total_overlap > 0:
-        longest_overlap = longest_intersection(intersection.nonzero()[0])
+    total_intersection = np.count_nonzero(intersection)
+    if total_intersection > 0:
+        longest_intersection = longest_intersection(intersection.nonzero()[0])
 
         # Require at least three overlapping data points
-        if longest_overlap > 2:
-            # Compute overlap scores
-            bait_overlap = np.sum(np.nansum(bait, axis=0) > 0)
-            prey_overlap = np.sum(np.nansum(prey, axis=0) > 0)
-            delta_overlap = abs(bait_overlap-prey_overlap)
+        if longest_intersection > 2:
+            # Prepare total bait and prey profiles & Replace nan with 0
+            total_bait = np.nan_to_num(bait)
+            total_prey = np.nan_to_num(prey)
 
             # Remove non-overlapping segments
             bait[:,~intersection] = np.nan
@@ -136,12 +139,12 @@ def score_interaction(bait, prey):
             bait = bait[(np.nansum(bait,axis=1) > 0),:]
             prey = prey[(np.nansum(prey,axis=1) > 0),:]
 
-            # Require at least two remaining peptide for bait and prey
-            if (bait.shape[0] > 1) and (prey.shape[0] > 1):
-                # Replace nan with 0
-                bait = np.nan_to_num(bait)
-                prey = np.nan_to_num(prey)
+            # Replace nan with 0
+            bait = np.nan_to_num(bait)
+            prey = np.nan_to_num(prey)
 
+            # Require at least two remaining peptides for bait and prey
+            if (bait.shape[0] > 1) and (prey.shape[0] > 1):
                 # Compute cross-correlation scores
                 xcorr_shape, xcorr_shift, xcorr_apex = sec_xcorr(bait, prey)
 
@@ -153,7 +156,14 @@ def score_interaction(bait, prey):
                 # Compute mass similarity score
                 mass_ratio = mass_similarity(bait, prey)
 
-                return({'var_xcorr_shape': xcorr_shape, 'var_xcorr_shift': xcorr_shift, 'var_mic': mic, 'var_tic': tic, 'var_mass_ratio': mass_ratio, 'var_intersection': longest_overlap, 'var_delta_intersection': delta_overlap, 'var_total_intersection': total_overlap})
+                # Compute total mass similarity score
+                total_mass_ratio = mass_similarity(total_bait, total_prey)
+
+                # Compute relative intersection score
+                relative_overlap = total_intersection / total_overlap
+                relative_intersection = longest_intersection / total_intersection
+
+                return({'var_xcorr_shape': xcorr_shape, 'var_xcorr_shift': xcorr_shift, 'var_mass_ratio': mass_ratio, 'var_total_mass_ratio': total_mass_ratio, 'var_mic': mic, 'var_tic': tic, 'var_sec_overlap': relative_overlap, 'var_sec_intersection': relative_intersection})
 
 # Scoring
 class scoring:
@@ -212,7 +222,10 @@ class scoring:
                 else:
                     sec_list = np.append(sec_list, np.arange(peak[0],peak[1]+1))
 
-            return x[x['sec_id'].isin(np.unique(sec_list))]
+            if len(x['replicate_id'].unique()) == 1:
+                return x[x['sec_id'].isin(np.unique(sec_list))][['peptide_id','sec_id','peptide_intensity','monomer_sec_id']]
+            else:
+                return x[x['sec_id'].isin(np.unique(sec_list))][['replicate_id','peptide_id','sec_id','peptide_intensity','monomer_sec_id']]
 
         # Report statistics before filtering
         click.echo("Info: %s unique peptides before filtering." % len(df['peptide_id'].unique()))
@@ -227,10 +240,10 @@ class scoring:
             df = df.groupby(['condition_id','replicate_id','protein_id','peptide_id']).apply(peptide_detrend).reset_index(level=['condition_id','replicate_id','protein_id','peptide_id'])
         elif self.peakpicking == "localmax_conditions":
             # Protein-level peakpicking
-            df = df.groupby(['condition_id','protein_id']).apply(protein_pick)
+            df = df.groupby(['condition_id','protein_id']).apply(protein_pick).reset_index(level=['condition_id','protein_id'])
         elif self.peakpicking == "localmax_replicates":
             # Protein-level peakpicking
-            df = df.groupby(['condition_id','replicate_id','protein_id']).apply(protein_pick)
+            df = df.groupby(['condition_id','replicate_id','protein_id']).apply(protein_pick).reset_index(level=['condition_id','replicate_id','protein_id'])
 
         # Report statistics after filtering
         click.echo("Info: %s unique peptides after filtering." % len(df['peptide_id'].unique()))

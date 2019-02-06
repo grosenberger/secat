@@ -61,8 +61,7 @@ class pyprophet:
         self.test = test
 
         # Read data
-        global_abundance = self.read_global_abundance()
-        data = self.read_data(global_abundance)
+        data = self.read_data()
 
         if data[data['learning'] == 1].shape[0] > 0:
             if self.apply_model == None:
@@ -90,17 +89,10 @@ class pyprophet:
         # Store model
         self.store_model()
 
-    def read_data(self, global_abundance):
+    def read_data(self):
         con = sqlite3.connect(self.outfile)
         df = pd.read_sql('SELECT *, condition_id || "_" || replicate_id || "_" || bait_id || "_" || prey_id AS pyprophet_feature_id, condition_id || "_" || bait_id || "_" || prey_id AS pyprophet_metafeature_id FROM FEATURE ORDER BY pyprophet_metafeature_id;', con)
         con.close()
-
-        # Append total mass ratio score
-        dfa = pd.merge(pd.merge(df[['condition_id','replicate_id','bait_id','prey_id']], global_abundance, left_on = ['condition_id','replicate_id','bait_id'], right_on = ['condition_id','replicate_id','protein_id']), global_abundance, left_on = ['condition_id','replicate_id','prey_id'], right_on = ['condition_id','replicate_id','protein_id'])
-        dfa['var_total_mass_ratio'] = dfa['peptide_intensity_x'] / dfa['peptide_intensity_y']
-        dfa.loc[dfa['var_total_mass_ratio'] > 1, 'var_total_mass_ratio'] = 1 / dfa.loc[dfa['var_total_mass_ratio'] > 1, 'var_total_mass_ratio']
-        dfa = dfa[['condition_id','replicate_id','bait_id','prey_id','var_total_mass_ratio']]
-        df = pd.merge(df, dfa, on=['condition_id','replicate_id','bait_id','prey_id'])
 
         # Filter according to boundaries
         df_filter = df.groupby(["bait_id","prey_id","decoy"])[["var_xcorr_shift","var_mass_ratio","var_total_mass_ratio"]].mean().dropna().reset_index(level=["bait_id","prey_id","decoy"])
@@ -112,23 +104,13 @@ class pyprophet:
         # We need to generate a score that selects for the very best interactions heterodimers of similar size: perfect shape, co-elution and identical mass
         df['main_var_kickstart'] = (df['var_xcorr_shape'] * df['var_mass_ratio']) / (df['var_xcorr_shift'] + 1)
 
-        df.to_csv("test.csv")
-        sys.exit()
-
         return df
-
-    def read_global_abundance(self):
-        con = sqlite3.connect(self.outfile)
-        df = pd.read_sql('SELECT condition_id, replicate_id, QUANTIFICATION.protein_id, QUANTIFICATION.peptide_id, sum(peptide_intensity) as peptide_intensity FROM QUANTIFICATION INNER JOIN SEC ON QUANTIFICATION.run_id = SEC.run_id INNER JOIN PEPTIDE_META ON QUANTIFICATION.peptide_id = PEPTIDE_META.peptide_id INNER JOIN PROTEIN_META ON QUANTIFICATION.protein_id = PROTEIN_META.protein_id GROUP BY condition_id, replicate_id, QUANTIFICATION.protein_id, QUANTIFICATION.peptide_id;', con)
-        con.close()
-
-        return df.groupby(['condition_id','replicate_id','protein_id'])['peptide_intensity'].mean().reset_index()
 
     def learn(self, learning_data):
         (result, scorer, weights) = PyProphet(self.classifier, self.xgb_hyperparams, self.xgb_params, self.xgb_params_space, self.xeval_fraction, self.xeval_num_iter, self.ss_initial_fdr, self.ss_iteration_fdr, self.ss_num_iter, self.group_id, self.parametric, self.pfdr, self.pi0_lambda, self.pi0_method, self.pi0_smooth_df, self.pi0_smooth_log_pi0, self.lfdr_truncate, self.lfdr_monotone, self.lfdr_transformation, self.lfdr_adj, self.lfdr_eps, False, self.threads, self.test).learn_and_apply(learning_data)
 
         self.plot(result, scorer.pi0, "learning")
-        # self.plot_scores(result.scored_tables, "learning")
+        self.plot_scores(result.scored_tables, "learning")
 
         return weights
 
@@ -165,7 +147,7 @@ class pyprophet:
         df.columns = ['condition_id','replicate_id','bait_id','prey_id','decoy','confidence_bin','score','pvalue','qvalue','pep']
 
         self.plot(result, scorer.pi0, "detecting_" + str(detecting_data['confidence_bin'].values[0]))
-        # self.plot_scores(result.scored_tables, "detecting_" + str(detecting_data['confidence_bin'].values[0]))
+        self.plot_scores(result.scored_tables, "detecting_" + str(detecting_data['confidence_bin'].values[0]))
 
         return df
 
