@@ -95,14 +95,14 @@ class pyprophet:
         con.close()
 
         # Filter according to boundaries
-        df_filter = df.groupby(["bait_id","prey_id","decoy"])[["var_xcorr_shift","var_mass_ratio","var_total_mass_ratio"]].mean().dropna().reset_index(level=["bait_id","prey_id","decoy"])
+        df_filter = df.groupby(["bait_id","prey_id","decoy"])[["var_xcorr_shift","var_mass_ratio","var_total_mass_ratio"]].mean().reset_index(level=["bait_id","prey_id","decoy"])
 
         df_filter = df_filter[(df_filter['var_xcorr_shift'] <= self.maximum_sec_shift) & (df_filter['var_mass_ratio'] >= self.minimum_mass_ratio) & (df_filter['var_total_mass_ratio'] >= self.minimum_mass_ratio)]
 
-        df = pd.merge(df, df_filter[["bait_id","prey_id","decoy"]], on=["bait_id","prey_id","decoy"]).dropna()
+        df = pd.merge(df, df_filter[["bait_id","prey_id","decoy"]], on=["bait_id","prey_id","decoy"])
 
-        # We need to generate a score that selects for the very best interactions heterodimers of similar size: perfect shape, co-elution and identical mass
-        df['main_var_kickstart'] = (df['var_xcorr_shape'] * df['var_mass_ratio']) / (df['var_xcorr_shift'] + 1)
+        # We need to generate a kickstart score for semi-supervised learning that selects for the very best interaction heterodimers: perfect shape, co-elution and overlap
+        df['main_var_kickstart'] = (df['var_xcorr_shape'] * df['var_total_mass_ratio']) / (df['var_xcorr_shift'] + 1)
 
         return df
 

@@ -43,7 +43,13 @@ class monomer:
 def score_chunk(queries, qm, run):
     scores = []
     for query_ix, query in queries.iterrows():
-        score = score_interaction(qm.xs(query['bait_id'], level='protein_id').values.copy(), qm.xs(query['prey_id'], level='protein_id').values.copy())
+        bait = qm.xs(query['bait_id'], level='protein_id')
+        bait_monomer_sec_id = bait.iloc[0].name[1]
+
+        prey = qm.xs(query['prey_id'], level='protein_id')
+        prey_monomer_sec_id = prey.iloc[0].name[1]
+
+        score = score_interaction(bait.values.copy(), prey.values.copy(), bait_monomer_sec_id, prey_monomer_sec_id)
         if score is not None:
             score['condition_id'] = run['condition_id']
             score['replicate_id'] = run['replicate_id']
@@ -51,7 +57,7 @@ def score_chunk(queries, qm, run):
             scores.append(score)
     return(scores)
 
-def score_interaction(bait, prey):
+def score_interaction(bait, prey, bait_monomer_sec_id, prey_monomer_sec_id):
     def longest_intersection(arr):
         # Compute longest continuous stretch
         n = len(arr)
@@ -76,9 +82,9 @@ def score_interaction(bait, prey):
         lxcorr = [] # cross-correlation lag
 
         if np.array_equal(a,b):
-            # Compare all rows of a against other rows of a but not against themselves
+            # Compare all rows of a against all rows of a, including itself (auto-correlation)
             for i in range(0, len(a)):
-                for j in range(i+1, len(a)):
+                for j in range(i, len(a)):
                     nxcorr.append(np.correlate(a[i], a[j], 'valid')[0] / len(a[i])) # Normalize by length
                     lxcorr.append(np.argmax(np.correlate(a[i], a[j], 'same'))) # Peak
         else:
@@ -125,7 +131,7 @@ def score_interaction(bait, prey):
     if total_intersection > 0:
         longest_intersection = longest_intersection(intersection.nonzero()[0])
 
-        # Require at least three overlapping data points
+        # Require at least three consecutive overlapping data points
         if longest_intersection > 2:
             # Prepare total bait and prey profiles & Replace nan with 0
             total_bait = np.nan_to_num(bait)
@@ -143,8 +149,8 @@ def score_interaction(bait, prey):
             bait = np.nan_to_num(bait)
             prey = np.nan_to_num(prey)
 
-            # Require at least two remaining peptides for bait and prey
-            if (bait.shape[0] > 1) and (prey.shape[0] > 1):
+            # Require at least one remaining peptide for bait and prey
+            if (bait.shape[0] > 0) and (prey.shape[0] > 0):
                 # Compute cross-correlation scores
                 xcorr_shape, xcorr_shift, xcorr_apex = sec_xcorr(bait, prey)
 
@@ -161,9 +167,11 @@ def score_interaction(bait, prey):
 
                 # Compute relative intersection score
                 relative_overlap = total_intersection / total_overlap
-                relative_intersection = longest_intersection / total_intersection
 
-                return({'var_xcorr_shape': xcorr_shape, 'var_xcorr_shift': xcorr_shift, 'var_mass_ratio': mass_ratio, 'var_total_mass_ratio': total_mass_ratio, 'var_mic': mic, 'var_tic': tic, 'var_sec_overlap': relative_overlap, 'var_sec_intersection': relative_intersection})
+                # Compute delta monomer score
+                delta_monomer = np.min(np.array(bait_monomer_sec_id - xcorr_apex, prey_monomer_sec_id - xcorr_apex))
+
+                return({'var_xcorr_shape': xcorr_shape, 'var_xcorr_shift': xcorr_shift, 'var_mass_ratio': mass_ratio, 'var_total_mass_ratio': total_mass_ratio, 'var_mic': mic, 'var_tic': tic, 'var_sec_overlap': relative_overlap, 'var_sec_intersection': longest_intersection, 'var_delta_monomer': delta_monomer})
 
 # Scoring
 class scoring:
@@ -288,7 +296,7 @@ class scoring:
         # Iterate over experimental design
         for exp_ix, run in exp_design.iterrows():
             chromatograms = self.chromatograms[(self.chromatograms['condition_id']==run['condition_id']) & (self.chromatograms['replicate_id']==run['replicate_id'])]
-            qm = chromatograms.pivot_table(index=['protein_id','peptide_id'], columns='sec_id', values='peptide_intensity')
+            qm = chromatograms.pivot_table(index=['protein_id','peptide_id','monomer_sec_id'], columns='sec_id', values='peptide_intensity')
 
             # Ensure that all queries are covered by chromatograms
             proteins = chromatograms['protein_id'].unique()
