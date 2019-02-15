@@ -104,6 +104,8 @@ class pyprophet:
         # We need to generate a kickstart score for semi-supervised learning that selects for the very best interaction heterodimers: perfect shape, co-elution and overlap
         df['main_var_kickstart'] = (df['var_xcorr_shape'] * df['var_total_mass_ratio']) / (df['var_xcorr_shift'] + 1)
 
+        # df = df.rename(index=str, columns={"var_xcorr_shape": "main_var_xcorr_shape", "var_sec_overlap": "main_var_sec_overlap"})
+
         return df
 
     def learn(self, learning_data):

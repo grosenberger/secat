@@ -294,9 +294,11 @@ class enrichment_test:
     def integrate(self):
         def collapse(x):
             if x.shape[0] > 1:
-                result = pd.Series({'nes': np.mean(x['nes'].values), 'pvalue': EmpiricalBrownsMethod(x[[c for c in x.columns if c.startswith("viper_")]].values, x['pvalue'].values)})
-            elif x.shape[0] == 1:
-                result = pd.Series({'nes': x['nes'].values[0], 'pvalue': x['pvalue'].values[0]})
+                result = pd.Series({'nes': np.mean(x['nes'].values), 'anes': np.mean(np.abs(x['nes'].values)), 'pvalue': EmpiricalBrownsMethod(x[[c for c in x.columns if c.startswith("viper_")]].values, x['pvalue'].values)})
+            elif x.shape[0] == 1 and x['level'].values[0] in ['monomer_intensity','total_intensity']:
+                result = pd.Series({'nes': x['nes'].values[0], 'anes': np.abs(x['nes'].values[0]), 'pvalue': x['pvalue'].values[0]})
+            else:
+                result = pd.Series({'nes': x['nes'].values[0], 'anes': np.abs(x['nes'].values[0]), 'pvalue': 1.0})
             return(result)
 
         def mtcorrect(x):
@@ -310,6 +312,7 @@ class enrichment_test:
 
         df_protein_level = self.tests[self.tests['bait_id'] == self.tests['prey_id']]
         df_edge_full = pd.concat([df_protein_level, df_edge_level, df_edge_level_rev], sort=False)
+        df_edge_full['anes'] = np.abs(df_edge_full['nes'])
         df_node_level = df_edge_full.groupby(['condition_1', 'condition_2','level','bait_id']).apply(collapse).reset_index()
 
         # Multi-testing correction and pooling
@@ -317,7 +320,7 @@ class enrichment_test:
         df_edge_level = df_edge_level.groupby(['condition_1', 'condition_2','level']).apply(mtcorrect).reset_index()
         df_edge = df_edge_level.sort_values('pvalue').groupby(['condition_1','condition_2','bait_id','prey_id']).head(1).reset_index()
         df_node_level = df_node_level.groupby(['condition_1', 'condition_2','level']).apply(mtcorrect).reset_index()
-        df_node = df_node_level.sort_values('pvalue').groupby(['condition_1','condition_2','bait_id']).head(1).reset_index()
+        df_node = df_node_level.sort_values('pvalue_adjusted').groupby(['condition_1','condition_2','bait_id']).head(1).reset_index()
 
         click.echo("Info: Total dysregulated proteins detected:")
         click.echo("%s (at FDR < 0.01)" % (df_node[df_node['pvalue_adjusted'] < 0.01][['bait_id']].drop_duplicates().shape[0]))
@@ -330,5 +333,5 @@ class enrichment_test:
             click.echo("%s (at FDR < 0.05)" % (df_node_level[(df_node_level['level'] == level) & (df_node_level['pvalue_adjusted'] < 0.05)][['bait_id']].drop_duplicates().shape[0]))
             click.echo("%s (at FDR < 0.1)" % (df_node_level[(df_node_level['level'] == level) & (df_node_level['pvalue_adjusted'] < 0.1)][['bait_id']].drop_duplicates().shape[0]))
 
-        return df_edge_level[['condition_1','condition_2','level','bait_id','prey_id','nes','pvalue','pvalue_adjusted']+[c for c in df_edge_level.columns if c.startswith("viper_")]], df_edge[['condition_1','condition_2','level','bait_id','prey_id','nes','pvalue','pvalue_adjusted']], df_node_level[['condition_1','condition_2','level','bait_id','nes','pvalue','pvalue_adjusted']], df_node[['condition_1','condition_2','level','bait_id','nes','pvalue','pvalue_adjusted']], df_protein_level[['condition_1','condition_2','level','bait_id','nes','pvalue','pvalue_adjusted'] + [c for c in df_protein_level.columns if c.startswith("viper_")]]
+        return df_edge_level[['condition_1','condition_2','level','bait_id','prey_id','nes','pvalue','pvalue_adjusted']+[c for c in df_edge_level.columns if c.startswith("viper_")]], df_edge[['condition_1','condition_2','level','bait_id','prey_id','nes','pvalue','pvalue_adjusted']], df_node_level[['condition_1','condition_2','level','bait_id','nes','anes','pvalue','pvalue_adjusted']], df_node[['condition_1','condition_2','level','bait_id','nes','anes','pvalue','pvalue_adjusted']], df_protein_level[['condition_1','condition_2','level','bait_id','nes','pvalue','pvalue_adjusted'] + [c for c in df_protein_level.columns if c.startswith("viper_")]]
 
