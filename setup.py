@@ -33,7 +33,7 @@ setup(
     ],
     packages=find_packages(exclude=['contrib', 'docs', 'tests']),
     include_package_data=True,
-    install_requires=['Click','tqdm','lxml','numpy','scipy','pandas','sklearn','pyprophet','minepy','rpy2','matplotlib'],
+    install_requires=['Click','tqdm','tzlocal','lxml','numpy','scipy','pandas','sklearn','pyprophet','minepy','rpy2','matplotlib'],
     # extras_require={  # Optional
     #     'dev': ['check-manifest'],
     #     'test': ['coverage'],

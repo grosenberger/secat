@@ -228,20 +228,34 @@ class enrichment_test:
 
         con.close()
 
+        monomer_qm = pd.merge(monomer_qm, monomer_qm[['bait_id']].drop_duplicates().head(100), on=['bait_id'])
+        complex_qm = pd.merge(complex_qm, complex_qm[['bait_id','prey_id']].drop_duplicates().head(100), on=['bait_id','prey_id'])
+
         return monomer_qm, complex_qm
 
     def compare(self):
         def collapse(x):
-            qm = x[[c for c in x.columns if c.startswith("viper_")]]
+            qm = x.sort_values(['is_bait'], ascending=False)[[c for c in x.columns if c.startswith("viper_")]]
 
             complex_intensity = qm.mean(axis=0)
             complex_intensity['level'] = 'complex_intensity'
-            complex_ratio = qm.diff(axis=0).iloc[1]
-            complex_ratio['level'] = 'complex_ratio'
+            complex_ratio_bait = qm.diff(axis=0).iloc[1]
+            complex_ratio_bait['level'] = 'complex_ratio'
+            complex_ratio_prey = -1*qm.diff(axis=0).iloc[1]
+            complex_ratio_prey['level'] = 'complex_ratio'
 
-            baits = pd.DataFrame([complex_intensity,complex_ratio],index=[0,1])
+            # qm = x.sort_values(['is_bait'], ascending=True)[[c for c in x.columns if c.startswith("viper_")]]
+
+            # complex_intensity = qm.mean(axis=0)
+            # complex_intensity['level'] = 'complex_intensity'
+            # complex_ratio_bait = qm.iloc[0]/qm.iloc[1]
+            # complex_ratio_bait['level'] = 'complex_ratio'
+            # complex_ratio_prey = qm.iloc[1]/qm.iloc[0]
+            # complex_ratio_prey['level'] = 'complex_ratio'
+
+            baits = pd.DataFrame([complex_intensity,complex_ratio_bait],index=[0,1])
             baits['is_bait'] = True
-            preys = baits.copy()
+            preys = pd.DataFrame([complex_intensity,complex_ratio_prey],index=[0,1])
             preys['is_bait'] = False
 
             return(pd.concat([baits, preys]))
