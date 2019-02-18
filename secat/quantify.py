@@ -228,8 +228,8 @@ class enrichment_test:
 
         con.close()
 
-        monomer_qm = pd.merge(monomer_qm, monomer_qm[['bait_id']].drop_duplicates().head(100), on=['bait_id'])
-        complex_qm = pd.merge(complex_qm, complex_qm[['bait_id','prey_id']].drop_duplicates().head(100), on=['bait_id','prey_id'])
+        # monomer_qm = pd.merge(monomer_qm, monomer_qm[['bait_id']].drop_duplicates().head(100), on=['bait_id'])
+        # complex_qm = pd.merge(complex_qm, complex_qm[['bait_id','prey_id']].drop_duplicates().head(100), on=['bait_id','prey_id'])
 
         return monomer_qm, complex_qm
 
@@ -239,23 +239,23 @@ class enrichment_test:
 
             complex_intensity = qm.mean(axis=0)
             complex_intensity['level'] = 'complex_intensity'
-            complex_ratio_bait = qm.diff(axis=0).iloc[1]
-            complex_ratio_bait['level'] = 'complex_ratio'
-            complex_ratio_prey = -1*qm.diff(axis=0).iloc[1]
-            complex_ratio_prey['level'] = 'complex_ratio'
+            complex_stoichiometry_bait = (qm.iloc[1] - qm.iloc[0]) - qm.mean(axis=0)
+            complex_stoichiometry_bait['level'] = 'complex_stoichiometry'
+            complex_stoichiometry_prey = (qm.iloc[0] - qm.iloc[1]) - qm.mean(axis=0)
+            complex_stoichiometry_prey['level'] = 'complex_stoichiometry'
 
             # qm = x.sort_values(['is_bait'], ascending=True)[[c for c in x.columns if c.startswith("viper_")]]
 
             # complex_intensity = qm.mean(axis=0)
             # complex_intensity['level'] = 'complex_intensity'
-            # complex_ratio_bait = qm.iloc[0]/qm.iloc[1]
-            # complex_ratio_bait['level'] = 'complex_ratio'
-            # complex_ratio_prey = qm.iloc[1]/qm.iloc[0]
-            # complex_ratio_prey['level'] = 'complex_ratio'
+            # complex_stoichiometry_bait = qm.iloc[0]/qm.iloc[1]
+            # complex_stoichiometry_bait['level'] = 'complex_stoichiometry'
+            # complex_stoichiometry_prey = qm.iloc[1]/qm.iloc[0]
+            # complex_stoichiometry_prey['level'] = 'complex_stoichiometry'
 
-            baits = pd.DataFrame([complex_intensity,complex_ratio_bait],index=[0,1])
+            baits = pd.DataFrame([complex_intensity,complex_stoichiometry_bait],index=[0,1])
             baits['is_bait'] = True
-            preys = pd.DataFrame([complex_intensity,complex_ratio_prey],index=[0,1])
+            preys = pd.DataFrame([complex_intensity,complex_stoichiometry_prey],index=[0,1])
             preys['is_bait'] = False
 
             return(pd.concat([baits, preys]))
