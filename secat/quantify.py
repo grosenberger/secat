@@ -28,7 +28,7 @@ class quantitative_matrix:
 
         interactions = pd.read_sql('SELECT DISTINCT bait_id, prey_id FROM FEATURE_SCORED_COMBINED WHERE qvalue <= %s AND bait_id != prey_id AND decoy == 0;' % (self.maximum_interaction_qvalue), con)
 
-        detections = pd.read_sql('SELECT DISTINCT condition_id, replicate_id, FEATURE_SCORED.bait_id, FEATURE_SCORED.prey_id, 1-pep AS score FROM FEATURE_SCORED INNER JOIN (SELECT DISTINCT bait_id, prey_id FROM FEATURE_SCORED_COMBINED WHERE qvalue <= %s AND bait_id != prey_id AND decoy == 0) AS FEATURE_SCORED_COMBINED ON FEATURE_SCORED.bait_id = FEATURE_SCORED_COMBINED.bait_id AND FEATURE_SCORED.prey_id = FEATURE_SCORED_COMBINED.prey_id;' % (self.maximum_interaction_qvalue), con)
+        detections = pd.read_sql('SELECT DISTINCT condition_id, replicate_id, FEATURE_SCORED.bait_id, FEATURE_SCORED.prey_id FROM FEATURE_SCORED INNER JOIN (SELECT DISTINCT bait_id, prey_id FROM FEATURE_SCORED_COMBINED WHERE qvalue <= %s AND bait_id != prey_id AND decoy == 0) AS FEATURE_SCORED_COMBINED ON FEATURE_SCORED.bait_id = FEATURE_SCORED_COMBINED.bait_id AND FEATURE_SCORED.prey_id = FEATURE_SCORED_COMBINED.prey_id;' % (self.maximum_interaction_qvalue), con)
 
         chromatograms = pd.read_sql('SELECT SEC.condition_id, SEC.replicate_id, SEC.sec_id, QUANTIFICATION.protein_id, QUANTIFICATION.peptide_id, peptide_intensity, MONOMER.sec_id AS monomer_sec_id FROM QUANTIFICATION INNER JOIN PROTEIN_META ON QUANTIFICATION.protein_id = PROTEIN_META.protein_id INNER JOIN PEPTIDE_META ON QUANTIFICATION.peptide_id = PEPTIDE_META.peptide_id INNER JOIN SEC ON QUANTIFICATION.RUN_ID = SEC.RUN_ID INNER JOIN MONOMER ON QUANTIFICATION.protein_id = MONOMER.protein_id and SEC.condition_id = MONOMER.condition_id AND SEC.replicate_id = MONOMER.replicate_id WHERE peptide_count >= %s AND peptide_rank <= %s;' % (self.minimum_peptides, self.maximum_peptides), con)
 
@@ -68,6 +68,7 @@ class quantitative_matrix:
             # Aggregate to peptide level
             peptide = df[['condition_id','replicate_id','bait_id','prey_id','is_bait','peptide_id']].copy()
             peptide['monomer_intensity'] = np.log2(df['peptide_intensity'].values+1)
+            peptide['bound_intensity'] = np.log2(df['total_peptide_intensity'].values-df['peptide_intensity'].values+1)
             peptide['total_intensity'] = np.log2(df['total_peptide_intensity'].values+1)
 
             return peptide
@@ -144,7 +145,7 @@ class enrichment_test:
         self.control_condition = control_condition
         self.enrichment_permutations = enrichment_permutations
         self.threads = threads
-        self.levels = ['fraction_intensity','monomer_intensity','total_intensity']
+        self.levels = ['fraction_intensity','monomer_intensity','bound_intensity','total_intensity']
         self.comparisons = self.contrast()
 
         self.monomer_qm, self.complex_qm = self.read()
@@ -309,7 +310,7 @@ class enrichment_test:
         def collapse(x):
             if x.shape[0] > 1:
                 result = pd.Series({'nes': np.mean(x['nes'].values), 'anes': np.mean(np.abs(x['nes'].values)), 'pvalue': EmpiricalBrownsMethod(x[[c for c in x.columns if c.startswith("viper_")]].values, x['pvalue'].values)})
-            elif x.shape[0] == 1 and x['level'].values[0] in ['monomer_intensity','total_intensity']:
+            elif x.shape[0] == 1 and x['level'].values[0] in ['monomer_intensity','bound_intensity','total_intensity']:
                 result = pd.Series({'nes': x['nes'].values[0], 'anes': np.abs(x['nes'].values[0]), 'pvalue': x['pvalue'].values[0]})
             else:
                 result = pd.Series({'nes': x['nes'].values[0], 'anes': np.abs(x['nes'].values[0]), 'pvalue': 1.0})
