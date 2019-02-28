@@ -296,11 +296,9 @@ class enrichment_test:
     def integrate(self):
         def collapse(x):
             if x.shape[0] > 1:
-                result = pd.Series({'nes': np.mean(x['nes'].values), 'anes': np.mean(x['anes'].values), 'cfactor': np.mean(x['cfactor'].values), 'pvalue': EmpiricalBrownsMethod(x[[c for c in x.columns if c.startswith("viper_")]].values, x['pvalue'].values)})
-            elif x.shape[0] == 1 and x['level'].values[0] in ['monomer_intensity','total_intensity']:
-                result = pd.Series({'nes': x['nes'].values[0], 'anes': x['anes'].values[0], 'cfactor': x['cfactor'].values[0], 'pvalue': x['pvalue'].values[0]})
+                result = pd.Series({'num_interactors': x.shape[0], 'nes': np.mean(x['nes'].values), 'anes': np.mean(x['anes'].values), 'cfactor': np.mean(x['cfactor'].values), 'pvalue': EmpiricalBrownsMethod(x[[c for c in x.columns if c.startswith("viper_")]].values, x['pvalue'].values)})
             else:
-                result = pd.Series({'nes': x['nes'].values[0], 'anes': x['anes'].values[0], 'cfactor': x['cfactor'].values[0], 'pvalue': 1.0})
+                result = pd.Series({'num_interactors': x.shape[0], 'nes': x['nes'].values[0], 'anes': x['anes'].values[0], 'cfactor': x['cfactor'].values[0], 'pvalue': x['pvalue'].values[0]})
             return(result)
 
         def mtcorrect(x):
