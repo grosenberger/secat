@@ -236,30 +236,13 @@ class enrichment_test:
 
     def compare(self):
         def collapse(x):
-            qm = x.sort_values(['is_bait'], ascending=False)[[c for c in x.columns if c.startswith("viper_")]]
+            ebm = EmpiricalBrownsMethod(x[[c for c in x.columns if c.startswith("viper_")]].values, x['pvalue'].values, extra_info=True)
 
-            complex_intensity = qm.mean(axis=0)
-            complex_intensity['level'] = 'complex_intensity'
-            complex_stoichiometry_bait = (qm.iloc[1] - qm.iloc[0]) - qm.mean(axis=0)
-            complex_stoichiometry_bait['level'] = 'complex_stoichiometry'
-            complex_stoichiometry_prey = (qm.iloc[0] - qm.iloc[1]) - qm.mean(axis=0)
-            complex_stoichiometry_prey['level'] = 'complex_stoichiometry'
+            result = pd.Series({'level': 'complex_intensity', 'nes': np.mean(x['nes'].values), 'anes': np.mean(x['anes'].values), 'pvalue': ebm[0], 'cfactor': ebm[2]})
 
-            # qm = x.sort_values(['is_bait'], ascending=True)[[c for c in x.columns if c.startswith("viper_")]]
+            result = pd.concat([result, x[[c for c in x.columns if c.startswith("viper_")]].mean(axis=0)])
 
-            # complex_intensity = qm.mean(axis=0)
-            # complex_intensity['level'] = 'complex_intensity'
-            # complex_stoichiometry_bait = qm.iloc[0]/qm.iloc[1]
-            # complex_stoichiometry_bait['level'] = 'complex_stoichiometry'
-            # complex_stoichiometry_prey = qm.iloc[1]/qm.iloc[0]
-            # complex_stoichiometry_prey['level'] = 'complex_stoichiometry'
-
-            baits = pd.DataFrame([complex_intensity,complex_stoichiometry_bait],index=[0,1])
-            baits['is_bait'] = True
-            preys = pd.DataFrame([complex_intensity,complex_stoichiometry_prey],index=[0,1])
-            preys['is_bait'] = False
-
-            return(pd.concat([baits, preys]))
+            return(result)
 
         dfs = []
         for level in self.levels:
@@ -291,29 +274,33 @@ class enrichment_test:
                         results['condition_1'] = comparison[0]
                         results['condition_2'] = comparison[1]
 
+                        # Conduct statistical test
+                        results_pvalue = results.groupby(['query_id','is_bait','level']).apply(lambda x: pd.Series({"nes": np.mean(x[qm_ids[qm_ids['condition_id']==comparison[0]]['quantification_id'].values].values[0]), "anes": np.mean(np.abs(x[qm_ids[qm_ids['condition_id']==comparison[0]]['quantification_id'].values].values[0])), "cfactor": 0, "pvalue": ttest_ind(x[qm_ids[qm_ids['condition_id']==comparison[0]]['quantification_id'].values].values[0], x[qm_ids[qm_ids['condition_id']==comparison[1]]['quantification_id'].values].values[0], equal_var=True)[1]})).reset_index()
+                        results = pd.merge(results, results_pvalue, on=['query_id','is_bait','level'])
+
                         # Append aggregated bait and prey metrics per query
                         if level == "fraction_intensity":
                             results_aggregated = results.groupby(['condition_1','condition_2','query_id']).apply(collapse).reset_index(level=['condition_1','condition_2','query_id'])
-                            results = pd.concat([results, results_aggregated], sort=False)
-
-                        # Conduct statistical test
-                        results_pvalue = results.groupby(['query_id','is_bait','level']).apply(lambda x: pd.Series({"nes": np.mean(x[qm_ids[qm_ids['condition_id']==comparison[0]]['quantification_id'].values].values[0]) - np.mean(x[qm_ids[qm_ids['condition_id']==comparison[1]]['quantification_id'].values].values[0]), "pvalue": ttest_ind(x[qm_ids[qm_ids['condition_id']==comparison[0]]['quantification_id'].values].values[0], x[qm_ids[qm_ids['condition_id']==comparison[1]]['quantification_id'].values].values[0], equal_var=True)[1]})).reset_index()
+                            results_aggregated['is_bait'] = True
+                            result_aggregated_prey = results_aggregated.copy()
+                            result_aggregated_prey['is_bait'] = False
+                            results = pd.concat([results, results_aggregated, result_aggregated_prey], sort=False)
 
                         # Append meta information
-                        results = pd.merge(pd.merge(results, results_pvalue, on=['query_id','is_bait','level']), dat[['query_id','bait_id','prey_id']].drop_duplicates(), on='query_id')
+                        results = pd.merge(results, dat[['query_id','bait_id','prey_id']].drop_duplicates(), on='query_id')
 
-                        dfs.append(results[['condition_1','condition_2','level','bait_id','prey_id','is_bait','nes','pvalue']+[c for c in results.columns if c.startswith("viper_")]])
+                        dfs.append(results[['condition_1','condition_2','level','bait_id','prey_id','is_bait','nes','anes','pvalue','cfactor']+[c for c in results.columns if c.startswith("viper_")]])
 
         return pd.concat(dfs, ignore_index=True, sort=True).sort_values(by='pvalue', ascending=True, na_position='last')
 
     def integrate(self):
         def collapse(x):
             if x.shape[0] > 1:
-                result = pd.Series({'nes': np.mean(x['nes'].values), 'anes': np.mean(np.abs(x['nes'].values)), 'pvalue': EmpiricalBrownsMethod(x[[c for c in x.columns if c.startswith("viper_")]].values, x['pvalue'].values)})
-            elif x.shape[0] == 1 and x['level'].values[0] in ['monomer_intensity','bound_intensity','total_intensity']:
-                result = pd.Series({'nes': x['nes'].values[0], 'anes': np.abs(x['nes'].values[0]), 'pvalue': x['pvalue'].values[0]})
+                result = pd.Series({'nes': np.mean(x['nes'].values), 'anes': np.mean(x['anes'].values), 'cfactor': np.mean(x['cfactor'].values), 'pvalue': EmpiricalBrownsMethod(x[[c for c in x.columns if c.startswith("viper_")]].values, x['pvalue'].values)})
+            elif x.shape[0] == 1 and x['level'].values[0] in ['monomer_intensity','total_intensity']:
+                result = pd.Series({'nes': x['nes'].values[0], 'anes': x['anes'].values[0], 'cfactor': x['cfactor'].values[0], 'pvalue': x['pvalue'].values[0]})
             else:
-                result = pd.Series({'nes': x['nes'].values[0], 'anes': np.abs(x['nes'].values[0]), 'pvalue': 1.0})
+                result = pd.Series({'nes': x['nes'].values[0], 'anes': x['anes'].values[0], 'cfactor': x['cfactor'].values[0], 'pvalue': 1.0})
             return(result)
 
         def mtcorrect(x):
@@ -327,7 +314,6 @@ class enrichment_test:
 
         df_protein_level = self.tests[self.tests['bait_id'] == self.tests['prey_id']]
         df_edge_full = pd.concat([df_protein_level, df_edge_level, df_edge_level_rev], sort=False)
-        df_edge_full['anes'] = np.abs(df_edge_full['nes'])
         df_node_level = df_edge_full.groupby(['condition_1', 'condition_2','level','bait_id']).apply(collapse).reset_index()
 
         # Multi-testing correction and pooling
@@ -348,5 +334,5 @@ class enrichment_test:
             click.echo("%s (at FDR < 0.05)" % (df_node_level[(df_node_level['level'] == level) & (df_node_level['pvalue_adjusted'] < 0.05)][['bait_id']].drop_duplicates().shape[0]))
             click.echo("%s (at FDR < 0.1)" % (df_node_level[(df_node_level['level'] == level) & (df_node_level['pvalue_adjusted'] < 0.1)][['bait_id']].drop_duplicates().shape[0]))
 
-        return df_edge_level[['condition_1','condition_2','level','bait_id','prey_id','nes','pvalue','pvalue_adjusted']+[c for c in df_edge_level.columns if c.startswith("viper_")]], df_edge[['condition_1','condition_2','level','bait_id','prey_id','nes','pvalue','pvalue_adjusted']], df_node_level[['condition_1','condition_2','level','bait_id','nes','anes','pvalue','pvalue_adjusted']], df_node[['condition_1','condition_2','level','bait_id','nes','anes','pvalue','pvalue_adjusted']], df_protein_level[['condition_1','condition_2','level','bait_id','nes','pvalue','pvalue_adjusted'] + [c for c in df_protein_level.columns if c.startswith("viper_")]]
+        return df_edge_level[['condition_1','condition_2','level','bait_id','prey_id','nes','anes','cfactor','pvalue','pvalue_adjusted']+[c for c in df_edge_level.columns if c.startswith("viper_")]], df_edge[['condition_1','condition_2','level','bait_id','prey_id','nes','anes','cfactor','pvalue','pvalue_adjusted']], df_node_level[['condition_1','condition_2','level','bait_id','nes','anes','cfactor','pvalue','pvalue_adjusted']], df_node[['condition_1','condition_2','level','bait_id','nes','anes','cfactor','pvalue','pvalue_adjusted']], df_protein_level[['condition_1','condition_2','level','bait_id','nes','anes','cfactor','pvalue','pvalue_adjusted'] + [c for c in df_protein_level.columns if c.startswith("viper_")]]
 
