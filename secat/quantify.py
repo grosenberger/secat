@@ -117,7 +117,7 @@ class quantitative_matrix:
         def peptide_summarize(df):
             # Aggregate to peptide level
             peptide = df[['condition_id','replicate_id','bait_id','prey_id','is_bait','peptide_id']].copy()
-            peptide['fraction_intensity'] = np.log2(df['peptide_intensity']+1)
+            peptide['interactor_intensity'] = np.log2(df['peptide_intensity']+1)
 
             return peptide
 
@@ -145,7 +145,7 @@ class enrichment_test:
         self.control_condition = control_condition
         self.enrichment_permutations = enrichment_permutations
         self.threads = threads
-        self.levels = ['fraction_intensity','monomer_intensity','bound_intensity','total_intensity']
+        self.levels = ['interactor_intensity','monomer_intensity','bound_intensity','total_intensity']
         self.comparisons = self.contrast()
 
         self.monomer_qm, self.complex_qm = self.read()
@@ -279,7 +279,7 @@ class enrichment_test:
                         results = pd.merge(results, results_pvalue, on=['query_id','is_bait','level'])
 
                         # Append aggregated bait and prey metrics per query
-                        if level == "fraction_intensity":
+                        if level == "interactor_intensity":
                             results_aggregated = results.groupby(['condition_1','condition_2','query_id']).apply(collapse).reset_index(level=['condition_1','condition_2','query_id'])
                             results_aggregated['is_bait'] = True
                             result_aggregated_prey = results_aggregated.copy()
@@ -312,6 +312,7 @@ class enrichment_test:
 
         df_protein_level = self.tests[self.tests['bait_id'] == self.tests['prey_id']]
         df_edge_full = pd.concat([df_protein_level, df_edge_level, df_edge_level_rev], sort=False)
+        df_edge_level = pd.concat([df_edge_level, df_edge_level_rev[df_edge_level_rev['level']=='interactor_intensity']], sort=False)
         df_node_level = df_edge_full.groupby(['condition_1', 'condition_2','level','bait_id']).apply(collapse).reset_index()
 
         # Multi-testing correction and pooling
@@ -332,5 +333,5 @@ class enrichment_test:
             click.echo("%s (at FDR < 0.05)" % (df_node_level[(df_node_level['level'] == level) & (df_node_level['pvalue_adjusted'] < 0.05)][['bait_id']].drop_duplicates().shape[0]))
             click.echo("%s (at FDR < 0.1)" % (df_node_level[(df_node_level['level'] == level) & (df_node_level['pvalue_adjusted'] < 0.1)][['bait_id']].drop_duplicates().shape[0]))
 
-        return df_edge_level[['condition_1','condition_2','level','bait_id','prey_id','nes','anes','cfactor','pvalue','pvalue_adjusted']+[c for c in df_edge_level.columns if c.startswith("viper_")]], df_edge[['condition_1','condition_2','level','bait_id','prey_id','nes','anes','cfactor','pvalue','pvalue_adjusted']], df_node_level[['condition_1','condition_2','level','bait_id','nes','anes','cfactor','pvalue','pvalue_adjusted']], df_node[['condition_1','condition_2','level','bait_id','nes','anes','cfactor','pvalue','pvalue_adjusted']], df_protein_level[['condition_1','condition_2','level','bait_id','nes','anes','cfactor','pvalue','pvalue_adjusted'] + [c for c in df_protein_level.columns if c.startswith("viper_")]]
+        return df_edge_level[['condition_1','condition_2','level','bait_id','prey_id','nes','anes','cfactor','pvalue','pvalue_adjusted']+[c for c in df_edge_level.columns if c.startswith("viper_")]], df_edge[['condition_1','condition_2','level','bait_id','prey_id','nes','anes','cfactor','pvalue','pvalue_adjusted']], df_node_level[['condition_1','condition_2','level','bait_id','nes','anes','cfactor','num_interactors','pvalue','pvalue_adjusted']], df_node[['condition_1','condition_2','level','bait_id','nes','anes','cfactor','num_interactors','pvalue','pvalue_adjusted']], df_protein_level[['condition_1','condition_2','level','bait_id','nes','anes','cfactor','pvalue','pvalue_adjusted'] + [c for c in df_protein_level.columns if c.startswith("viper_")]]
 
