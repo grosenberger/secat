@@ -25,7 +25,7 @@ from pyprophet.stats import pemp, qvalue, pi0est
 from hyperopt import hp
 
 class pyprophet:
-    def __init__(self, outfile, apply_model, minimum_mass_ratio, maximum_sec_shift, cb_decoys, xeval_fraction, xeval_num_iter, ss_initial_fdr, ss_iteration_fdr, ss_num_iter, parametric, pfdr, pi0_lambda, pi0_method, pi0_smooth_df, pi0_smooth_log_pi0, lfdr_truncate, lfdr_monotone, lfdr_transformation, lfdr_adj, lfdr_eps, threads, test):
+    def __init__(self, outfile, apply_model, minimum_abundance_ratio, maximum_sec_shift, cb_decoys, xeval_fraction, xeval_num_iter, ss_initial_fdr, ss_iteration_fdr, ss_num_iter, parametric, pfdr, pi0_lambda, pi0_method, pi0_smooth_df, pi0_smooth_log_pi0, lfdr_truncate, lfdr_monotone, lfdr_transformation, lfdr_adj, lfdr_eps, threads, test):
 
         self.outfile = outfile
         self.apply_model = apply_model
@@ -37,7 +37,7 @@ class pyprophet:
 
         self.xgb_params_space = {'eta': hp.uniform('eta', 0.5, 1.0), 'gamma': hp.uniform('gamma', 0.0, 0.5), 'max_depth': hp.quniform('max_depth', 2, 8, 1), 'min_child_weight': hp.quniform('min_child_weight', 1, 5, 1), 'subsample': hp.uniform('subsample', 0.5, 1.0), 'colsample_bytree': 1.0, 'colsample_bylevel': 1.0, 'colsample_bynode': 1.0, 'lambda': hp.uniform('lambda', 0.0, 1.0), 'alpha': hp.uniform('alpha', 0.0, 1.0), 'scale_pos_weight': 1.0, 'silent': 1, 'objective': 'binary:logitraw', 'nthread': 1, 'eval_metric': 'auc'}
 
-        self.minimum_mass_ratio = minimum_mass_ratio
+        self.minimum_abundance_ratio = minimum_abundance_ratio
         self.maximum_sec_shift = maximum_sec_shift
         self.cb_decoys = cb_decoys
         self.xeval_fraction = xeval_fraction
@@ -95,14 +95,14 @@ class pyprophet:
         con.close()
 
         # Filter according to boundaries
-        df_filter = df.groupby(["bait_id","prey_id","decoy"])[["var_xcorr_shift","var_mass_ratio","var_total_mass_ratio"]].mean().reset_index(level=["bait_id","prey_id","decoy"])
+        df_filter = df.groupby(["bait_id","prey_id","decoy"])[["var_xcorr_shift","var_abundance_ratio","var_total_abundance_ratio"]].mean().reset_index(level=["bait_id","prey_id","decoy"])
 
-        df_filter = df_filter[(df_filter['var_xcorr_shift'] <= self.maximum_sec_shift) & (df_filter['var_mass_ratio'] >= self.minimum_mass_ratio) & (df_filter['var_total_mass_ratio'] >= self.minimum_mass_ratio)]
+        df_filter = df_filter[(df_filter['var_xcorr_shift'] <= self.maximum_sec_shift) & (df_filter['var_abundance_ratio'] >= self.minimum_abundance_ratio) & (df_filter['var_total_abundance_ratio'] >= self.minimum_abundance_ratio)]
 
         df = pd.merge(df, df_filter[["bait_id","prey_id","decoy"]], on=["bait_id","prey_id","decoy"])
 
         # We need to generate a kickstart score for semi-supervised learning that selects for the very best interaction heterodimers: perfect shape, co-elution and overlap
-        df['main_var_kickstart'] = (df['var_xcorr_shape'] * df['var_total_mass_ratio']) / (df['var_xcorr_shift'] + 1)
+        df['main_var_kickstart'] = (df['var_xcorr_shape'] * df['var_total_abundance_ratio']) / (df['var_xcorr_shift'] + 1)
 
         # df = df.rename(index=str, columns={"var_xcorr_shape": "main_var_xcorr_shape", "var_sec_overlap": "main_var_sec_overlap"})
 

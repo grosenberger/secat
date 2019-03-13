@@ -110,15 +110,15 @@ def score_interaction(bait, prey, bait_monomer_sec_id, prey_monomer_sec_id):
 
     def mass_similarity(bm, pm):
         # Sum bait and prey peptides
-        bpmass = np.sum(bm, axis=1, keepdims=True).mean()
-        ppmass = np.sum(pm, axis=1, keepdims=True).mean()
+        bpabundance = np.sum(bm, axis=1, keepdims=True).mean()
+        ppabundance = np.sum(pm, axis=1, keepdims=True).mean()
 
-        # Compute mass ratio of bait and prey protein
-        mass_ratio = bpmass / ppmass
-        if mass_ratio > 1:
-            mass_ratio = 1 / mass_ratio
+        # Compute abundance ratio of bait and prey protein
+        abundance_ratio = bpabundance / ppabundance
+        if abundance_ratio > 1:
+            abundance_ratio = 1 / abundance_ratio
 
-        return mass_ratio
+        return abundance_ratio
 
 
    # Compute bait and prey overlap
@@ -160,18 +160,21 @@ def score_interaction(bait, prey, bait_monomer_sec_id, prey_monomer_sec_id):
                 tic = tic_stat.mean(axis=0).mean() # Axis 0: summary for prey peptides / Axis 1: summary for bait peptides
 
                 # Compute mass similarity score
-                mass_ratio = mass_similarity(bait, prey)
+                abundance_ratio = mass_similarity(bait, prey)
 
                 # Compute total mass similarity score
-                total_mass_ratio = mass_similarity(total_bait, total_prey)
+                total_abundance_ratio = mass_similarity(total_bait, total_prey)
 
                 # Compute relative intersection score
                 relative_overlap = total_intersection / total_overlap
 
                 # Compute delta monomer score
-                delta_monomer = np.min(np.array(bait_monomer_sec_id - xcorr_apex, prey_monomer_sec_id - xcorr_apex))
+                delta_monomer = np.abs(bait_monomer_sec_id - prey_monomer_sec_id)
 
-                return({'var_xcorr_shape': xcorr_shape, 'var_xcorr_shift': xcorr_shift, 'var_mass_ratio': mass_ratio, 'var_total_mass_ratio': total_mass_ratio, 'var_mic': mic, 'var_tic': tic, 'var_sec_overlap': relative_overlap, 'var_sec_intersection': longest_intersection, 'var_delta_monomer': delta_monomer})
+                # Compute apex monomer score
+                apex_monomer = np.min(np.array(bait_monomer_sec_id - xcorr_apex, prey_monomer_sec_id - xcorr_apex))
+
+                return({'var_xcorr_shape': xcorr_shape, 'var_xcorr_shift': xcorr_shift, 'var_abundance_ratio': abundance_ratio, 'var_total_abundance_ratio': total_abundance_ratio, 'var_mic': mic, 'var_tic': tic, 'var_sec_overlap': relative_overlap, 'var_sec_intersection': longest_intersection, 'var_delta_monomer': delta_monomer, 'var_apex_monomer': apex_monomer})
 
 # Scoring
 class scoring:
