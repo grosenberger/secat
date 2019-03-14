@@ -11,13 +11,13 @@ We strongly advice to install *SECAT* in a Python [*virtualenv*](https://virtual
 Install the development version of *SECAT* from GitHub:
 
 ````
-    $ pip install git+https://github.com/grosenberger/secat.git@master
+pip install git+https://github.com/grosenberger/secat.git@master
 ````
 
 Install the stable version of *SECAT* from the Python Package Index (PyPI):
 
 ````
-    $ pip install secat
+pip install secat
 ````
 
 Running SECAT
@@ -76,7 +76,7 @@ secat export --in=ccl2kyoto_string_negative_spectronaut.secat
 
 **6. Plotting of chromatograms**
 
-PDF reports can be generated for the top results:
+PDF reports can be generated for the top (or selected) results:
 
 ````
 secat plot --in=ccl2kyoto_string_negative_spectronaut.secat
