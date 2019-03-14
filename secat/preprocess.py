@@ -64,7 +64,7 @@ class mitab:
             else:
                 return 0
 
-        df = pd.read_table(mitabfile, header = None, usecols=[0,1,14])
+        df = pd.read_csv(mitabfile, sep="\t", header = None, usecols=[0,1,14])
         df.columns = ["bait_id","prey_id","interaction_confidence"]
 
         # Reduce DB to UniProtKB entries with scores
@@ -99,7 +99,7 @@ class stringdb:
         self.df = self.read(stringdbfile, uniprot)
 
     def read(self, stringdbfile, uniprot):
-        df = pd.read_table(stringdbfile, sep=" ")
+        df = pd.read_csv(stringdbfile, sep=" ")
 
         _, df['protein1s'] = df['protein1'].str.split('.', 1).str
         _, df['protein2s'] = df['protein2'].str.split('.', 1).str
@@ -121,7 +121,7 @@ class bioplex:
         self.df = self.read(bioplexfile)
 
     def read(self, bioplexfile):
-        df = pd.read_table(bioplexfile)
+        df = pd.read_csv(bioplexfile, sep="\t")
 
         df = df[['UniprotA','UniprotB','p(Interaction)']]
         df.columns = ["bait_id","prey_id","interaction_confidence"]
@@ -133,7 +133,7 @@ class preppi:
         self.df = self.read(preppifile)
 
     def read(self, preppifile):
-        df = pd.read_table(preppifile)
+        df = pd.read_csv(preppifile, sep="\t")
 
         # Criterion for direct physical interaction
         # df = df[df['str_max_score'] * df['red_score'] > 100]
@@ -178,7 +178,7 @@ class net:
         if netfile == None:
             return self.formats[4]
 
-        header = pd.read_table(netfile, sep=None, nrows=1, engine='python')
+        header = pd.read_csv(netfile, sep=None, nrows=1, engine='python')
 
         columns = list(header.columns.values)
 
@@ -222,7 +222,7 @@ class sec:
         self.df = self.read(secfile)
 
     def identify(self, secfile):
-        header = pd.read_table(secfile, sep=None, nrows=1, engine='python')
+        header = pd.read_csv(secfile, sep=None, nrows=1, engine='python')
 
         columns = list(header.columns.values)
 
@@ -273,7 +273,7 @@ class quantification:
             self.df = self.read_long(infile)
 
     def identify(self, infile):
-        header = pd.read_table(infile, sep=None, nrows=1, engine='python')
+        header = pd.read_csv(infile, sep=None, nrows=1, engine='python')
 
         columns = list(header.columns.values)
 
@@ -445,8 +445,8 @@ class query:
 
         # Generate confidence bin assignment
         if len(queries['interaction_confidence'].unique()) >= self.interaction_confidence_bins:
-            queries['confidence_bin'] = pd.cut(queries['interaction_confidence'], bins=self.interaction_confidence_bins, labels=False)
-            # queries['confidence_bin'] = pd.qcut(queries['interaction_confidence'], q=self.interaction_confidence_bins, labels=False)
+            # queries['confidence_bin'] = pd.cut(queries['interaction_confidence'], bins=self.interaction_confidence_bins, labels=False)
+            queries['confidence_bin'] = pd.qcut(queries['interaction_confidence'], q=self.interaction_confidence_bins, labels=False, duplicates='drop')
         else:
             queries['confidence_bin'] = 1
 

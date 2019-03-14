@@ -45,7 +45,7 @@ def cli():
 @click.option('--decoy_subsample/--no-decoy_subsample', default=False, show_default=True, help='Whether decoys should be subsampled to be approximately of similar number as targets.')
 @click.option('--decoy_exclude/--no-decoy_exclude', default=True, show_default=True, help='Whether decoy interactions also covered by targets should be excluded.')
 @click.option('--min_interaction_confidence', 'min_interaction_confidence', default=0.0, show_default=True, type=float, help='Minimum interaction confidence for prior information from network.')
-@click.option('--interaction_confidence_bins', 'interaction_confidence_bins', default=20, show_default=True, type=int, help='Number of interaction confidence bins for grouped error rate estimation.')
+@click.option('--interaction_confidence_bins', 'interaction_confidence_bins', default=100, show_default=True, type=int, help='Number of interaction confidence bins for grouped error rate estimation.')
 
 def preprocess(infiles, outfile, secfile, netfile, posnetfile, negnetfile, uniprotfile, columns, decoy_intensity_bins, decoy_left_sec_bins, decoy_right_sec_bins, decoy_oversample, decoy_subsample, decoy_exclude, min_interaction_confidence, interaction_confidence_bins):
     """
