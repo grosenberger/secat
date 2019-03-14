@@ -425,9 +425,10 @@ class meta:
         return peptide_meta, protein_meta
 
 class query:
-    def __init__(self, net_data, posnet_data, negnet_data, protein_meta_data, min_interaction_confidence, interaction_confidence_bins, decoy_oversample, decoy_subsample, decoy_exclude):
+    def __init__(self, net_data, posnet_data, negnet_data, protein_meta_data, min_interaction_confidence, interaction_confidence_bins, interaction_confidence_quantile, decoy_oversample, decoy_subsample, decoy_exclude):
         self.min_interaction_confidence = min_interaction_confidence
         self.interaction_confidence_bins = interaction_confidence_bins
+        self.interaction_confidence_quantile = interaction_confidence_quantile
         self.decoy_oversample = decoy_oversample
         self.decoy_subsample = decoy_subsample
         self.decoy_exclude = decoy_exclude
@@ -445,8 +446,10 @@ class query:
 
         # Generate confidence bin assignment
         if len(queries['interaction_confidence'].unique()) >= self.interaction_confidence_bins:
-            # queries['confidence_bin'] = pd.cut(queries['interaction_confidence'], bins=self.interaction_confidence_bins, labels=False)
-            queries['confidence_bin'] = pd.qcut(queries['interaction_confidence'], q=self.interaction_confidence_bins, labels=False, duplicates='drop')
+            if self.interaction_confidence_quantile:
+                queries['confidence_bin'] = pd.qcut(queries['interaction_confidence'], q=self.interaction_confidence_bins, labels=False, duplicates='drop')
+            else:
+                queries['confidence_bin'] = pd.cut(queries['interaction_confidence'], bins=self.interaction_confidence_bins, labels=False)
         else:
             queries['confidence_bin'] = 1
 

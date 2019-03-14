@@ -46,8 +46,8 @@ def cli():
 @click.option('--decoy_exclude/--no-decoy_exclude', default=True, show_default=True, help='Whether decoy interactions also covered by targets should be excluded.')
 @click.option('--min_interaction_confidence', 'min_interaction_confidence', default=0.0, show_default=True, type=float, help='Minimum interaction confidence for prior information from network.')
 @click.option('--interaction_confidence_bins', 'interaction_confidence_bins', default=100, show_default=True, type=int, help='Number of interaction confidence bins for grouped error rate estimation.')
-
-def preprocess(infiles, outfile, secfile, netfile, posnetfile, negnetfile, uniprotfile, columns, decoy_intensity_bins, decoy_left_sec_bins, decoy_right_sec_bins, decoy_oversample, decoy_subsample, decoy_exclude, min_interaction_confidence, interaction_confidence_bins):
+@click.option('--interaction_confidence_quantile/--no-interaction_confidence_quantile', default=True, show_default=True, help='Whether interaction confidence bins should be grouped by quantiles.')
+def preprocess(infiles, outfile, secfile, netfile, posnetfile, negnetfile, uniprotfile, columns, decoy_intensity_bins, decoy_left_sec_bins, decoy_right_sec_bins, decoy_oversample, decoy_subsample, decoy_exclude, min_interaction_confidence, interaction_confidence_bins, interaction_confidence_quantile):
     """
     Import and preprocess SEC data.
     """
@@ -110,7 +110,7 @@ def preprocess(infiles, outfile, secfile, netfile, posnetfile, negnetfile, unipr
 
     # Generate interaction query data
     click.echo("Info: Generating interaction query data.")
-    query_data = query(net_data, posnet_data, negnet_data, meta_data.protein_meta, min_interaction_confidence, interaction_confidence_bins, decoy_oversample, decoy_subsample, decoy_exclude)
+    query_data = query(net_data, posnet_data, negnet_data, meta_data.protein_meta, min_interaction_confidence, interaction_confidence_bins, interaction_confidence_quantile, decoy_oversample, decoy_subsample, decoy_exclude)
     query_data.to_df().to_sql('QUERY', con, index=False)
 
     # Remove any entries that are not necessary (proteins not covered by LC-MS/MS data)
@@ -285,7 +285,8 @@ def quantify(infile, outfile, control_condition, maximum_interaction_qvalue, min
 # SECAT export features
 @cli.command()
 @click.option('--in', 'infile', required=True, type=click.Path(exists=True), help='Input SECAT file.')
-def export(infile):
+@click.option('--maximum_interaction_qvalue', default=0.05, show_default=True, type=float, help='Maximum q-value to consider interactions for quantification.')
+def export(infile, maximum_interaction_qvalue):
     """
     Export SECAT results.
     """
@@ -301,10 +302,10 @@ def export(infile):
     con = sqlite3.connect(infile)
 
     if check_sqlite_table(con, 'FEATURE_SCORED_COMBINED'):
-        interaction_data = pd.read_sql('SELECT DISTINCT bait_id, prey_id FROM FEATURE_SCORED_COMBINED WHERE decoy == 0 and qvalue < 0.1;' , con)
+        interaction_data = pd.read_sql('SELECT DISTINCT bait_id, prey_id FROM FEATURE_SCORED_COMBINED WHERE decoy == 0 and qvalue <= %s;' % maximum_interaction_qvalue , con)
         interaction_data.to_csv(outfile_interactions, index=False)
     if check_sqlite_table(con, 'FEATURE_SCORED_COMBINED') and check_sqlite_table(con, 'MONOMER_QM'):
-        network_data = pd.read_sql('SELECT DISTINCT bait_id, prey_id FROM FEATURE_SCORED_COMBINED WHERE decoy == 0 and qvalue < 0.1 UNION SELECT DISTINCT bait_id, prey_id FROM MONOMER_QM;' , con)
+        network_data = pd.read_sql('SELECT DISTINCT bait_id, prey_id FROM FEATURE_SCORED_COMBINED WHERE decoy == 0 and qvalue <= %s UNION SELECT DISTINCT bait_id, prey_id FROM MONOMER_QM;' % maximum_interaction_qvalue , con)
         network_data.to_csv(outfile_network, index=False)
     if check_sqlite_table(con, 'NODE'):
         node_data = pd.read_sql('SELECT * FROM NODE;' , con)
