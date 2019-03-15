@@ -167,9 +167,11 @@ class enrichment_test:
             conditions.remove(self.control_condition)
             for condition in conditions:
                 comparisons.append([condition, self.control_condition])
-        # prepare multi-sample comparisons
-        else:
+        # prepare multi-sample comparisons via centering of all samples
+        elif self.control_condition == 'center':
             comparisons = list(itertools.combinations(conditions, 2))
+        else:
+            sys.exit("Error: Specify correct control condition identifier as reference or use 'center' to compare all against all.")
 
         return comparisons
 
@@ -209,9 +211,13 @@ class enrichment_test:
         r_mx = robjects.r.matrix(mx_vec, nrow=mx_nr, ncol=mx_nc)
         r_mx.rownames = robjects.StrVector(data_mx.index)
         r_mx.colnames = robjects.StrVector(data_mx.columns)
-        reference_ix = [i+1 for i, s in enumerate(r_mx.colnames) if self.control_condition in s] # R index
+
+        if self.control_condition == 'center':
+            reference_ix = [i+1 for i, s in enumerate(r_mx.colnames)]
+        else:
+            reference_ix = [i+1 for i, s in enumerate(r_mx.colnames) if self.control_condition in s] # R index
         if len(reference_ix) < 3:
-            sys.exit("Error: Only %s control samples were specified. SECAT requires at least three controls." % (len(reference_ix)))
+            sys.exit("Error: Only %s control/reference samples were specified. SECAT requires at least three." % (len(reference_ix)))
 
         # Compute VIPER profile
         vpres = vp.viper(r_mx, r_network, verbose = False, minsize = 1, cores = self.threads)
@@ -275,7 +281,7 @@ class enrichment_test:
                         results['condition_2'] = comparison[1]
 
                         # Conduct statistical test
-                        results_pvalue = results.groupby(['query_id','is_bait','level']).apply(lambda x: pd.Series({"nes": np.mean(x[qm_ids[qm_ids['condition_id']==comparison[0]]['quantification_id'].values].values[0]), "anes": np.mean(np.abs(x[qm_ids[qm_ids['condition_id']==comparison[0]]['quantification_id'].values].values[0])), "cfactor": 0, "pvalue": ttest_ind(x[qm_ids[qm_ids['condition_id']==comparison[0]]['quantification_id'].values].values[0], x[qm_ids[qm_ids['condition_id']==comparison[1]]['quantification_id'].values].values[0], equal_var=True)[1]})).reset_index()
+                        results_pvalue = results.groupby(['query_id','is_bait','level']).apply(lambda x: pd.Series({"nes": np.mean(x[qm_ids[qm_ids['condition_id']==comparison[0]]['quantification_id'].values].values[0]) - np.mean(x[qm_ids[qm_ids['condition_id']==comparison[1]]['quantification_id'].values].values[0]), "anes": np.abs(np.mean(x[qm_ids[qm_ids['condition_id']==comparison[0]]['quantification_id'].values].values[0]) - np.mean(x[qm_ids[qm_ids['condition_id']==comparison[1]]['quantification_id'].values].values[0])), "cfactor": 0, "pvalue": ttest_ind(x[qm_ids[qm_ids['condition_id']==comparison[0]]['quantification_id'].values].values[0], x[qm_ids[qm_ids['condition_id']==comparison[1]]['quantification_id'].values].values[0], equal_var=True)[1]})).reset_index()
                         results = pd.merge(results, results_pvalue, on=['query_id','is_bait','level'])
 
                         # Append aggregated bait and prey metrics per query
