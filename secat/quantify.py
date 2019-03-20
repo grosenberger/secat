@@ -4,6 +4,7 @@ import click
 import sqlite3
 import os
 import sys
+import warnings
 
 from .EmpiricalBrownsMethod import EmpiricalBrownsMethod
 import itertools
@@ -140,12 +141,13 @@ class quantitative_matrix:
         return complexes_peptides
 
 class enrichment_test:
-    def __init__(self, outfile, control_condition, enrichment_permutations, threads):
+    def __init__(self, outfile, control_condition, min_abs_log2fx, max_interactor_ratio, threads):
         self.outfile = outfile
         self.control_condition = control_condition
-        self.enrichment_permutations = enrichment_permutations
+        self.min_abs_log2fx = min_abs_log2fx
+        self.max_interactor_ratio = max_interactor_ratio
         self.threads = threads
-        self.levels = ['interactor_intensity','monomer_intensity','bound_intensity','total_intensity']
+        self.levels = ['interactor_intensity','complex_intensity','complex_stoichiometry','monomer_intensity','bound_intensity','total_intensity']
         self.comparisons = self.contrast()
 
         self.monomer_qm, self.complex_qm = self.read()
@@ -167,7 +169,7 @@ class enrichment_test:
             conditions.remove(self.control_condition)
             for condition in conditions:
                 comparisons.append([condition, self.control_condition])
-        # prepare multi-sample comparisons via centering of all samples
+        # prepare multi-sample comparisons
         elif self.control_condition == 'center':
             comparisons = list(itertools.combinations(conditions, 2))
         else:
@@ -175,7 +177,7 @@ class enrichment_test:
 
         return comparisons
 
-    def viper(self, data_mx, subunit_set):
+    def viper(self, data_mx, subunit_set, subunit_tfms):
         from rpy2 import robjects
         from rpy2.rinterface import RRuntimeError
         from rpy2.robjects import r, pandas2ri, numpy2ri
@@ -193,17 +195,20 @@ class enrichment_test:
             vp = importr("viper")
 
         # Conduct VIPER analysis
-        regulons = []
-        for subunit in subunit_set:
-            tfmode = robjects.FloatVector(np.repeat(1.0,len(subunit_set[subunit])))
-            tfmode.names = robjects.StrVector(subunit_set[subunit])
-            likelihood = robjects.FloatVector(np.repeat(1.0,len(subunit_set[subunit])))
-            
-            regulon = robjects.ListVector({'tfmode': tfmode, 'likelihood': likelihood})
-            regulons.append(regulon)
+        r_networks = robjects.ListVector.from_length(len(subunit_tfms))
 
-        # Generate R Regulon
-        r_network = robjects.ListVector(zip(subunit_set.keys(), regulons))
+        for i, subunit_tfm in enumerate(subunit_tfms):
+            regulons = []
+            for subunit in subunit_set:
+                tfmode = robjects.FloatVector(subunit_tfm[subunit])
+                tfmode.names = robjects.StrVector(subunit_set[subunit])
+                likelihood = robjects.FloatVector(np.repeat(1.0,len(subunit_set[subunit])))
+                
+                regulon = robjects.ListVector({'tfmode': tfmode, 'likelihood': likelihood})
+                regulons.append(regulon)
+
+            # Generate R regulon
+            r_networks[i] = robjects.ListVector(zip(subunit_set.keys(), regulons))
 
         # Generate R matrix
         mx_nr, mx_nc = data_mx.shape
@@ -212,19 +217,11 @@ class enrichment_test:
         r_mx.rownames = robjects.StrVector(data_mx.index)
         r_mx.colnames = robjects.StrVector(data_mx.columns)
 
-        if self.control_condition == 'center':
-            reference_ix = [i+1 for i, s in enumerate(r_mx.colnames)]
-        else:
-            reference_ix = [i+1 for i, s in enumerate(r_mx.colnames) if self.control_condition in s] # R index
-        if len(reference_ix) < 3:
-            sys.exit("Error: Only %s control/reference samples were specified. SECAT requires at least three." % (len(reference_ix)))
-
         # Compute VIPER profile
-        vpres = vp.viper(r_mx, r_network, verbose = False, minsize = 1, cores = self.threads)
-        vpsig = vp.viperSignature(vpres, vpres.rx(True, robjects.IntVector(reference_ix)), per = self.enrichment_permutations, cores=self.threads).rx2('signature')
-        
-        pd_mx = pd.DataFrame(pandas2ri.ri2py(vpsig), columns = vpsig.colnames)
-        pd_mx['query_id'] = vpsig.rownames
+        vpres = vp.viper(r_mx, r_networks, verbose = False, minsize = 1, cores = self.threads)
+  
+        pd_mx = pd.DataFrame(pandas2ri.ri2py(vpres), columns = vpres.colnames)
+        pd_mx['query_id'] = vpres.rownames
         return(pd_mx)
 
     def read(self):
@@ -235,42 +232,57 @@ class enrichment_test:
 
         con.close()
 
-        # monomer_qm = pd.merge(monomer_qm, monomer_qm[['bait_id']].drop_duplicates().head(100), on=['bait_id'])
-        # complex_qm = pd.merge(complex_qm, complex_qm[['bait_id','prey_id']].drop_duplicates().head(100), on=['bait_id','prey_id'])
-
         return monomer_qm, complex_qm
 
     def compare(self):
-        def collapse(x):
-            ebm = EmpiricalBrownsMethod(x[[c for c in x.columns if c.startswith("viper_")]].values, x['pvalue'].values, extra_info=True)
-
-            result = pd.Series({'level': 'complex_intensity', 'nes': np.mean(x['nes'].values), 'anes': np.mean(x['anes'].values), 'pvalue': ebm[0], 'cfactor': ebm[2]})
-
-            result = pd.concat([result, x[[c for c in x.columns if c.startswith("viper_")]].mean(axis=0)])
-
-            return(result)
-
         dfs = []
         for level in self.levels:
             for state in [self.monomer_qm, self.complex_qm]:
-                if level in state.columns:
-                    # Generate matrix
-                    dat = state[state[level] > 0].copy()
+                if level in state.columns or (level in ['complex_intensity', 'complex_stoichiometry'] and 'interactor_intensity' in state.columns):
+                    if level in state.columns:
+                        dat = state[state[level] > 0].copy()
+                    else:
+                        dat = state[state['interactor_intensity'] > 0].copy()
+                        dat = dat.rename(index=str, columns={"interactor_intensity": level})
+
                     dat['query_id'] = dat['bait_id'] + '_' + dat['prey_id']
                     dat['query_peptide_id'] = dat['bait_id'] + '_' + dat['prey_id'] + '_' + dat['peptide_id']
                     dat['quantification_id'] = 'viper_' + dat['condition_id'] + '_' + dat['replicate_id']
                     dat['run_id'] = dat['condition_id'] + '_' + dat['replicate_id']
-                    data_mx = dat.pivot_table(index='query_peptide_id', columns='quantification_id', values=level, fill_value=0)
-
                     qm_ids = dat[['quantification_id','condition_id','replicate_id']].drop_duplicates()
 
-                    # Generate subunit set
-                    query_set = dat[['query_id','is_bait','query_peptide_id']].copy()
-                    query_set['query_id'] = query_set['query_id'] + "+" + query_set['is_bait'].astype(int).astype(str)
-                    subunit_set = query_set.groupby(['query_id'])['query_peptide_id'].apply(lambda x: x.unique().tolist()).to_dict()
+                    # Generate matrix for fold-change
+                    quant_mx = dat.pivot_table(index=['query_id','query_peptide_id'], columns='quantification_id', values=level, fill_value=0)
+
+                    # Generate matrix for ratio-change
+                    ratio_mx = dat.pivot_table(index=['query_id','is_bait','query_peptide_id'], columns='quantification_id', values=level, fill_value=0)
+
+                    # Generate matrix for VIPER
+                    data_mx = dat.pivot_table(index='query_peptide_id', columns='quantification_id', values=level, fill_value=0)
+
+                    # Generate subunit set for VIPER
+                    if level == 'complex_intensity':
+                        # Complex abundance testing combines bait and prey peptides into a single regulon with positive tfmode sign
+                        query_set = dat[['query_id','is_bait','query_peptide_id']].copy()
+                        query_set['query_id'] = query_set['query_id'] + "+1"
+                        subunit_set = query_set.groupby(['query_id'])['query_peptide_id'].apply(lambda x: x.unique().tolist()).to_dict()
+                        subunit_tfm = query_set.groupby(['query_id'])['query_peptide_id'].apply(lambda x: np.repeat(1,len(x.unique()))).to_dict()
+                    elif level == 'complex_stoichiometry':
+                        # Complex stoichiometry testing combines bait and prey peptides into a single regulon but with different tfmode signs
+                        query_set = dat[['query_id','is_bait','query_peptide_id']].copy()
+                        query_set.loc[query_set['is_bait']==0,'is_bait'] = -1
+                        query_set['query_id'] = query_set['query_id'] + "+1"
+                        subunit_set = query_set.groupby(['query_id'])['query_peptide_id'].apply(lambda x: x.unique().tolist()).to_dict()
+                        subunit_tfm = query_set.groupby(['query_id'])[['query_peptide_id','is_bait']].apply(lambda x: x.drop_duplicates()['is_bait'].tolist()).to_dict()
+                    else:
+                        # All other modalities are assessed on protein-level, separately for bait and prey proteins
+                        query_set = dat[['query_id','is_bait','query_peptide_id']].copy()
+                        query_set['query_id'] = query_set['query_id'] + "+" + query_set['is_bait'].astype(int).astype(str)
+                        subunit_set = query_set.groupby(['query_id'])['query_peptide_id'].apply(lambda x: x.unique().tolist()).to_dict()
+                        subunit_tfm = query_set.groupby(['query_id'])['query_peptide_id'].apply(lambda x: np.repeat(1,len(x.unique()))).to_dict()
 
                     # Run VIPER
-                    results = self.viper(data_mx, subunit_set)
+                    results = self.viper(data_mx, subunit_set, [subunit_tfm])
 
                     results[['query_id','is_bait']] = results['query_id'].str.split("+", expand=True)
                     results['is_bait'] = results['is_bait'].astype('int')
@@ -280,31 +292,55 @@ class enrichment_test:
                         results['condition_1'] = comparison[0]
                         results['condition_2'] = comparison[1]
 
-                        # Conduct statistical test
-                        results_pvalue = results.groupby(['query_id','is_bait','level']).apply(lambda x: pd.Series({"nes": np.mean(x[qm_ids[qm_ids['condition_id']==comparison[0]]['quantification_id'].values].values[0]) - np.mean(x[qm_ids[qm_ids['condition_id']==comparison[1]]['quantification_id'].values].values[0]), "anes": np.abs(np.mean(x[qm_ids[qm_ids['condition_id']==comparison[0]]['quantification_id'].values].values[0]) - np.mean(x[qm_ids[qm_ids['condition_id']==comparison[1]]['quantification_id'].values].values[0])), "cfactor": 0, "pvalue": ttest_ind(x[qm_ids[qm_ids['condition_id']==comparison[0]]['quantification_id'].values].values[0], x[qm_ids[qm_ids['condition_id']==comparison[1]]['quantification_id'].values].values[0], equal_var=True)[1]})).reset_index()
-                        results = pd.merge(results, results_pvalue, on=['query_id','is_bait','level'])
+                        # Compute fold-change and absolute fold-change
+                        if level == 'complex_stoichiometry':
+                            results['log2fx'] = np.nan
+                            results['abs_log2fx'] = np.nan
+                        else:
+                            quant_mx_avg = quant_mx.groupby(['query_id','query_peptide_id']).apply(lambda x: pd.Series({'comparison_0': np.nanmean(np.exp2(x[qm_ids[qm_ids['condition_id']==comparison[0]]['quantification_id'].values].values)), 'comparison_1': np.nanmean(np.exp2(x[qm_ids[qm_ids['condition_id']==comparison[1]]['quantification_id'].values].values))})).reset_index(level=['query_id','query_peptide_id']).dropna()
 
-                        # Append aggregated bait and prey metrics per query
-                        if level == "interactor_intensity":
-                            results_aggregated = results.groupby(['condition_1','condition_2','query_id']).apply(collapse).reset_index(level=['condition_1','condition_2','query_id'])
-                            results_aggregated['is_bait'] = True
-                            result_aggregated_prey = results_aggregated.copy()
-                            result_aggregated_prey['is_bait'] = False
-                            results = pd.concat([results, results_aggregated, result_aggregated_prey], sort=False)
+                            quant_mx_log2fx = quant_mx_avg.groupby(['query_id','query_peptide_id']).apply(lambda x: np.log2((x['comparison_0'])/(x['comparison_1']))).reset_index(level=['query_id','query_peptide_id'])
+
+                            quant_mx_log2fx_prot = quant_mx_log2fx.groupby('query_id').mean().reset_index()
+                            quant_mx_log2fx_prot.columns = ['query_id','log2fx']
+                            quant_mx_log2fx_prot['abs_log2fx'] = np.abs(quant_mx_log2fx_prot['log2fx'])
+                            results = pd.merge(results, quant_mx_log2fx_prot, on=['query_id'], how='left')
+
+                        # Compute interactor ratio
+                        if level == 'complex_stoichiometry':
+                            ratio_mx_prot = ratio_mx.groupby(['query_id','is_bait'])[[c for c in ratio_mx.columns if c.startswith("viper_")]].mean().reset_index()
+                            ratio_mx_prot_ratio = ratio_mx_prot.groupby('query_id').apply(lambda x: (x.loc[x['is_bait']==0].squeeze()+1) / (x.loc[x['is_bait']==1].squeeze()+1)).reset_index(level='query_id')
+
+                            ratio_change = ratio_mx_prot_ratio.groupby('query_id').apply(lambda x: np.mean(x[qm_ids[qm_ids['condition_id']==comparison[0]]['quantification_id'].values].values) / np.mean(x[qm_ids[qm_ids['condition_id']==comparison[1]]['quantification_id'].values].values)).reset_index(level='query_id')
+                            ratio_change.columns = ['query_id','interactor_ratio']
+                            ratio_change.loc[ratio_change['interactor_ratio'] > 1,'interactor_ratio'] = (1 / ratio_change.loc[ratio_change['interactor_ratio'] > 1,'interactor_ratio'])
+                            results = pd.merge(results, ratio_change, on=['query_id'], how='left')
+                        else:
+                            results['interactor_ratio'] = np.nan
+
+                        # Conduct statistical tests
+                        results_pvalue = results.groupby(['query_id','is_bait','level']).apply(lambda x: pd.Series({"pvalue": ttest_ind(x[qm_ids[qm_ids['condition_id']==comparison[0]]['quantification_id'].values].values[0], x[qm_ids[qm_ids['condition_id']==comparison[1]]['quantification_id'].values].values[0], equal_var=True)[1]})).reset_index()
+                        results = pd.merge(results, results_pvalue, on=['query_id','is_bait','level'])
 
                         # Append meta information
                         results = pd.merge(results, dat[['query_id','bait_id','prey_id']].drop_duplicates(), on='query_id')
 
-                        dfs.append(results[['condition_1','condition_2','level','bait_id','prey_id','is_bait','nes','anes','pvalue','cfactor']+[c for c in results.columns if c.startswith("viper_")]])
+                        # Append reverse information for complex_intensity and complex_stoichiometry levels
+                        if level in ['complex_intensity', 'complex_stoichiometry']:
+                            results_rev = results.copy()
+                            results_rev['is_bait'] = 0
+                            results = pd.concat([results, results_rev])
+
+                        dfs.append(results[['condition_1','condition_2','level','bait_id','prey_id','is_bait','log2fx','abs_log2fx','interactor_ratio','pvalue']+[c for c in results.columns if c.startswith("viper_")]])
 
         return pd.concat(dfs, ignore_index=True, sort=True).sort_values(by='pvalue', ascending=True, na_position='last')
 
     def integrate(self):
         def collapse(x):
             if x.shape[0] > 1:
-                result = pd.Series({'num_interactors': x.shape[0], 'nes': np.mean(x['nes'].values), 'anes': np.mean(x['anes'].values), 'cfactor': np.mean(x['cfactor'].values), 'pvalue': EmpiricalBrownsMethod(x[[c for c in x.columns if c.startswith("viper_")]].values, x['pvalue'].values)})
+                result = pd.Series({'num_interactors': x.shape[0], 'log2fx': np.mean(x['log2fx'].values), 'abs_log2fx': np.mean(x['abs_log2fx'].values), 'interactor_ratio': np.mean(x['interactor_ratio'].values), 'pvalue': EmpiricalBrownsMethod(x[[c for c in x.columns if c.startswith("viper_")]].values, x['pvalue'].values)})
             else:
-                result = pd.Series({'num_interactors': x.shape[0], 'nes': x['nes'].values[0], 'anes': x['anes'].values[0], 'cfactor': x['cfactor'].values[0], 'pvalue': x['pvalue'].values[0]})
+                result = pd.Series({'num_interactors': x.shape[0], 'log2fx': x['log2fx'].values[0], 'abs_log2fx': x['abs_log2fx'].values[0], 'interactor_ratio': x['interactor_ratio'].values[0], 'pvalue': x['pvalue'].values[0]})
             return(result)
 
         def mtcorrect(x):
@@ -326,18 +362,20 @@ class enrichment_test:
         df_edge_level = df_edge_level.groupby(['condition_1', 'condition_2','level']).apply(mtcorrect).reset_index()
         df_edge = df_edge_level.sort_values('pvalue').groupby(['condition_1','condition_2','bait_id','prey_id']).head(1).reset_index()
         df_node_level = df_node_level.groupby(['condition_1', 'condition_2','level']).apply(mtcorrect).reset_index()
-        df_node = df_node_level.sort_values('pvalue_adjusted').groupby(['condition_1','condition_2','bait_id']).head(1).reset_index()
+
+        df_node_level_filtered = df_node_level[(df_node_level['abs_log2fx'] > self.min_abs_log2fx) | (df_node_level['interactor_ratio'] < self.max_interactor_ratio)]
+        df_node = df_node_level_filtered.sort_values('pvalue_adjusted').groupby(['condition_1','condition_2','bait_id']).head(1).reset_index()
 
         click.echo("Info: Total dysregulated proteins detected:")
         click.echo("%s (at FDR < 0.01)" % (df_node[df_node['pvalue_adjusted'] < 0.01][['bait_id']].drop_duplicates().shape[0]))
         click.echo("%s (at FDR < 0.05)" % (df_node[df_node['pvalue_adjusted'] < 0.05][['bait_id']].drop_duplicates().shape[0]))
         click.echo("%s (at FDR < 0.1)" % (df_node[df_node['pvalue_adjusted'] < 0.1][['bait_id']].drop_duplicates().shape[0]))
 
-        for level in df_node_level['level'].unique():
+        for level in df_node_level_filtered['level'].unique():
             click.echo("Info: Dysregulated (%s-mode) proteins detected:" % (level))
-            click.echo("%s (at FDR < 0.01)" % (df_node_level[(df_node_level['level'] == level) & (df_node_level['pvalue_adjusted'] < 0.01)][['bait_id']].drop_duplicates().shape[0]))
-            click.echo("%s (at FDR < 0.05)" % (df_node_level[(df_node_level['level'] == level) & (df_node_level['pvalue_adjusted'] < 0.05)][['bait_id']].drop_duplicates().shape[0]))
-            click.echo("%s (at FDR < 0.1)" % (df_node_level[(df_node_level['level'] == level) & (df_node_level['pvalue_adjusted'] < 0.1)][['bait_id']].drop_duplicates().shape[0]))
+            click.echo("%s (at FDR < 0.01)" % (df_node_level_filtered[(df_node_level_filtered['level'] == level) & (df_node_level_filtered['pvalue_adjusted'] < 0.01)][['bait_id']].drop_duplicates().shape[0]))
+            click.echo("%s (at FDR < 0.05)" % (df_node_level_filtered[(df_node_level_filtered['level'] == level) & (df_node_level_filtered['pvalue_adjusted'] < 0.05)][['bait_id']].drop_duplicates().shape[0]))
+            click.echo("%s (at FDR < 0.1)" % (df_node_level_filtered[(df_node_level_filtered['level'] == level) & (df_node_level_filtered['pvalue_adjusted'] < 0.1)][['bait_id']].drop_duplicates().shape[0]))
 
-        return df_edge_level[['condition_1','condition_2','level','bait_id','prey_id','nes','anes','cfactor','pvalue','pvalue_adjusted']+[c for c in df_edge_level.columns if c.startswith("viper_")]], df_edge[['condition_1','condition_2','level','bait_id','prey_id','nes','anes','cfactor','pvalue','pvalue_adjusted']], df_node_level[['condition_1','condition_2','level','bait_id','nes','anes','cfactor','num_interactors','pvalue','pvalue_adjusted']], df_node[['condition_1','condition_2','level','bait_id','nes','anes','cfactor','num_interactors','pvalue','pvalue_adjusted']], df_protein_level[['condition_1','condition_2','level','bait_id','nes','anes','cfactor','pvalue','pvalue_adjusted'] + [c for c in df_protein_level.columns if c.startswith("viper_")]]
+        return df_edge_level[['condition_1','condition_2','level','bait_id','prey_id','log2fx','abs_log2fx','interactor_ratio','pvalue','pvalue_adjusted']+[c for c in df_edge_level.columns if c.startswith("viper_")]], df_edge[['condition_1','condition_2','level','bait_id','prey_id','log2fx','abs_log2fx','interactor_ratio','pvalue','pvalue_adjusted']], df_node_level[['condition_1','condition_2','level','bait_id','log2fx','abs_log2fx','interactor_ratio','num_interactors','pvalue','pvalue_adjusted']], df_node[['condition_1','condition_2','level','bait_id','log2fx','abs_log2fx','interactor_ratio','num_interactors','pvalue','pvalue_adjusted']], df_protein_level[['condition_1','condition_2','level','bait_id','log2fx','abs_log2fx','interactor_ratio','pvalue','pvalue_adjusted'] + [c for c in df_protein_level.columns if c.startswith("viper_")]]
 

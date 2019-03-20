@@ -245,11 +245,12 @@ def learn(infile, outfile, apply_model, minimum_abundance_ratio, maximum_sec_shi
 @click.option('--out', 'outfile', required=False, type=click.Path(exists=False), help='Output SECAT file.')
 @click.option('--control_condition', default="center", type=str, help='Specify control condition identifier. Setting this parameter to "center" will compare all conditions against all and use the mean as reference for quantification.')
 @click.option('--maximum_interaction_qvalue', default=0.05, show_default=True, type=float, help='Maximum q-value to consider interactions for quantification.')
+@click.option('--min_abs_log2fx', default=0.0, show_default=True, type=float, help='Minimum absolute log2 fold-change for integrated nodes.')
+@click.option('--max_interactor_ratio', default=0.9, show_default=True, type=float, help='Maximum interactor ratio for integrated nodes.')
 @click.option('--minimum_peptides', 'minimum_peptides', default=1, show_default=True, type=int, help='Minimum number of peptides required to quantify an interaction.')
 @click.option('--maximum_peptides', 'maximum_peptides', default=3, show_default=True, type=int, help='Maximum number of peptides used to quantify an interaction.')
-@click.option('--enrichment_permutations', 'enrichment_permutations', default=1000, show_default=True, type=int, help='Number of permutations for enrichment testing.')
 @click.option('--threads', default=1, show_default=True, type=int, help='Number of threads used for parallel processing. -1 means all available CPUs.', callback=transform_threads)
-def quantify(infile, outfile, control_condition, maximum_interaction_qvalue, minimum_peptides, maximum_peptides, enrichment_permutations, threads):
+def quantify(infile, outfile, control_condition, maximum_interaction_qvalue, min_abs_log2fx, max_interactor_ratio, minimum_peptides, maximum_peptides, threads):
     """
     Quantify protein and interaction features in SEC data.
     """
@@ -271,7 +272,7 @@ def quantify(infile, outfile, control_condition, maximum_interaction_qvalue, min
     con.close()
 
     click.echo("Info: Assess differential features.")
-    et = enrichment_test(outfile, control_condition, enrichment_permutations, threads)
+    et = enrichment_test(outfile, control_condition, min_abs_log2fx, max_interactor_ratio, threads)
 
     con = sqlite3.connect(outfile)
     et.edge.to_sql('EDGE', con, index=False, if_exists='replace')
