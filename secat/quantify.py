@@ -9,7 +9,7 @@ import warnings
 from .EmpiricalBrownsMethod import EmpiricalBrownsMethod
 import itertools
 
-from scipy.stats import mannwhitneyu, ttest_ind
+from scipy.stats import ttest_ind, ttest_rel
 
 from statsmodels.stats.multitest import multipletests
 
@@ -141,9 +141,10 @@ class quantitative_matrix:
         return complexes_peptides
 
 class enrichment_test:
-    def __init__(self, outfile, control_condition, min_abs_log2fx, max_interactor_ratio, threads):
+    def __init__(self, outfile, control_condition, paired, min_abs_log2fx, max_interactor_ratio, threads):
         self.outfile = outfile
         self.control_condition = control_condition
+        self.paired = paired
         self.min_abs_log2fx = min_abs_log2fx
         self.max_interactor_ratio = max_interactor_ratio
         self.threads = threads
@@ -319,7 +320,12 @@ class enrichment_test:
                             results['interactor_ratio'] = np.nan
 
                         # Conduct statistical tests
-                        results_pvalue = results.groupby(['query_id','is_bait','level']).apply(lambda x: pd.Series({"pvalue": ttest_ind(x[qm_ids[qm_ids['condition_id']==comparison[0]]['quantification_id'].values].values[0], x[qm_ids[qm_ids['condition_id']==comparison[1]]['quantification_id'].values].values[0], equal_var=True)[1]})).reset_index()
+                        # Paired analysis: For example replicates 1 of conditions A & B were measured by the same SILAC experiment
+                        if self.paired:
+                            results_pvalue = results.groupby(['query_id','is_bait','level']).apply(lambda x: pd.Series({"pvalue": ttest_rel(x[qm_ids[qm_ids['condition_id']==comparison[0]].sort_values(by=['quantification_id'])['quantification_id'].values].values[0], x[qm_ids[qm_ids['condition_id']==comparison[1]].sort_values(by=['quantification_id'])['quantification_id'].values].values[0])[1]})).reset_index()
+                        # Treat samples as independent measurements, e.g. quantification by LFQ
+                        else:
+                            results_pvalue = results.groupby(['query_id','is_bait','level']).apply(lambda x: pd.Series({"pvalue": ttest_ind(x[qm_ids[qm_ids['condition_id']==comparison[0]]['quantification_id'].values].values[0], x[qm_ids[qm_ids['condition_id']==comparison[1]]['quantification_id'].values].values[0], equal_var=True)[1]})).reset_index()
                         results = pd.merge(results, results_pvalue, on=['query_id','is_bait','level'])
 
                         # Append meta information
