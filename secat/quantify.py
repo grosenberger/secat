@@ -328,6 +328,9 @@ class enrichment_test:
                             results_pvalue = results.groupby(['query_id','is_bait','level']).apply(lambda x: pd.Series({"pvalue": ttest_ind(x[qm_ids[qm_ids['condition_id']==comparison[0]]['quantification_id'].values].values[0], x[qm_ids[qm_ids['condition_id']==comparison[1]]['quantification_id'].values].values[0], equal_var=True)[1]})).reset_index()
                         results = pd.merge(results, results_pvalue, on=['query_id','is_bait','level'])
 
+                        # Set p-value to 1.0 if invalid
+                        results.loc[np.isnan(results['pvalue']),'pvalue'] = 1.0
+
                         # Append meta information
                         results = pd.merge(results, dat[['query_id','bait_id','prey_id']].drop_duplicates(), on='query_id')
 
