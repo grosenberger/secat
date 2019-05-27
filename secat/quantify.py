@@ -69,7 +69,7 @@ class quantitative_matrix:
             # Aggregate to peptide level
             peptide = df[['condition_id','replicate_id','bait_id','prey_id','is_bait','peptide_id']].copy()
             peptide['monomer_intensity'] = np.log2(df['peptide_intensity'].values+1)
-            peptide['bound_intensity'] = np.log2(df['total_peptide_intensity'].values-df['peptide_intensity'].values+1)
+            peptide['nonmonomer_intensity'] = np.log2(df['total_peptide_intensity'].values-df['peptide_intensity'].values+1)
             peptide['total_intensity'] = np.log2(df['total_peptide_intensity'].values+1)
 
             return peptide
@@ -148,7 +148,7 @@ class enrichment_test:
         self.min_abs_log2fx = min_abs_log2fx
         self.max_interactor_ratio = max_interactor_ratio
         self.threads = threads
-        self.levels = ['interactor_intensity','complex_intensity','complex_stoichiometry','monomer_intensity','bound_intensity','total_intensity']
+        self.levels = ['interactor_intensity','complex_intensity','complex_stoichiometry','monomer_intensity','nonmonomer_intensity','total_intensity']
         self.comparisons = self.contrast()
 
         self.monomer_qm, self.complex_qm = self.read()
@@ -180,16 +180,14 @@ class enrichment_test:
 
     def viper(self, data_mx, subunit_set, subunit_tfms):
         from rpy2 import robjects
-        from rpy2.rinterface import RRuntimeError
-        from rpy2.robjects import r, pandas2ri, numpy2ri
+        from rpy2.robjects import r, pandas2ri
+        from rpy2.robjects.conversion import localconverter
         from rpy2.robjects.packages import importr
-        numpy2ri.activate()
-        pandas2ri.activate()
 
         base = importr('base')
         try:
             vp = importr("viper")
-        except RRuntimeError:
+        except:
             base.source("http://www.bioconductor.org/biocLite.R")
             biocinstaller = importr("BiocInstaller")
             biocinstaller.biocLite("viper")
@@ -201,7 +199,7 @@ class enrichment_test:
         for i, subunit_tfm in enumerate(subunit_tfms):
             regulons = []
             for subunit in subunit_set:
-                tfmode = robjects.FloatVector(subunit_tfm[subunit])
+                tfmode = robjects.FloatVector(np.asarray(subunit_tfm[subunit]).astype(float))
                 tfmode.names = robjects.StrVector(subunit_set[subunit])
                 likelihood = robjects.FloatVector(np.repeat(1.0,len(subunit_set[subunit])))
                 
@@ -220,8 +218,10 @@ class enrichment_test:
 
         # Compute VIPER profile
         vpres = vp.viper(r_mx, r_networks, verbose = False, minsize = 1, cores = self.threads)
-  
-        pd_mx = pd.DataFrame(pandas2ri.ri2py(vpres), columns = vpres.colnames)
+
+        with localconverter(robjects.default_converter + pandas2ri.converter):
+            vpres_df = robjects.conversion.rpy2py(vpres)
+        pd_mx = pd.DataFrame(vpres_df, columns = vpres.colnames)
         pd_mx['query_id'] = vpres.rownames
         return(pd_mx)
 
