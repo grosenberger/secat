@@ -141,12 +141,11 @@ class quantitative_matrix:
         return complexes_peptides
 
 class enrichment_test:
-    def __init__(self, outfile, control_condition, paired, min_abs_log2fx, max_interactor_ratio, threads):
+    def __init__(self, outfile, control_condition, paired, min_abs_log2fx, threads):
         self.outfile = outfile
         self.control_condition = control_condition
         self.paired = paired
         self.min_abs_log2fx = min_abs_log2fx
-        self.max_interactor_ratio = max_interactor_ratio
         self.threads = threads
         self.levels = ['interactor_intensity','complex_intensity','complex_stoichiometry','monomer_intensity','nonmonomer_intensity','total_intensity']
         self.comparisons = self.contrast()
@@ -253,7 +252,7 @@ class enrichment_test:
                     qm_ids = dat[['quantification_id','condition_id','replicate_id']].drop_duplicates()
 
                     # Generate matrix for fold-change
-                    quant_mx = dat.pivot_table(index=['query_id','query_peptide_id'], columns='quantification_id', values=level, fill_value=0)
+                    quant_mx = dat.pivot_table(index=['query_id','is_bait','query_peptide_id'], columns='quantification_id', values=level, fill_value=0)
 
                     # Generate matrix for ratio-change
                     ratio_mx = dat.pivot_table(index=['query_id','is_bait','query_peptide_id'], columns='quantification_id', values=level, fill_value=0)
@@ -289,26 +288,29 @@ class enrichment_test:
                     results['is_bait'] = results['is_bait'].astype('int')
                     results['level'] = level
 
+                    # Append reverse information for complex_intensity and complex_stoichiometry levels
+                    if level in ['complex_intensity', 'complex_stoichiometry']:
+                        results_rev = results.copy()
+                        results_rev['is_bait'] = 0
+                        results = pd.concat([results, results_rev])
+
                     for comparison in self.comparisons:
                         results['condition_1'] = comparison[0]
                         results['condition_2'] = comparison[1]
 
                         # Compute fold-change and absolute fold-change
-                        if level == 'complex_stoichiometry':
-                            results['log2fx'] = np.nan
-                            results['abs_log2fx'] = np.nan
-                        else:
-                            quant_mx_avg = quant_mx.groupby(['query_id','query_peptide_id']).apply(lambda x: pd.Series({'comparison_0': np.nanmean(np.exp2(x[qm_ids[qm_ids['condition_id']==comparison[0]]['quantification_id'].values].values)), 'comparison_1': np.nanmean(np.exp2(x[qm_ids[qm_ids['condition_id']==comparison[1]]['quantification_id'].values].values))})).reset_index(level=['query_id','query_peptide_id']).dropna()
+                        quant_mx_avg = quant_mx.groupby(['query_id','is_bait','query_peptide_id']).apply(lambda x: pd.Series({'comparison_0': np.nanmean(np.exp2(x[qm_ids[qm_ids['condition_id']==comparison[0]]['quantification_id'].values].values)), 'comparison_1': np.nanmean(np.exp2(x[qm_ids[qm_ids['condition_id']==comparison[1]]['quantification_id'].values].values))})).reset_index(level=['query_id','is_bait','query_peptide_id']).dropna()
 
-                            quant_mx_log2fx = quant_mx_avg.groupby(['query_id','query_peptide_id']).apply(lambda x: np.log2((x['comparison_0'])/(x['comparison_1']))).reset_index(level=['query_id','query_peptide_id'])
+                        quant_mx_log2fx = quant_mx_avg.groupby(['query_id','is_bait','query_peptide_id']).apply(lambda x: np.log2((x['comparison_0'])/(x['comparison_1']))).reset_index(level=['query_id','is_bait','query_peptide_id'])
 
-                            quant_mx_log2fx_prot = quant_mx_log2fx.groupby('query_id').mean().reset_index()
-                            quant_mx_log2fx_prot.columns = ['query_id','log2fx']
-                            quant_mx_log2fx_prot['abs_log2fx'] = np.abs(quant_mx_log2fx_prot['log2fx'])
-                            results = pd.merge(results, quant_mx_log2fx_prot, on=['query_id'], how='left')
+                        quant_mx_log2fx_prot = quant_mx_log2fx.groupby(['query_id','is_bait']).mean().reset_index()
+                        quant_mx_log2fx_prot.columns = ['query_id','is_bait','log2fx']
+                        quant_mx_log2fx_prot['abs_log2fx'] = np.abs(quant_mx_log2fx_prot['log2fx'])
+
+                        results = pd.merge(results, quant_mx_log2fx_prot, on=['query_id','is_bait'], how='left')
 
                         # Compute interactor ratio
-                        if level == 'complex_stoichiometry':
+                        if level in ['complex_intensity', 'complex_stoichiometry']:
                             ratio_mx_prot = ratio_mx.groupby(['query_id','is_bait'])[[c for c in ratio_mx.columns if c.startswith("viper_")]].mean().reset_index()
                             ratio_mx_prot_ratio = ratio_mx_prot.groupby('query_id').apply(lambda x: (x.loc[x['is_bait']==0].squeeze()+1) / (x.loc[x['is_bait']==1].squeeze()+1)).reset_index(level='query_id')
 
@@ -333,12 +335,6 @@ class enrichment_test:
 
                         # Append meta information
                         results = pd.merge(results, dat[['query_id','bait_id','prey_id']].drop_duplicates(), on='query_id')
-
-                        # Append reverse information for complex_intensity and complex_stoichiometry levels
-                        if level in ['complex_intensity', 'complex_stoichiometry']:
-                            results_rev = results.copy()
-                            results_rev['is_bait'] = 0
-                            results = pd.concat([results, results_rev])
 
                         dfs.append(results[['condition_1','condition_2','level','bait_id','prey_id','is_bait','log2fx','abs_log2fx','interactor_ratio','pvalue']+[c for c in results.columns if c.startswith("viper_")]])
 
@@ -372,7 +368,7 @@ class enrichment_test:
         df_edge = df_edge_level.sort_values('pvalue').groupby(['condition_1','condition_2','bait_id','prey_id']).head(1).reset_index()
         df_node_level = df_node_level.groupby(['condition_1', 'condition_2','level']).apply(mtcorrect).reset_index()
 
-        df_node_level_filtered = df_node_level[(df_node_level['abs_log2fx'] > self.min_abs_log2fx) | (df_node_level['interactor_ratio'] < self.max_interactor_ratio)]
+        df_node_level_filtered = df_node_level[df_node_level['abs_log2fx'] > self.min_abs_log2fx]
         df_node = df_node_level_filtered.sort_values('pvalue_adjusted').groupby(['condition_1','condition_2','bait_id']).head(1).reset_index()
 
         click.echo("Info: Total dysregulated proteins detected:")
