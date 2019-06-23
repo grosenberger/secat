@@ -27,13 +27,12 @@ def check_sqlite_table(con, table):
     return(table_present)
 
 class plot_features:
-    def __init__(self, infile, level, id, max_qvalue, min_abs_log2fx, max_interactor_ratio, mode, combined, peptide_rank):
+    def __init__(self, infile, level, id, max_qvalue, min_abs_log2fx, mode, combined, peptide_rank):
         self.infile = infile
         self.level = level
         self.id = id
         self.max_qvalue = max_qvalue
         self.min_abs_log2fx = min_abs_log2fx
-        self.max_interactor_ratio = max_interactor_ratio
         self.mode = mode
         self.combined = combined
         self.peptide_rank = peptide_rank
@@ -167,7 +166,7 @@ class plot_features:
             table = 'EDGE_LEVEL'
 
         if check_sqlite_table(con, 'EDGE') and self.mode == 'enrichment':
-            df = pd.read_sql('SELECT DISTINCT bait_id || "_" || prey_id AS interaction_id, 0 as decoy FROM %s WHERE pvalue_adjusted < %s AND ((abs_log2fx >= %s AND interactor_ratio IS NULL) OR (abs_log2fx IS NULL AND interactor_ratio <= %s)) ORDER BY pvalue ASC;' % (table, self.max_qvalue, self.min_abs_log2fx, self.max_interactor_ratio), con)
+            df = pd.read_sql('SELECT DISTINCT bait_id || "_" || prey_id AS interaction_id, 0 as decoy FROM %s WHERE pvalue_adjusted < %s AND abs_log2fx > %s ORDER BY pvalue ASC;' % (table, self.max_qvalue, self.min_abs_log2fx), con)
         elif self.mode == 'detection_integrated':
             df = pd.read_sql('SELECT DISTINCT bait_id || "_" || prey_id AS interaction_id, decoy FROM FEATURE_SCORED_COMBINED WHERE qvalue < %s GROUP BY bait_id, prey_id ORDER BY qvalue ASC;' % (self.max_qvalue), con)
         elif self.mode == 'detection_separate':
@@ -230,7 +229,7 @@ class plot_features:
             table = 'NODE_LEVEL'
 
         if self.mode == 'enrichment':
-            df = pd.read_sql('SELECT DISTINCT bait_id, min(pvalue) as pvalue FROM %s WHERE pvalue_adjusted < %s AND ((abs_log2fx >= %s AND interactor_ratio IS NULL) OR (abs_log2fx IS NULL AND interactor_ratio <= %s)) GROUP BY bait_id;' % (table, self.max_qvalue, self.min_abs_log2fx, self.max_interactor_ratio), con)
+            df = pd.read_sql('SELECT DISTINCT bait_id, min(pvalue) as pvalue FROM %s WHERE pvalue_adjusted < %s AND abs_log2fx > %s GROUP BY bait_id;' % (table, self.max_qvalue, self.min_abs_log2fx), con)
 
         con.close()
 
