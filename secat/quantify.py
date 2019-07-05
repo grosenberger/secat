@@ -69,7 +69,7 @@ class quantitative_matrix:
             # Aggregate to peptide level
             peptide = df[['condition_id','replicate_id','bait_id','prey_id','is_bait','peptide_id']].copy()
             peptide['monomer_intensity'] = np.log2(df['peptide_intensity'].values+1)
-            peptide['nonmonomer_intensity'] = np.log2(df['total_peptide_intensity'].values-df['peptide_intensity'].values+1)
+            peptide['assembled_intensity'] = np.log2(df['total_peptide_intensity'].values-df['peptide_intensity'].values+1)
             peptide['total_intensity'] = np.log2(df['total_peptide_intensity'].values+1)
 
             return peptide
@@ -147,7 +147,7 @@ class enrichment_test:
         self.paired = paired
         self.min_abs_log2fx = min_abs_log2fx
         self.threads = threads
-        self.levels = ['interactor_intensity','complex_intensity','complex_stoichiometry','monomer_intensity','nonmonomer_intensity','total_intensity']
+        self.levels = ['interactor_intensity','complex_intensity','complex_stoichiometry','monomer_intensity','assembled_intensity','total_intensity']
         self.comparisons = self.contrast()
 
         self.monomer_qm, self.complex_qm = self.read()
