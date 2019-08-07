@@ -333,7 +333,7 @@ def export(infile, maximum_interaction_qvalue):
 @click.option('--id', required=False, type=str, help='Plot specific UniProt bait_id (Q10000) or interaction_id (Q10000_P10000)')
 @click.option('--max_qvalue', default=0.01, show_default=True, type=float, help='Maximum q-value to plot baits or interactions.')
 @click.option('--min_abs_log2fx', default=1.0, show_default=True, type=float, help='Minimum absolute log2 fold-change for integrated nodes.')
-@click.option('--mode', default='enrichment', show_default=True, type=click.Choice(['enrichment', 'detection_integrated', 'detection_separate']), help='Select mode to order interaction plots by. Note: detection_separate will also report decoys')
+@click.option('--mode', default='quantitative', show_default=True, type=click.Choice(['quantitative', 'detection_integrated', 'detection_separate']), help='Select mode to order interaction plots by. Note: detection_separate will also report decoys')
 @click.option('--combined/--no-combined', default=False, show_default=True, help='Select interactions and baits according to combined q-values.')
 @click.option('--peptide_rank', default=6, show_default=True, type=int, help='Number of most intense peptides to plot.')
 def plot(infile, level, id, max_qvalue, min_abs_log2fx, mode, combined, peptide_rank):
