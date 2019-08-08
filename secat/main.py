@@ -249,8 +249,10 @@ def learn(infile, outfile, apply_model, minimum_abundance_ratio, maximum_sec_shi
 @click.option('--min_abs_log2fx', default=1.0, show_default=True, type=float, help='Minimum absolute log2 fold-change for integrated nodes.')
 @click.option('--minimum_peptides', 'minimum_peptides', default=1, show_default=True, type=int, help='Minimum number of peptides required to quantify an interaction.')
 @click.option('--maximum_peptides', 'maximum_peptides', default=3, show_default=True, type=int, help='Maximum number of peptides used to quantify an interaction.')
+@click.option('--missing_peptides', 'missing_peptides', default="zero", type=str, help='Whether missing peptide abundances should be set to 0 ("zero") or dropped ("drop") for fold change computation.')
+@click.option('--peptide_log2fx/--no-peptide_log2fx', default=True, show_default=True, help='Whether peptide-level log2fx should be computed instead of protein-level. Protein-level is more robust if measured peptides are variable between conditions or replicates.')
 @click.option('--threads', default=1, show_default=True, type=int, help='Number of threads used for parallel processing. -1 means all available CPUs.', callback=transform_threads)
-def quantify(infile, outfile, control_condition, paired, maximum_interaction_qvalue, min_abs_log2fx, minimum_peptides, maximum_peptides, threads):
+def quantify(infile, outfile, control_condition, paired, maximum_interaction_qvalue, min_abs_log2fx, minimum_peptides, maximum_peptides, missing_peptides, peptide_log2fx, threads):
     """
     Quantify protein and interaction features in SEC data.
     """
@@ -262,7 +264,6 @@ def quantify(infile, outfile, control_condition, paired, maximum_interaction_qva
         copyfile(infile, outfile)
         outfile = outfile
 
-
     click.echo("Info: Prepare quantitative matrices.")
     qm = quantitative_matrix(outfile, maximum_interaction_qvalue, minimum_peptides, maximum_peptides)
 
@@ -272,7 +273,7 @@ def quantify(infile, outfile, control_condition, paired, maximum_interaction_qva
     con.close()
 
     click.echo("Info: Assess differential features.")
-    et = enrichment_test(outfile, control_condition, paired, min_abs_log2fx, threads)
+    et = enrichment_test(outfile, control_condition, paired, min_abs_log2fx, missing_peptides, peptide_log2fx, threads)
 
     con = sqlite3.connect(outfile)
     et.edge.to_sql('EDGE', con, index=False, if_exists='replace')

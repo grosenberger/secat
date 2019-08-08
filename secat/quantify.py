@@ -141,11 +141,13 @@ class quantitative_matrix:
         return complexes_peptides
 
 class enrichment_test:
-    def __init__(self, outfile, control_condition, paired, min_abs_log2fx, threads):
+    def __init__(self, outfile, control_condition, paired, min_abs_log2fx, missing_peptides, peptide_log2fx, threads):
         self.outfile = outfile
         self.control_condition = control_condition
         self.paired = paired
         self.min_abs_log2fx = min_abs_log2fx
+        self.missing_peptides = missing_peptides
+        self.peptide_log2fx = peptide_log2fx
         self.threads = threads
         self.levels = ['interactor_intensity','complex_intensity','complex_stoichiometry','monomer_intensity','assembled_intensity','total_intensity']
         self.comparisons = self.contrast()
@@ -251,11 +253,18 @@ class enrichment_test:
                     dat['run_id'] = dat['condition_id'] + '_' + dat['replicate_id']
                     qm_ids = dat[['quantification_id','condition_id','replicate_id']].drop_duplicates()
 
+                    if self.missing_peptides == 'drop':
+                        peptide_fill_value = np.nan
+                    elif self.missing_peptides == 'zero':
+                        peptide_fill_value = 0
+                    else:
+                        sys.exit("Error: Invalid parameter for 'missing_peptides' selected.")
+
                     # Generate matrix for fold-change
-                    quant_mx = dat.pivot_table(index=['query_id','is_bait','query_peptide_id'], columns='quantification_id', values=level, fill_value=0)
+                    quant_mx = dat.pivot_table(index=['query_id','is_bait','query_peptide_id'], columns='quantification_id', values=level, fill_value=peptide_fill_value)
 
                     # Generate matrix for ratio-change
-                    ratio_mx = dat.pivot_table(index=['query_id','is_bait','query_peptide_id'], columns='quantification_id', values=level, fill_value=0)
+                    ratio_mx = dat.pivot_table(index=['query_id','is_bait','query_peptide_id'], columns='quantification_id', values=level, fill_value=peptide_fill_value)
 
                     # Generate matrix for VIPER
                     data_mx = dat.pivot_table(index='query_peptide_id', columns='quantification_id', values=level, fill_value=0)
@@ -299,13 +308,20 @@ class enrichment_test:
                         results['condition_2'] = comparison[1]
 
                         # Compute fold-change and absolute fold-change
-                        quant_mx_avg = quant_mx.groupby(['query_id','is_bait','query_peptide_id']).apply(lambda x: pd.Series({'comparison_0': np.nanmean(np.exp2(x[qm_ids[qm_ids['condition_id']==comparison[0]]['quantification_id'].values].values)), 'comparison_1': np.nanmean(np.exp2(x[qm_ids[qm_ids['condition_id']==comparison[1]]['quantification_id'].values].values))})).reset_index(level=['query_id','is_bait','query_peptide_id']).dropna()
+                        quant_mx_avg = quant_mx.groupby(['query_id','is_bait','query_peptide_id']).apply(lambda x: pd.Series({'comparison_0': np.nanmean(np.exp2(x[qm_ids[qm_ids['condition_id']==comparison[0]]['quantification_id'].values].values)), 'comparison_1': np.nanmean(np.exp2(x[qm_ids[qm_ids['condition_id']==comparison[1]]['quantification_id'].values].values))})).reset_index(level=['query_id','is_bait','query_peptide_id'])
 
-                        quant_mx_log2fx = quant_mx_avg.groupby(['query_id','is_bait','query_peptide_id']).apply(lambda x: np.log2((x['comparison_0'])/(x['comparison_1']))).reset_index(level=['query_id','is_bait','query_peptide_id'])
+                        if self.peptide_log2fx:
+                            quant_mx_log2fx = quant_mx_avg.groupby(['query_id','is_bait','query_peptide_id']).apply(lambda x: np.log2((x['comparison_0'])/(x['comparison_1']))).reset_index(level=['query_id','is_bait','query_peptide_id'])
 
-                        quant_mx_log2fx_prot = quant_mx_log2fx.groupby(['query_id','is_bait']).mean().reset_index()
-                        quant_mx_log2fx_prot.columns = ['query_id','is_bait','log2fx']
-                        quant_mx_log2fx_prot['abs_log2fx'] = np.abs(quant_mx_log2fx_prot['log2fx'])
+                            quant_mx_log2fx_prot = quant_mx_log2fx.groupby(['query_id','is_bait']).mean().reset_index()
+                            quant_mx_log2fx_prot.columns = ['query_id','is_bait','log2fx']
+                            quant_mx_log2fx_prot['abs_log2fx'] = np.abs(quant_mx_log2fx_prot['log2fx'])
+                        else:
+                            quant_mx_avg_prot = quant_mx_avg.groupby(['query_id','is_bait'])[['comparison_0','comparison_1']].mean().reset_index()
+                            quant_mx_log2fx_prot = quant_mx_avg_prot.groupby(['query_id','is_bait']).apply(lambda x: np.log2((x['comparison_0'])/(x['comparison_1']))).reset_index(level=['query_id','is_bait'])
+
+                            quant_mx_log2fx_prot.columns = ['query_id','is_bait','log2fx']
+                            quant_mx_log2fx_prot['abs_log2fx'] = np.abs(quant_mx_log2fx_prot['log2fx'])
 
                         results = pd.merge(results, quant_mx_log2fx_prot, on=['query_id','is_bait'], how='left')
 
