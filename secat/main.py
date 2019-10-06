@@ -343,3 +343,74 @@ def plot(infile, level, id, max_qvalue, min_abs_log2fx, mode, combined, peptide_
     """
 
     pf = plot_features(infile, level, id, max_qvalue, min_abs_log2fx, mode, combined, peptide_rank)
+
+# SECAT print statistics
+@cli.command()
+@click.option('--in', 'infile', required=True, type=click.Path(exists=True), help='Input SECAT file.')
+@click.option('--min_abs_log2fx', default=1.0, show_default=True, type=float, help='Minimum absolute log2 fold-change for integrated nodes.')
+def statistics(infile, min_abs_log2fx):
+    """
+    Print SECAT statistics
+    """
+
+    con = sqlite3.connect(infile)
+
+    if check_sqlite_table(con, 'QUANTIFICATION') and check_sqlite_table(con, 'SEC') and check_sqlite_table(con, 'PROTEIN'):
+        click.echo("Protein information")
+        click.echo(10*"-")
+        pepprot = pd.read_sql('SELECT * FROM QUANTIFICATION INNER JOIN SEC ON QUANTIFICATION.run_id = SEC.run_id WHERE protein_id IN (SELECT DISTINCT protein_id FROM PROTEIN);' , con)
+
+        click.echo("Total proteins: %s" % len(pepprot['protein_id'].drop_duplicates()))
+        click.echo("Total proteins per run:")
+        click.echo(pepprot.groupby(['condition_id', 'replicate_id'])['protein_id'].nunique())
+        click.echo(10*"-")
+
+        click.echo("Total peptides: %s" % len(pepprot[['peptide_id']].drop_duplicates()))
+        click.echo("Total peptides per run:")
+        click.echo(pepprot.groupby(['condition_id', 'replicate_id'])['peptide_id'].nunique())
+        click.echo(10*"=")
+
+    if check_sqlite_table(con, 'FEATURE_SCORED_COMBINED'):
+        click.echo("PPI Information")
+        click.echo(10*"-")
+        intact_combined = pd.read_sql('SELECT *, bait_id || "_" || prey_id AS interaction_id FROM FEATURE_SCORED_COMBINED WHERE decoy==0;' , con)
+        intact = pd.read_sql('SELECT *, bait_id || "_" || prey_id AS interaction_id FROM FEATURE_SCORED WHERE decoy==0;' , con)
+
+        click.echo("Total interactions (q-value<0.01): %s" % intact_combined[intact_combined['qvalue']<0.01]['interaction_id'].nunique())
+        click.echo("Total interactions per run (q-value<0.01):")
+        click.echo(intact[intact['qvalue']<0.01].groupby(['condition_id', 'replicate_id'])['interaction_id'].nunique())
+        click.echo(10*"-")
+
+        click.echo("Total interactions (q-value<0.05): %s" % intact_combined[intact_combined['qvalue']<0.05]['interaction_id'].nunique())
+        click.echo("Total interactions per run (q-value<0.05):")
+        click.echo(intact[intact['qvalue']<0.05].groupby(['condition_id', 'replicate_id'])['interaction_id'].nunique())
+        click.echo(10*"-")
+
+        click.echo("Total interactions (q-value<0.1): %s" % intact_combined[intact_combined['qvalue']<0.1]['interaction_id'].nunique())
+        click.echo("Total interactions per run (q-value<0.1):")
+        click.echo(intact[intact['qvalue']<0.1].groupby(['condition_id', 'replicate_id'])['interaction_id'].nunique())
+        click.echo(10*"=")
+
+    if check_sqlite_table(con, 'PROTEIN_LEVEL'):
+        click.echo("Quantitative Information (min_abs_log2fx > %s)" % min_abs_log2fx)
+        click.echo(10*"-")
+
+        df_node_level = pd.read_sql('SELECT * FROM NODE_LEVEL;', con)
+
+        df_node_level_filtered = df_node_level[df_node_level['abs_log2fx'] > min_abs_log2fx]
+        df_node = df_node_level_filtered.sort_values('pvalue_adjusted').groupby(['condition_1','condition_2','bait_id']).head(1).reset_index()
+
+        click.echo("Info: Total dysregulated proteins detected:")
+        click.echo("%s (at FDR < 0.01)" % (df_node[df_node['pvalue_adjusted'] < 0.01][['bait_id']].drop_duplicates().shape[0]))
+        click.echo("%s (at FDR < 0.05)" % (df_node[df_node['pvalue_adjusted'] < 0.05][['bait_id']].drop_duplicates().shape[0]))
+        click.echo("%s (at FDR < 0.1)" % (df_node[df_node['pvalue_adjusted'] < 0.1][['bait_id']].drop_duplicates().shape[0]))
+        click.echo("%s (unfiltered)" % (df_node[['bait_id']].drop_duplicates().shape[0]))
+
+        for level in df_node_level_filtered['level'].unique():
+            click.echo("Info: Dysregulated (%s-mode) proteins detected:" % (level))
+            click.echo("%s (at FDR < 0.01)" % (df_node_level_filtered[(df_node_level_filtered['level'] == level) & (df_node_level_filtered['pvalue_adjusted'] < 0.01)][['bait_id']].drop_duplicates().shape[0]))
+            click.echo("%s (at FDR < 0.05)" % (df_node_level_filtered[(df_node_level_filtered['level'] == level) & (df_node_level_filtered['pvalue_adjusted'] < 0.05)][['bait_id']].drop_duplicates().shape[0]))
+            click.echo("%s (at FDR < 0.1)" % (df_node_level_filtered[(df_node_level_filtered['level'] == level) & (df_node_level_filtered['pvalue_adjusted'] < 0.1)][['bait_id']].drop_duplicates().shape[0]))
+            click.echo("%s (unfiltered)" % (df_node_level_filtered[(df_node_level_filtered['level'] == level)][['bait_id']].drop_duplicates().shape[0]))
+            
+        click.echo(10*"=")
