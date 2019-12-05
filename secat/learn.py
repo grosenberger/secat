@@ -173,6 +173,8 @@ class pyprophet:
         score_columns = ["d_score"] + [c for c in df.columns if c.startswith("main_var_")] + [c for c in df.columns if c.startswith("var_")]
 
         with PdfPages(out) as pdf:
+            plt.figure(figsize=(10, 10))
+            plt.subplots_adjust(hspace=.5)
             for idx in score_columns:
                 top_targets = df[df["decoy"] == 0][idx]
                 top_decoys = df[df["decoy"] == 1][idx]
@@ -186,9 +188,6 @@ class pyprophet:
                     ddensity._compute_covariance()
                     xs = linspace(min(concatenate((top_targets, top_decoys))), max(
                         concatenate((top_targets, top_decoys))), 200)
-
-                    plt.figure(figsize=(10, 10))
-                    plt.subplots_adjust(hspace=.5)
 
                     plt.subplot(211)
                     plt.title(idx)
@@ -206,6 +205,7 @@ class pyprophet:
                     plt.legend(loc=2)
 
                     pdf.savefig()
+                    plt.clf()
                     plt.close()
 
 class combine:
