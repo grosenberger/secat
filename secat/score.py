@@ -209,8 +209,12 @@ class scoring:
         return df
 
     def filter_peptides(self, df):
-        def peptide_detrend(x):
+        def peptide_detrend_zero(x):
             peptide_mean = np.mean(np.append(x['peptide_intensity'], np.zeros(len(self.sec_boundaries['sec_id'].unique())-x.shape[0])))
+            return x[x['peptide_intensity'] > peptide_mean][['sec_id','peptide_intensity','monomer_sec_id']]
+
+        def peptide_detrend_drop(x):
+            peptide_mean = np.mean(x['peptide_intensity'])
             return x[x['peptide_intensity'] > peptide_mean][['sec_id','peptide_intensity','monomer_sec_id']]
 
         def protein_pick(x):
@@ -246,9 +250,12 @@ class scoring:
         # Filter monomers
         df = df[df['sec_id'] <= df['monomer_sec_id']]
 
-        if self.peakpicking == "detrend":
-            # Remove constant trends from peptides
-            df = df.groupby(['condition_id','replicate_id','protein_id','peptide_id']).apply(peptide_detrend).reset_index(level=['condition_id','replicate_id','protein_id','peptide_id'])
+        if self.peakpicking == "detrend_zero":
+            # Remove constant trends from peptides, average over all fractions
+            df = df.groupby(['condition_id','replicate_id','protein_id','peptide_id']).apply(peptide_detrend_zero).reset_index(level=['condition_id','replicate_id','protein_id','peptide_id'])
+        if self.peakpicking == "detrend_drop":
+            # Remove constant trends from peptides, average over fractions with detections
+            df = df.groupby(['condition_id','replicate_id','protein_id','peptide_id']).apply(peptide_detrend_drop).reset_index(level=['condition_id','replicate_id','protein_id','peptide_id'])
         elif self.peakpicking == "localmax_conditions":
             # Protein-level peakpicking
             df = df.groupby(['condition_id','protein_id']).apply(protein_pick).reset_index(level=['condition_id','protein_id'])
