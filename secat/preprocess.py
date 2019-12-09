@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 import click
 from sklearn import preprocessing
+import statsmodels.api as sm
 import sys
 import os
 
@@ -9,6 +10,14 @@ from lxml import etree
 import itertools
 
 from pandas.api.types import is_numeric_dtype
+
+try:
+    import matplotlib
+    matplotlib.use('Agg')
+    from matplotlib.backends.backend_pdf import PdfPages
+    import matplotlib.pyplot as plt
+except ImportError:
+    plt = None
 
 class uniprot:
     def __init__(self, uniprotfile):
@@ -372,6 +381,104 @@ class quantification:
     def to_df(self):
         return self.df
 
+
+class normalization:
+    def __init__(self, quantification_data, sec_data, window_size, padded, outfile):
+        self.quantification_data = quantification_data
+        self.sec_data = sec_data
+        self.window_size = window_size
+        self.df = self.slide_normalize(padded)
+
+        # plot input data
+        self.plot(self.quantification_data, self.sec_data, os.path.splitext(os.path.basename(outfile))[0]+"_raw.pdf")
+        # plot normalized data
+        self.plot(self.df, self.sec_data, os.path.splitext(os.path.basename(outfile))[0]+"_norm.pdf")
+
+    def slide_normalize(self, padded):
+        def window(seq, n=2):
+            "Returns a sliding window (of width n) over data from the iterable"
+            "   s -> (s0,s1,...s[n-1]), (s1,s2,...,sn), ...                   "
+            it = iter(seq)
+            result = tuple(itertools.islice(it, n))
+            if len(result) == n:
+                yield results
+            for elem in it:
+                result = result[1:] + (elem,)
+                yield result
+
+        quantification_data = self.quantification_data.copy()
+        quantification_data['peptide_intensity'] = np.log2(quantification_data['peptide_intensity'])
+
+        quantification_list = []
+
+        if padded:
+            # Add padding to lower and upper boundaries to ensure that each fractions is covered by equal number of windows
+            min_sec_id = min(self.sec_data['sec_id']) - self.window_size + 1
+            max_sec_id = max(self.sec_data['sec_id']) + self.window_size
+        else:
+            min_sec_id = min(self.sec_data['sec_id'])
+            max_sec_id = max(self.sec_data['sec_id'])+1
+
+        for w in window(range(min_sec_id, max_sec_id),  n=self.window_size):
+            runs = self.sec_data.loc[self.sec_data['sec_id'].isin(w)]['run_id']
+            mx_norm = self.normalize(quantification_data.loc[quantification_data['run_id'].isin(runs)])
+            quantification_list.append(mx_norm)
+
+        quantification_norm = pd.concat(quantification_list)
+        quantification_norm = quantification_norm.groupby(['run_id','protein_id','peptide_id'])['peptide_intensity'].mean().reset_index()
+
+        quantification_norm['peptide_intensity'] = np.exp2(quantification_norm['peptide_intensity'])
+
+        return(quantification_norm)
+
+    def normalize(self, quantification_data):
+        def normalizeCyclicLoess(x, span=0.7, iterations = 3):
+            n = len(x.columns)
+            for k in range(0,iterations):
+                a = x.mean(axis=1, skipna=True)
+                for i in range(0,n):
+                    m = x.iloc[:,i] - a
+
+                    # Fit lowess model
+                    lwd = 0.01 * np.diff([np.nanmin(m),np.nanmax(m)])
+                    lw = sm.nonparametric.lowess(endog=m.values, exog=a.values, frac=span, it=3, delta=lwd, return_sorted=False)
+                    x.iloc[:,i] = x.iloc[:,i].values - lw
+            return x
+
+        mx = pd.pivot_table(quantification_data, values='peptide_intensity', index=['protein_id','peptide_id'], columns='run_id').reset_index()
+        mx_idx = mx[['protein_id','peptide_id']]
+        mx = mx.drop(['protein_id','peptide_id'], axis=1)
+
+        mx_norm = normalizeCyclicLoess(mx)
+        mx_new = pd.merge(mx_idx, mx_norm, left_index=True, right_index=True)
+        quantification_data_new = mx_new.melt(id_vars=['protein_id','peptide_id'], var_name='run_id', value_name='peptide_intensity')
+        return quantification_data_new.dropna()[quantification_data.columns]
+
+    def plot(self, quantification_data, sec_data, filename):
+        if plt is None:
+            raise ImportError("Error: The matplotlib package is required to create a report.")
+
+        quantification_sum = quantification_data.groupby(['run_id'])['peptide_intensity'].sum().reset_index()
+
+        dfsum = pd.merge(quantification_sum, sec_data, on='run_id')
+        dfsum['sample_id'] = dfsum['condition_id'].astype(str) + '_' + dfsum['replicate_id'].astype(str)
+
+        dfplot = pd.pivot_table(dfsum, values='peptide_intensity', index='sec_id', columns='sample_id').reset_index()
+
+        with PdfPages(filename) as pdf:
+            plt.figure(figsize=(10, 5))
+            for sample in dfplot.drop('sec_id', axis=1):
+                plt.plot(dfplot['sec_id'], dfplot[sample], label=sample)
+            plt.legend()
+            plt.xlabel("SEC fraction")
+            plt.ylabel("total intensity")
+            pdf.savefig()
+            plt.clf()
+            plt.close()
+
+    def to_df(self):
+        return self.df
+
 class meta:
     def __init__(self, quantification_data, sec_data, decoy_intensity_bins, decoy_left_sec_bins, decoy_right_sec_bins):
         self.decoy_intensity_bins = decoy_intensity_bins
@@ -381,7 +488,7 @@ class meta:
         self.peptide_meta, self.protein_meta = self.generate(quantification_data, sec_data)
 
     def generate(self, quantification_data, sec_data):
-        df = pd.merge(quantification_data.to_df(), sec_data.to_df(), on='run_id')
+        df = pd.merge(quantification_data, sec_data, on='run_id')
 
         # Peptide-level meta data
         top_pep_tg = df.groupby(['peptide_id'])

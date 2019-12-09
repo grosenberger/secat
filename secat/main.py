@@ -7,7 +7,7 @@ from shutil import copyfile
 import pandas as pd
 import numpy as np
 
-from .preprocess import uniprot, net, sec, quantification, meta, query
+from .preprocess import uniprot, net, sec, quantification, normalization, meta, query
 from .score import monomer, scoring
 from .learn import pyprophet, combine
 from .quantify import quantitative_matrix, enrichment_test
@@ -37,6 +37,10 @@ def cli():
 @click.option('--negnet', 'negnetfile', required=False, type=click.Path(exists=True), help='Reference binary negative protein-protein interaction file in STRING-DB or HUPO-PSI MITAB (2.5-2.7) format.')
 @click.option('--uniprot', 'uniprotfile', required=True, type=click.Path(exists=True), help='Reference molecular weights file in UniProt XML format.')
 @click.option('--columns', default=["run_id","sec_id","sec_mw","condition_id","replicate_id","run_id","protein_id","peptide_id","peptide_intensity"], show_default=True, type=(str,str,str,str,str,str,str,str,str), help='Column names for SEC & peptide quantification files')
+# Parameters for normalization
+@click.option('--normalize/--no-normalize', default=True, show_default=True, help='Normalize quantification data by sliding window cycling LOWESS normaklization.')
+@click.option('--normalize_window','normalize_window', default=5, show_default=True, type=int, help='Number of SEC fractions per sliding window.')
+@click.option('--normalize_padded/--no-normalize_padded', default=True, show_default=True, help='Use padding for first and last SEC fractions.')
 # Parameters for decoys
 @click.option('--decoy_intensity_bins', 'decoy_intensity_bins', default=1, show_default=True, type=int, help='Number of decoy bins for intensity.')
 @click.option('--decoy_left_sec_bins', 'decoy_left_sec_bins', default=1, show_default=True, type=int, help='Number of decoy bins for left SEC fraction.')
@@ -47,7 +51,7 @@ def cli():
 @click.option('--min_interaction_confidence', 'min_interaction_confidence', default=0.0, show_default=True, type=float, help='Minimum interaction confidence for prior information from network.')
 @click.option('--interaction_confidence_bins', 'interaction_confidence_bins', default=100, show_default=True, type=int, help='Number of interaction confidence bins for grouped error rate estimation.')
 @click.option('--interaction_confidence_quantile/--no-interaction_confidence_quantile', default=True, show_default=True, help='Whether interaction confidence bins should be grouped by quantiles.')
-def preprocess(infiles, outfile, secfile, netfile, posnetfile, negnetfile, uniprotfile, columns, decoy_intensity_bins, decoy_left_sec_bins, decoy_right_sec_bins, decoy_oversample, decoy_subsample, decoy_exclude, min_interaction_confidence, interaction_confidence_bins, interaction_confidence_quantile):
+def preprocess(infiles, outfile, secfile, netfile, posnetfile, negnetfile, uniprotfile, columns, normalize, normalize_window, normalize_padded, decoy_intensity_bins, decoy_left_sec_bins, decoy_right_sec_bins, decoy_oversample, decoy_subsample, decoy_exclude, min_interaction_confidence, interaction_confidence_bins, interaction_confidence_quantile):
     """
     Import and preprocess SEC data.
     """
@@ -68,14 +72,23 @@ def preprocess(infiles, outfile, secfile, netfile, posnetfile, negnetfile, unipr
     # Generate Peptide quantification table
     run_ids = sec_data.to_df()['run_id'].unique() # Extract valid run_ids from SEC definition table
 
+    quantification_list = []
     for infile in infiles:
         click.echo("Info: Parsing peptide quantification file %s." % infile)
-        quantification_data = quantification(infile, columns, run_ids)
-        quantification_data.to_df().to_sql('QUANTIFICATION' ,con, index=False, if_exists='append')
+        quantification_list.append(quantification(infile, columns, run_ids).to_df())
+    quantification_data = pd.concat(quantification_list)
+
+    # Normalize quantitative data
+    if normalize:
+        click.echo("Info: Normalizing quantitative data.")
+        quantification_data = normalization(quantification_data, sec_data.to_df(), normalize_window, normalize_padded, outfile).to_df()
+
+    # Store quantification data
+    quantification_data.to_sql('QUANTIFICATION' ,con, index=False, if_exists='append')
 
     # Generate peptide and protein meta data over all conditions and replicates
     click.echo("Info: Generating peptide and protein meta data.")
-    meta_data = meta(quantification_data, sec_data, decoy_intensity_bins, decoy_left_sec_bins, decoy_right_sec_bins)
+    meta_data = meta(quantification_data, sec_data.to_df(), decoy_intensity_bins, decoy_left_sec_bins, decoy_right_sec_bins)
     meta_data.peptide_meta.to_sql('PEPTIDE_META', con, index=False)
     meta_data.protein_meta.to_sql('PROTEIN_META', con, index=False)
 
