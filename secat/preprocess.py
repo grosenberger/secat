@@ -401,7 +401,7 @@ class normalization:
             it = iter(seq)
             result = tuple(itertools.islice(it, n))
             if len(result) == n:
-                yield results
+                yield result
             for elem in it:
                 result = result[1:] + (elem,)
                 yield result
