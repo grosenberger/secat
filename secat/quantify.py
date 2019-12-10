@@ -68,9 +68,9 @@ class quantitative_matrix:
         def peptide_summarize(df):
             # Aggregate to peptide level
             peptide = df[['condition_id','replicate_id','bait_id','prey_id','is_bait','peptide_id']].copy()
-            peptide['monomer_intensity'] = np.log2(df['peptide_intensity'].values+1)
-            peptide['assembled_intensity'] = np.log2(df['total_peptide_intensity'].values-df['peptide_intensity'].values+1)
-            peptide['total_intensity'] = np.log2(df['total_peptide_intensity'].values+1)
+            peptide['monomer_abundance'] = np.log2(df['peptide_intensity'].values+1)
+            peptide['assembled_abundance'] = np.log2(df['total_peptide_intensity'].values-df['peptide_intensity'].values+1)
+            peptide['total_abundance'] = np.log2(df['total_peptide_intensity'].values+1)
 
             return peptide
 
@@ -118,7 +118,7 @@ class quantitative_matrix:
         def peptide_summarize(df):
             # Aggregate to peptide level
             peptide = df[['condition_id','replicate_id','bait_id','prey_id','is_bait','peptide_id']].copy()
-            peptide['interactor_intensity'] = np.log2(df['peptide_intensity']+1)
+            peptide['interactor_abundance'] = np.log2(df['peptide_intensity']+1)
 
             return peptide
 
@@ -149,7 +149,7 @@ class enrichment_test:
         self.missing_peptides = missing_peptides
         self.peptide_log2fx = peptide_log2fx
         self.threads = threads
-        self.levels = ['interactor_intensity','complex_intensity','complex_stoichiometry','monomer_intensity','assembled_intensity','total_intensity']
+        self.levels = ['interactor_abundance','complex_abundance','interactor_ratio','monomer_abundance','assembled_abundance','total_abundance']
         self.comparisons = self.contrast()
 
         self.monomer_qm, self.complex_qm = self.read()
@@ -240,12 +240,12 @@ class enrichment_test:
         dfs = []
         for level in self.levels:
             for state in [self.monomer_qm, self.complex_qm]:
-                if level in state.columns or (level in ['complex_intensity', 'complex_stoichiometry'] and 'interactor_intensity' in state.columns):
+                if level in state.columns or (level in ['complex_abundance', 'interactor_ratio'] and 'interactor_abundance' in state.columns):
                     if level in state.columns:
                         dat = state[state[level] > 0].copy()
                     else:
-                        dat = state[state['interactor_intensity'] > 0].copy()
-                        dat = dat.rename(index=str, columns={"interactor_intensity": level})
+                        dat = state[state['interactor_abundance'] > 0].copy()
+                        dat = dat.rename(index=str, columns={"interactor_abundance": level})
 
                     dat['query_id'] = dat['bait_id'] + '_' + dat['prey_id']
                     dat['query_peptide_id'] = dat['bait_id'] + '_' + dat['prey_id'] + '_' + dat['peptide_id']
@@ -270,13 +270,13 @@ class enrichment_test:
                     data_mx = dat.pivot_table(index='query_peptide_id', columns='quantification_id', values=level, fill_value=0)
 
                     # Generate subunit set for VIPER
-                    if level == 'complex_intensity':
+                    if level == 'complex_abundance':
                         # Complex abundance testing combines bait and prey peptides into a single regulon with positive tfmode sign
                         query_set = dat[['query_id','is_bait','query_peptide_id']].copy()
                         query_set['query_id'] = query_set['query_id'] + "+1"
                         subunit_set = query_set.groupby(['query_id'])['query_peptide_id'].apply(lambda x: x.unique().tolist()).to_dict()
                         subunit_tfm = query_set.groupby(['query_id'])['query_peptide_id'].apply(lambda x: np.repeat(1,len(x.unique()))).to_dict()
-                    elif level == 'complex_stoichiometry':
+                    elif level == 'interactor_ratio':
                         # Complex stoichiometry testing combines bait and prey peptides into a single regulon but with different tfmode signs
                         query_set = dat[['query_id','is_bait','query_peptide_id']].copy()
                         query_set.loc[query_set['is_bait']==0,'is_bait'] = -1
@@ -297,8 +297,8 @@ class enrichment_test:
                     results['is_bait'] = results['is_bait'].astype('int')
                     results['level'] = level
 
-                    # Append reverse information for complex_intensity and complex_stoichiometry levels
-                    if level in ['complex_intensity', 'complex_stoichiometry']:
+                    # Append reverse information for complex_abundance and interactor_ratio levels
+                    if level in ['complex_abundance', 'interactor_ratio']:
                         results_rev = results.copy()
                         results_rev['is_bait'] = 0
                         results = pd.concat([results, results_rev])
@@ -326,7 +326,7 @@ class enrichment_test:
                         results = pd.merge(results, quant_mx_log2fx_prot, on=['query_id','is_bait'], how='left')
 
                         # Compute interactor ratio
-                        if level in ['complex_intensity', 'complex_stoichiometry']:
+                        if level in ['complex_abundance', 'interactor_ratio']:
                             ratio_mx_prot = ratio_mx.groupby(['query_id','is_bait'])[[c for c in ratio_mx.columns if c.startswith("viper_")]].mean().reset_index()
                             ratio_mx_prot_ratio = ratio_mx_prot.groupby('query_id').apply(lambda x: (x.loc[x['is_bait']==0].squeeze()+1) / (x.loc[x['is_bait']==1].squeeze()+1)).reset_index(level='query_id')
 
@@ -375,7 +375,7 @@ class enrichment_test:
 
         df_protein_level = self.tests[self.tests['bait_id'] == self.tests['prey_id']]
         df_edge_full = pd.concat([df_protein_level, df_edge_level, df_edge_level_rev], sort=False)
-        df_edge_level = pd.concat([df_edge_level, df_edge_level_rev[df_edge_level_rev['level']=='interactor_intensity']], sort=False)
+        df_edge_level = pd.concat([df_edge_level, df_edge_level_rev[df_edge_level_rev['level']=='interactor_abundance']], sort=False)
         df_node_level = df_edge_full.groupby(['condition_1', 'condition_2','level','bait_id']).apply(collapse).reset_index()
 
         # Multi-testing correction and pooling
