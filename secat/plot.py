@@ -242,7 +242,7 @@ class plot_features:
 
         tags = peptide_data.sort_values(by=['tag'])['tag'].drop_duplicates().values.tolist()
 
-        f = plt.figure(figsize=(12,(len(tags)+1)*2.5))
+        f = plt.figure(figsize=(12,(len(tags)+1)*4.5))
 
         # Axes that share the x- and y-axes
         ax = f.add_subplot(len(tags)+1, 1, 1)

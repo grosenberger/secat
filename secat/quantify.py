@@ -10,6 +10,7 @@ from .EmpiricalBrownsMethod import EmpiricalBrownsMethod
 import itertools
 
 from scipy.stats import ttest_ind, ttest_rel
+from scipy.special import ndtr
 
 from statsmodels.stats.multitest import multipletests
 
@@ -304,8 +305,9 @@ class enrichment_test:
                         results = pd.concat([results, results_rev])
 
                     for comparison in self.comparisons:
-                        results['condition_1'] = comparison[0]
-                        results['condition_2'] = comparison[1]
+                        results_comparison = results.copy()
+                        results_comparison['condition_1'] = comparison[0]
+                        results_comparison['condition_2'] = comparison[1]
 
                         # Compute fold-change and absolute fold-change
                         quant_mx_avg = quant_mx.groupby(['query_id','is_bait','query_peptide_id']).apply(lambda x: pd.Series({'comparison_0': np.nanmean(np.exp2(x[qm_ids[qm_ids['condition_id']==comparison[0]]['quantification_id'].values].values)), 'comparison_1': np.nanmean(np.exp2(x[qm_ids[qm_ids['condition_id']==comparison[1]]['quantification_id'].values].values))})).reset_index(level=['query_id','is_bait','query_peptide_id'])
@@ -323,7 +325,7 @@ class enrichment_test:
                             quant_mx_log2fx_prot.columns = ['query_id','is_bait','log2fx']
                             quant_mx_log2fx_prot['abs_log2fx'] = np.abs(quant_mx_log2fx_prot['log2fx'])
 
-                        results = pd.merge(results, quant_mx_log2fx_prot, on=['query_id','is_bait'], how='left')
+                        results_comparison = pd.merge(results_comparison, quant_mx_log2fx_prot, on=['query_id','is_bait'], how='left')
 
                         # Compute interactor ratio
                         if level in ['complex_abundance', 'interactor_ratio']:
@@ -333,26 +335,30 @@ class enrichment_test:
                             ratio_change = ratio_mx_prot_ratio.groupby('query_id').apply(lambda x: np.mean(x[qm_ids[qm_ids['condition_id']==comparison[0]]['quantification_id'].values].values) / np.mean(x[qm_ids[qm_ids['condition_id']==comparison[1]]['quantification_id'].values].values)).reset_index(level='query_id')
                             ratio_change.columns = ['query_id','interactor_ratio']
                             ratio_change.loc[ratio_change['interactor_ratio'] > 1,'interactor_ratio'] = (1 / ratio_change.loc[ratio_change['interactor_ratio'] > 1,'interactor_ratio'])
-                            results = pd.merge(results, ratio_change, on=['query_id'], how='left')
+                            results_comparison = pd.merge(results_comparison, ratio_change, on=['query_id'], how='left')
                         else:
-                            results['interactor_ratio'] = np.nan
+                            results_comparison['interactor_ratio'] = np.nan
 
-                        # Conduct statistical tests
-                        # Paired analysis: For example replicates 1 of conditions A & B were measured by the same SILAC experiment
-                        if self.paired:
-                            results_pvalue = results.groupby(['query_id','is_bait','level']).apply(lambda x: pd.Series({"pvalue": ttest_rel(x[qm_ids[qm_ids['condition_id']==comparison[0]].sort_values(by=['quantification_id'])['quantification_id'].values].values[0], x[qm_ids[qm_ids['condition_id']==comparison[1]].sort_values(by=['quantification_id'])['quantification_id'].values].values[0])[1]})).reset_index()
-                        # Treat samples as independent measurements, e.g. quantification by LFQ
+                        # Conduct statistical tests for single samples
+                        if qm_ids[qm_ids['condition_id']==comparison[0]].shape[0] == 1:
+                            results_pvalue = results_comparison.groupby(['query_id','is_bait','level']).apply(lambda x: pd.Series({"pvalue": ndtr(x[qm_ids[qm_ids['condition_id']==comparison[0]]['quantification_id'].values[0]]).values[0]})).reset_index()
+                        # Conduct statistical tests with replicates
                         else:
-                            results_pvalue = results.groupby(['query_id','is_bait','level']).apply(lambda x: pd.Series({"pvalue": ttest_ind(x[qm_ids[qm_ids['condition_id']==comparison[0]]['quantification_id'].values].values[0], x[qm_ids[qm_ids['condition_id']==comparison[1]]['quantification_id'].values].values[0], equal_var=True)[1]})).reset_index()
-                        results = pd.merge(results, results_pvalue, on=['query_id','is_bait','level'])
+                            # Paired analysis: For example replicates 1 of conditions A & B were measured by the same SILAC experiment
+                            if self.paired:
+                                results_pvalue = results_comparison.groupby(['query_id','is_bait','level']).apply(lambda x: pd.Series({"pvalue": ttest_rel(x[qm_ids[qm_ids['condition_id']==comparison[0]].sort_values(by=['quantification_id'])['quantification_id'].values].values[0], x[qm_ids[qm_ids['condition_id']==comparison[1]].sort_values(by=['quantification_id'])['quantification_id'].values].values[0])[1]})).reset_index()
+                            # Treat samples as independent measurements, e.g. quantification by LFQ
+                            else:
+                                results_pvalue = results_comparison.groupby(['query_id','is_bait','level']).apply(lambda x: pd.Series({"pvalue": ttest_ind(x[qm_ids[qm_ids['condition_id']==comparison[0]]['quantification_id'].values].values[0], x[qm_ids[qm_ids['condition_id']==comparison[1]]['quantification_id'].values].values[0], equal_var=True)[1]})).reset_index()
+                        results_comparison = pd.merge(results_comparison, results_pvalue, on=['query_id','is_bait','level'])
 
                         # Set p-value to 1.0 if invalid
-                        results.loc[np.isnan(results['pvalue']),'pvalue'] = 1.0
+                        results_comparison.loc[np.isnan(results_comparison['pvalue']),'pvalue'] = 1.0
 
                         # Append meta information
-                        results = pd.merge(results, dat[['query_id','bait_id','prey_id']].drop_duplicates(), on='query_id')
+                        results_comparison = pd.merge(results_comparison, dat[['query_id','bait_id','prey_id']].drop_duplicates(), on='query_id')
 
-                        dfs.append(results[['condition_1','condition_2','level','bait_id','prey_id','is_bait','log2fx','abs_log2fx','interactor_ratio','pvalue']+[c for c in results.columns if c.startswith("viper_")]])
+                        dfs.append(results_comparison[['condition_1','condition_2','level','bait_id','prey_id','is_bait','log2fx','abs_log2fx','interactor_ratio','pvalue']+[c for c in results_comparison.columns if c.startswith("viper_")]])
 
         return pd.concat(dfs, ignore_index=True, sort=True).sort_values(by='pvalue', ascending=True, na_position='last')
 
