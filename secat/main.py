@@ -84,7 +84,7 @@ def preprocess(infiles, outfile, secfile, netfile, posnetfile, negnetfile, unipr
         quantification_data = normalization(quantification_data, sec_data.to_df(), normalize_window, normalize_padded, outfile).to_df()
 
     # Store quantification data
-    quantification_data.to_df().to_sql('QUANTIFICATION' ,con, index=False, if_exists='append')
+    quantification_data.to_sql('QUANTIFICATION' ,con, index=False, if_exists='append')
 
     # Generate peptide and protein meta data over all conditions and replicates
     click.echo("Info: Generating peptide and protein meta data.")
