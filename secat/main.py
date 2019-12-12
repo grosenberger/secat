@@ -290,7 +290,6 @@ def quantify(infile, outfile, control_condition, paired, maximum_interaction_qva
 
     con = sqlite3.connect(outfile)
     et.edge.to_sql('EDGE', con, index=False, if_exists='replace')
-    print(et.edge_level)
     et.edge_level.to_sql('EDGE_LEVEL', con, index=False, if_exists='replace')
     et.node.to_sql('NODE', con, index=False, if_exists='replace')
     et.node_level.to_sql('NODE_LEVEL', con, index=False, if_exists='replace')
