@@ -341,7 +341,7 @@ class enrichment_test:
 
                         # Conduct statistical tests for single samples
                         if qm_ids[qm_ids['condition_id']==comparison[0]].shape[0] == 1:
-                            results_pvalue = results_comparison.groupby(['query_id','is_bait','level']).apply(lambda x: pd.Series({"pvalue": ndtr(x[qm_ids[qm_ids['condition_id']==comparison[0]]['quantification_id'].values[0]]).values[0]})).reset_index()
+                            results_pvalue = results_comparison.groupby(['query_id','is_bait','level']).apply(lambda x: pd.Series({"pvalue": ndtr(x[qm_ids[qm_ids['condition_id']==comparison[0]]['quantification_id'].values[0]]).values[0], "nes": x[qm_ids[qm_ids['condition_id']==comparison[0]]['quantification_id'].values[0]].values[0]})).reset_index()
                         # Conduct statistical tests with replicates
                         else:
                             # Paired analysis: For example replicates 1 of conditions A & B were measured by the same SILAC experiment
@@ -358,7 +358,12 @@ class enrichment_test:
                         # Append meta information
                         results_comparison = pd.merge(results_comparison, dat[['query_id','bait_id','prey_id']].drop_duplicates(), on='query_id')
 
-                        dfs.append(results_comparison[['condition_1','condition_2','level','bait_id','prey_id','is_bait','log2fx','abs_log2fx','interactor_ratio','pvalue']+[c for c in results_comparison.columns if c.startswith("viper_")]])
+                        # Select VIPER / NES columns
+                        nes_columns = [c for c in results_comparison.columns if c.startswith("viper_")]
+                        if "nes" in results_comparison.columns:
+                            nes_columns += ["nes"]
+
+                        dfs.append(results_comparison[['condition_1','condition_2','level','bait_id','prey_id','is_bait','log2fx','abs_log2fx','interactor_ratio','pvalue']+nes_columns])
 
         return pd.concat(dfs, ignore_index=True, sort=True).sort_values(by='pvalue', ascending=True, na_position='last')
 
@@ -404,5 +409,10 @@ class enrichment_test:
             click.echo("%s (at FDR < 0.05)" % (df_node_level_filtered[(df_node_level_filtered['level'] == level) & (df_node_level_filtered['pvalue_adjusted'] < 0.05)][['bait_id']].drop_duplicates().shape[0]))
             click.echo("%s (at FDR < 0.1)" % (df_node_level_filtered[(df_node_level_filtered['level'] == level) & (df_node_level_filtered['pvalue_adjusted'] < 0.1)][['bait_id']].drop_duplicates().shape[0]))
 
-        return df_edge_level[['condition_1','condition_2','level','bait_id','prey_id','log2fx','abs_log2fx','interactor_ratio','pvalue','pvalue_adjusted']+[c for c in df_edge_level.columns if c.startswith("viper_")]], df_edge[['condition_1','condition_2','level','bait_id','prey_id','log2fx','abs_log2fx','interactor_ratio','pvalue','pvalue_adjusted']], df_node_level[['condition_1','condition_2','level','bait_id','log2fx','abs_log2fx','interactor_ratio','num_interactors','pvalue','pvalue_adjusted']], df_node[['condition_1','condition_2','level','bait_id','log2fx','abs_log2fx','interactor_ratio','num_interactors','pvalue','pvalue_adjusted']], df_protein_level[['condition_1','condition_2','level','bait_id','log2fx','abs_log2fx','interactor_ratio','pvalue','pvalue_adjusted'] + [c for c in df_protein_level.columns if c.startswith("viper_")]]
+        # Select VIPER / NES columns
+        if "nes" in df_edge_level.columns:
+            nes_columns = ["nes"]
+        else:
+            nes_columns = [c for c in df_edge_level.columns if c.startswith("viper_")]
 
+        return df_edge_level[['condition_1','condition_2','level','bait_id','prey_id','log2fx','abs_log2fx','interactor_ratio','pvalue','pvalue_adjusted'] + nes_columns], df_edge[['condition_1','condition_2','level','bait_id','prey_id','log2fx','abs_log2fx','interactor_ratio','pvalue','pvalue_adjusted']], df_node_level[['condition_1','condition_2','level','bait_id','log2fx','abs_log2fx','interactor_ratio','num_interactors','pvalue','pvalue_adjusted']], df_node[['condition_1','condition_2','level','bait_id','log2fx','abs_log2fx','interactor_ratio','num_interactors','pvalue','pvalue_adjusted']], df_protein_level[['condition_1','condition_2','level','bait_id','log2fx','abs_log2fx','interactor_ratio','pvalue','pvalue_adjusted'] + nes_columns]
