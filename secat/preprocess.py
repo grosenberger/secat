@@ -271,7 +271,10 @@ class quantification:
         self.run_id_col = columns[5]
         self.protein_id_col = columns[6]
         self.peptide_id_col = columns[7]
-        self.intensity_id_col = columns[8]
+        self.peptide_sequence_col = columns[8]
+        self.modified_peptide_sequence_col = columns[9]
+        self.precursor_charge_col = columns[10]
+        self.peptide_intensity_col = columns[11]
         self.formats = ['matrix','long']
         self.format, self.header = self.identify(infile)
         self.run_ids = run_ids
@@ -290,7 +293,7 @@ class quantification:
         if self.run_id_col not in columns and self.protein_id_col in columns and self.peptide_id_col in columns:
             return self.formats[0], columns
         # Long list
-        elif self.run_id_col in columns and self.protein_id_col in columns and self.peptide_id_col and self.intensity_id_col in columns:
+        elif self.run_id_col in columns and self.protein_id_col in columns and self.peptide_id_col in columns and self.peptide_sequence_col in columns and self.modified_peptide_sequence_col in columns and self.precursor_charge_col in columns and self.peptide_intensity_col in columns:
             return self.formats[1], columns
         else:
             sys.exit("Error: Peptide quantification file format is not supported. Try changing the 'columns' parameter.")
@@ -301,16 +304,19 @@ class quantification:
 
         # Read data
         mx = pd.read_csv(infile, sep=None, engine='python')
-        df = pd.melt(mx, id_vars=[self.protein_id_col, self.peptide_id_col], value_vars=run_id_columns, var_name=self.run_id_col, value_name=self.intensity_id_col)
+        df = pd.melt(mx, id_vars=[self.protein_id_col, self.peptide_id_col, self.peptide_sequence_col, self.modified_peptide_sequence_col, self.precursor_charge_col], value_vars=run_id_columns, var_name=self.run_id_col, value_name=self.peptide_intensity_col)
 
         # Organize and rename columns
-        df = df[[self.run_id_col, self.protein_id_col, self.peptide_id_col, self.intensity_id_col]]
-        df.columns = ['run_id', 'protein_id', 'peptide_id', 'peptide_intensity']
+        df = df[[self.run_id_col, self.protein_id_col, self.peptide_id_col, self.peptide_sequence_col, self.modified_peptide_sequence_col, self.precursor_charge_col, self.peptide_intensity_col]]
+        df.columns = ['run_id', 'protein_id', 'peptide_id', 'peptide_sequence', 'modified_peptide_sequence', 'precursor_charge', 'peptide_intensity']
 
-        # run_id, condition_id and replicate_id are categorial values, peptide_intensity must be float
+        # run_id, condition_id and replicate_id are categorial values, precursor_charge must be int, peptide_intensity must be float
         df['run_id'] = df['run_id'].apply(lambda x: os.path.basename(str(x)))
         df['protein_id'] = df['protein_id'].apply(str)
         df['peptide_id'] = df['peptide_id'].apply(str)
+        df['peptide_sequence'] = df['peptide_sequence'].apply(str)
+        df['modified_peptide_sequence'] = df['modified_peptide_sequence'].apply(str)
+        df['precursor_charge'] = df['precursor_charge'].apply(int)
         df['peptide_intensity'] = df['peptide_intensity'].apply(float)
 
         df = df.sort_values(by=['protein_id','peptide_id','run_id'])
@@ -346,13 +352,16 @@ class quantification:
             df = df.loc[df['decoy'] == 0]
 
         # Organize and rename columns
-        df = df[[self.run_id_col, self.protein_id_col, self.peptide_id_col, self.intensity_id_col]]
-        df.columns = ['run_id', 'protein_id', 'peptide_id', 'peptide_intensity']
+        df = df[[self.run_id_col, self.protein_id_col, self.peptide_id_col, self.peptide_sequence_col, self.modified_peptide_sequence_col, self.precursor_charge_col, self.peptide_intensity_col]]
+        df.columns = ['run_id', 'protein_id', 'peptide_id', 'peptide_sequence', 'modified_peptide_sequence', 'precursor_charge', 'peptide_intensity']
 
-        # run_id, condition_id and replicate_id are categorial values, peptide_intensity must be float
+        # run_id, condition_id and replicate_id are categorial values, precursor_charge must be int, peptide_intensity must be float
         df['run_id'] = df['run_id'].apply(lambda x: os.path.basename(str(x)))
         df['protein_id'] = df['protein_id'].apply(str)
         df['peptide_id'] = df['peptide_id'].apply(str)
+        df['peptide_sequence'] = df['peptide_sequence'].apply(str)
+        df['modified_peptide_sequence'] = df['modified_peptide_sequence'].apply(str)
+        df['precursor_charge'] = df['precursor_charge'].apply(int)
         df['peptide_intensity'] = df['peptide_intensity'].apply(float)
 
         df = df.sort_values(by=['protein_id','peptide_id','run_id'])
@@ -480,14 +489,14 @@ class normalization:
         return self.df
 
 class meta:
-    def __init__(self, quantification_data, sec_data, decoy_intensity_bins, decoy_left_sec_bins, decoy_right_sec_bins):
+    def __init__(self, quantification_data, quantification_peptide_meta_data, sec_data, decoy_intensity_bins, decoy_left_sec_bins, decoy_right_sec_bins):
         self.decoy_intensity_bins = decoy_intensity_bins
         self.decoy_left_sec_bins = decoy_left_sec_bins
         self.decoy_right_sec_bins = decoy_right_sec_bins
 
-        self.peptide_meta, self.protein_meta = self.generate(quantification_data, sec_data)
+        self.peptide_meta, self.protein_meta = self.generate(quantification_data, quantification_peptide_meta_data, sec_data)
 
-    def generate(self, quantification_data, sec_data):
+    def generate(self, quantification_data, quantification_peptide_meta_data, sec_data):
         df = pd.merge(quantification_data, sec_data, on='run_id')
 
         # Peptide-level meta data
@@ -499,7 +508,7 @@ class meta:
         top_pep_rank['peptide_rank'] = top_pep_rank.groupby(['protein_id'])['sumIntensity'].rank(ascending=False)
 
         # Store peptide-level meta data
-        peptide_meta = top_pep_rank[['peptide_id','peptide_rank']]
+        peptide_meta = pd.merge(quantification_peptide_meta_data, top_pep_rank[['peptide_id','peptide_rank']], on='peptide_id', how='inner')
 
         # Protein-level meta data
         num_pep = top_pep_rank.groupby(['protein_id'])['peptide_id'].count().reset_index()

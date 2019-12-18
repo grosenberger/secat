@@ -36,7 +36,7 @@ def cli():
 @click.option('--posnet', 'posnetfile', required=False, type=click.Path(exists=True), help='Reference binary positive protein-protein interaction file in STRING-DB or HUPO-PSI MITAB (2.5-2.7) format.')
 @click.option('--negnet', 'negnetfile', required=False, type=click.Path(exists=True), help='Reference binary negative protein-protein interaction file in STRING-DB or HUPO-PSI MITAB (2.5-2.7) format.')
 @click.option('--uniprot', 'uniprotfile', required=True, type=click.Path(exists=True), help='Reference molecular weights file in UniProt XML format.')
-@click.option('--columns', default=["run_id","sec_id","sec_mw","condition_id","replicate_id","run_id","protein_id","peptide_id","peptide_intensity"], show_default=True, type=(str,str,str,str,str,str,str,str,str), help='Column names for SEC & peptide quantification files')
+@click.option('--columns', default=["run_id","sec_id","sec_mw","condition_id","replicate_id","run_id","protein_id","peptide_id","peptide_sequence","modified_peptide_sequence","precursor_charge","peptide_intensity"], show_default=True, type=(str,str,str,str,str,str,str,str,str,str,str,str), help='Column names for SEC & peptide quantification files')
 # Parameters for normalization
 @click.option('--normalize/--no-normalize', default=True, show_default=True, help='Normalize quantification data by sliding window cycling LOWESS normaklization.')
 @click.option('--normalize_window','normalize_window', default=5, show_default=True, type=int, help='Number of SEC fractions per sliding window.')
@@ -78,6 +78,10 @@ def preprocess(infiles, outfile, secfile, netfile, posnetfile, negnetfile, unipr
         quantification_list.append(quantification(infile, columns, run_ids).to_df())
     quantification_data = pd.concat(quantification_list)
 
+    # Extract quantification peptide meta data
+    quantification_peptide_meta_data = quantification_data[['peptide_id', 'peptide_sequence', 'modified_peptide_sequence', 'precursor_charge']].drop_duplicates()
+    quantification_data = quantification_data[['run_id', 'protein_id', 'peptide_id', 'peptide_intensity']]
+
     # Normalize quantitative data
     if normalize:
         click.echo("Info: Normalizing quantitative data.")
@@ -88,7 +92,7 @@ def preprocess(infiles, outfile, secfile, netfile, posnetfile, negnetfile, unipr
 
     # Generate peptide and protein meta data over all conditions and replicates
     click.echo("Info: Generating peptide and protein meta data.")
-    meta_data = meta(quantification_data, sec_data.to_df(), decoy_intensity_bins, decoy_left_sec_bins, decoy_right_sec_bins)
+    meta_data = meta(quantification_data, quantification_peptide_meta_data, sec_data.to_df(), decoy_intensity_bins, decoy_left_sec_bins, decoy_right_sec_bins)
     meta_data.peptide_meta.to_sql('PEPTIDE_META', con, index=False)
     meta_data.protein_meta.to_sql('PROTEIN_META', con, index=False)
 
