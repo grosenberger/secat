@@ -25,7 +25,7 @@ from pyprophet.stats import pemp, qvalue, pi0est
 from hyperopt import hp
 
 class pyprophet:
-    def __init__(self, outfile, apply_model, minimum_abundance_ratio, maximum_sec_shift, cb_decoys, xeval_fraction, xeval_num_iter, ss_initial_fdr, ss_iteration_fdr, ss_num_iter, parametric, pfdr, pi0_lambda, pi0_method, pi0_smooth_df, pi0_smooth_log_pi0, lfdr_truncate, lfdr_monotone, lfdr_transformation, lfdr_adj, lfdr_eps, threads, test):
+    def __init__(self, outfile, apply_model, minimum_abundance_ratio, maximum_sec_shift, cb_decoys, xeval_fraction, xeval_num_iter, ss_initial_fdr, ss_iteration_fdr, ss_num_iter, parametric, pfdr, pi0_lambda, pi0_method, pi0_smooth_df, pi0_smooth_log_pi0, lfdr_truncate, lfdr_monotone, lfdr_transformation, lfdr_adj, lfdr_eps, plot_reports, threads, test):
 
         self.outfile = outfile
         self.apply_model = apply_model
@@ -58,40 +58,72 @@ class pyprophet:
         self.lfdr_adj = lfdr_adj
         self.lfdr_eps = lfdr_eps
         self.threads = threads
+        self.plot_reports = plot_reports
         self.test = test
+        self.has_learning = self.has_learning()
 
-        # Read data
-        data = self.read_data()
+        # Load pretrained model if available
+        if self.apply_model is not None:
+            self.weights = self.load_model()
 
-        if data[data['learning'] == 1].shape[0] > 0:
-            if self.apply_model == None:
-                # Learn model
+        # Learn classifier
+        else:
+            if self.has_learning:
+                learning_data = self.read_data(learning=True)
                 if self.cb_decoys:
                     click.echo("Info: Using decoys from same confidence bin for learning.")
-                    self.weights = self.learn(data[(data['learning'] == 1)])
+                    self.weights = self.learn(learning_data[(learning_data['learning'] == 1)])
                 else:
-                    self.weights = self.learn(data[(data['learning'] == 1) | (data['decoy'] == 1)])
+                    self.weights = self.learn(learning_data[(learning_data['learning'] == 1) | (learning_data['decoy'] == 1)])
             else:
-                # Apply pretrained model
-                self.weights = self.load_model()
-            # Apply model
-            self.df = data[data['learning'] == 0].groupby('confidence_bin').apply(self.apply)
-        else:
-            if self.apply_model == None:
-                # Learn model
-                self.weights = self.learn(data[data['confidence_bin'] == data['confidence_bin'].max()])
+                learning_data = self.read_data(learning=False)
+                self.weights = self.learn(learning_data[learning_data['confidence_bin'] == learning_data['confidence_bin'].max()])
+            # Store model
+            self.store_model()
+
+        # Apply classifier to full dataset
+        runs = self.read_runs()
+
+        # Apply separately for each run
+        for run in runs.iterrows():
+            click.echo("Info: Apply scores to condition %s and replicate %s." %(run[1]['condition_id'], run[1]['replicate_id']))
+            data = self.read_data(learning=False, condition_id=run[1]['condition_id'], replicate_id=run[1]['replicate_id'])
+
+            if self.has_learning:
+                scored_data = data[data['learning'] == 0].groupby('confidence_bin').apply(self.apply, condition_id=run[1]['condition_id'], replicate_id=run[1]['replicate_id'])
             else:
-                # Apply pretrained model
-                self.weights = self.load_model()
-            # Apply model
-            self.df = data.groupby('confidence_bin').apply(self.apply)
+                scored_data = data.groupby('confidence_bin').apply(self.apply, condition_id=run[1]['condition_id'], replicate_id=run[1]['replicate_id'])
 
-        # Store model
-        self.store_model()
+            con = sqlite3.connect(outfile)
+            scored_data.to_sql('FEATURE_SCORED', con, index=False, if_exists='append')
+            con.close()
 
-    def read_data(self):
+    def has_learning(self):
         con = sqlite3.connect(self.outfile)
-        df = pd.read_sql('SELECT *, condition_id || "_" || replicate_id || "_" || bait_id || "_" || prey_id AS pyprophet_feature_id, condition_id || "_" || bait_id || "_" || prey_id AS pyprophet_metafeature_id FROM FEATURE ORDER BY pyprophet_metafeature_id;', con)
+        c = con.cursor()
+        c.execute('SELECT count(*) FROM FEATURE WHERE learning==1;')
+        if c.fetchone()[0] == 0:
+            learning = False
+        else:
+            learning = True
+        con.close()
+        return learning
+
+    def read_runs(self):
+        con = sqlite3.connect(self.outfile)
+        df = pd.read_sql('SELECT DISTINCT condition_id, replicate_id FROM FEATURE;', con)
+        con.close()
+
+        return df
+
+    def read_data(self, learning=False, condition_id=None, replicate_id=None):
+        con = sqlite3.connect(self.outfile)
+        if learning and condition_id is None and replicate_id is None:
+            df = pd.read_sql('SELECT *, condition_id || "_" || replicate_id || "_" || bait_id || "_" || prey_id || "_" || decoy AS pyprophet_feature_id, condition_id || "_" || bait_id || "_" || prey_id || "_" || decoy AS pyprophet_metafeature_id FROM FEATURE WHERE learning==1 OR decoy==1 ORDER BY pyprophet_metafeature_id;', con)
+        elif condition_id is not None and replicate_id is not None:
+            df = pd.read_sql('SELECT *, condition_id || "_" || replicate_id || "_" || bait_id || "_" || prey_id || "_" || decoy AS pyprophet_feature_id, condition_id || "_" || bait_id || "_" || prey_id || "_" || decoy AS pyprophet_metafeature_id FROM FEATURE WHERE learning==0 AND condition_id=="%s" AND replicate_id=="%s" ORDER BY pyprophet_metafeature_id;' % (condition_id, replicate_id), con)
+        else:
+            df = pd.read_sql('SELECT *, condition_id || "_" || replicate_id || "_" || bait_id || "_" || prey_id || "_" || decoy AS pyprophet_feature_id, condition_id || "_" || bait_id || "_" || prey_id || "_" || decoy AS pyprophet_metafeature_id FROM FEATURE ORDER BY pyprophet_metafeature_id;', con)
         con.close()
 
         # Filter according to boundaries
@@ -142,14 +174,15 @@ class pyprophet:
 
         return pickle.loads(data[0])
 
-    def apply(self, detecting_data):
+    def apply(self, detecting_data, condition_id, replicate_id):
         (result, scorer, weights) = PyProphet(self.classifier, self.xgb_hyperparams, self.xgb_params, self.xgb_params_space, self.xeval_fraction, self.xeval_num_iter, self.ss_initial_fdr, self.ss_iteration_fdr, self.ss_num_iter, self.group_id, self.parametric, self.pfdr, self.pi0_lambda, self.pi0_method, self.pi0_smooth_df, self.pi0_smooth_log_pi0, self.lfdr_truncate, self.lfdr_monotone, self.lfdr_transformation, self.lfdr_adj, self.lfdr_eps, False, self.threads, self.test).apply_weights(detecting_data, self.weights)
 
         df = result.scored_tables[['condition_id','replicate_id','bait_id','prey_id','decoy','confidence_bin','d_score','p_value','q_value','pep']]
         df.columns = ['condition_id','replicate_id','bait_id','prey_id','decoy','confidence_bin','score','pvalue','qvalue','pep']
 
-        self.plot(result, scorer.pi0, "detecting_" + str(detecting_data['confidence_bin'].values[0]))
-        self.plot_scores(result.scored_tables, "detecting_" + str(detecting_data['confidence_bin'].values[0]))
+        if self.plot_reports:
+            self.plot(result, scorer.pi0, condition_id + "_" + replicate_id + "_" + "detecting_" + str(detecting_data['confidence_bin'].values[0]))
+            self.plot_scores(result.scored_tables, condition_id + "_" + replicate_id + "_" + "detecting_" + str(detecting_data['confidence_bin'].values[0]))
 
         return df
 
@@ -223,7 +256,7 @@ class combine:
 
     def read(self):
         con = sqlite3.connect(self.outfile)
-        df = pd.read_sql('SELECT * FROM FEATURE_SCORED;', con)
+        df = pd.read_sql('SELECT condition_id, bait_id , prey_id , decoy , confidence_bin, score, qvalue FROM FEATURE_SCORED;', con)
         con.close()
 
         return df

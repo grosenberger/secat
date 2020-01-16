@@ -197,7 +197,7 @@ class scoring:
         self.queries = self.read_queries()
 
         click.echo("Info: Score PPI.")
-        self.df = self.compare()
+        self.compare()
 
     def read_chromatograms(self):
         # Read data
@@ -302,7 +302,6 @@ class scoring:
         # Obtain experimental design
         exp_design = self.chromatograms[['condition_id','replicate_id']].drop_duplicates()
 
-        scores = []
         # Iterate over experimental design
         for exp_ix, run in exp_design.iterrows():
             chromatograms = self.chromatograms[(self.chromatograms['condition_id']==run['condition_id']) & (self.chromatograms['replicate_id']==run['replicate_id'])]
@@ -321,7 +320,9 @@ class scoring:
 
             with tqdm(total=len(queries_chunks)) as pbar:
                 for i, result in tqdm(enumerate(pool.imap_unordered(partial(score_chunk, qm=qm, run=run), queries_chunks))):
-                    pbar.update()
-                    scores.extend(result)
 
-        return(pd.DataFrame(scores))
+                    con = sqlite3.connect(self.outfile)
+                    pd.DataFrame(result).to_sql('FEATURE', con, index=False, if_exists='append')
+                    con.close()
+
+                    pbar.update()

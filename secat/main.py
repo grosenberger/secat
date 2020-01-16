@@ -186,12 +186,15 @@ def score(infile, outfile, monomer_threshold_factor, minimum_peptides, maximum_p
 
     # Signal processing
     click.echo("Info: Signal processing.")
-    feature_data = scoring(outfile, chunck_size, threads, minimum_peptides, maximum_peptides, peakpicking)
-    # cProfile.runctx('scoring(outfile, chunck_size, minimum_peptides, maximum_peptides, peakpicking)', globals(), locals = {'outfile': outfile, 'chunck_size': chunck_size, 'minimum_peptides': minimum_peptides, 'maximum_peptides': maximum_peptides, 'peakpicking': peakpicking}, filename="score_performance.cprof")
 
+    # Drop features if they already exist
     con = sqlite3.connect(outfile)
-    feature_data.df.to_sql('FEATURE', con, index=False, if_exists='replace')
+    c = con.cursor()
+    c.execute('DROP TABLE IF EXISTS FEATURE;')
     con.close()
+
+    scoring(outfile, chunck_size, threads, minimum_peptides, maximum_peptides, peakpicking)
+    # cProfile.runctx('scoring(outfile, chunck_size, minimum_peptides, maximum_peptides, peakpicking)', globals(), locals = {'outfile': outfile, 'chunck_size': chunck_size, 'minimum_peptides': minimum_peptides, 'maximum_peptides': maximum_peptides, 'peakpicking': peakpicking}, filename="score_performance.cprof")
 
 # SECAT learn features
 @cli.command()
@@ -220,9 +223,10 @@ def score(infile, outfile, monomer_threshold_factor, minimum_peptides, maximum_p
 @click.option('--lfdr_transformation', default='probit', show_default=True, type=click.Choice(['probit', 'logit']), help='Either a "probit" or "logit" transformation is applied to the p-values so that a local FDR estimate can be formed that does not involve edge effects of the [0,1] interval in which the p-values lie.')
 @click.option('--lfdr_adj', default=1.5, show_default=True, type=float, help='Numeric value that is applied as a multiple of the smoothing bandwidth used in the density estimation.')
 @click.option('--lfdr_eps', default=np.power(10.0,-8), show_default=True, type=float, help='Numeric value that is threshold for the tails of the empirical p-value distribution.')
+@click.option('--plot_reports/--no-plot_reports', default=False, show_default=True, help='Plot reports for all confidence bins.')
 @click.option('--threads', default=1, show_default=True, type=int, help='Number of threads used for parallel processing. -1 means all available CPUs.', callback=transform_threads)
-@click.option('--test/--no-test', default=False, show_default=True, help='Run in test mode with fixed seed.')
-def learn(infile, outfile, apply_model, minimum_abundance_ratio, maximum_sec_shift, cb_decoys, xeval_fraction, xeval_num_iter, ss_initial_fdr, ss_iteration_fdr, ss_num_iter, parametric, pfdr, pi0_lambda, pi0_method, pi0_smooth_df, pi0_smooth_log_pi0, lfdr_truncate, lfdr_monotone, lfdr_transformation, lfdr_adj, lfdr_eps, threads, test):
+@click.option('--test/--no-test', default=False, show_default=True, help='Run in test mode with fixed seed to ensure reproducibility.')
+def learn(infile, outfile, apply_model, minimum_abundance_ratio, maximum_sec_shift, cb_decoys, xeval_fraction, xeval_num_iter, ss_initial_fdr, ss_iteration_fdr, ss_num_iter, parametric, pfdr, pi0_lambda, pi0_method, pi0_smooth_df, pi0_smooth_log_pi0, lfdr_truncate, lfdr_monotone, lfdr_transformation, lfdr_adj, lfdr_eps, plot_reports, threads, test):
     """
     Learn true/false interaction features in SEC data.
     """
@@ -237,11 +241,13 @@ def learn(infile, outfile, apply_model, minimum_abundance_ratio, maximum_sec_shi
     # Run PyProphet training
     click.echo("Info: Running PyProphet.")
 
-    scored_data = pyprophet(outfile, apply_model, minimum_abundance_ratio, maximum_sec_shift, cb_decoys, xeval_fraction, xeval_num_iter, ss_initial_fdr, ss_iteration_fdr, ss_num_iter, parametric, pfdr, pi0_lambda, pi0_method, pi0_smooth_df, pi0_smooth_log_pi0, lfdr_truncate, lfdr_monotone, lfdr_transformation, lfdr_adj, lfdr_eps, threads, test)
-
+    # Drop feature scores if they already exist
     con = sqlite3.connect(outfile)
-    scored_data.df.to_sql('FEATURE_SCORED', con, index=False, if_exists='replace')
+    c = con.cursor()
+    c.execute('DROP TABLE IF EXISTS FEATURE_SCORED;')
     con.close()
+
+    pyprophet(outfile, apply_model, minimum_abundance_ratio, maximum_sec_shift, cb_decoys, xeval_fraction, xeval_num_iter, ss_initial_fdr, ss_iteration_fdr, ss_num_iter, parametric, pfdr, pi0_lambda, pi0_method, pi0_smooth_df, pi0_smooth_log_pi0, lfdr_truncate, lfdr_monotone, lfdr_transformation, lfdr_adj, lfdr_eps, plot_reports, threads, test)
 
     # Combine all replicates
     click.echo("Info: Combine evidence across replicate runs.")
