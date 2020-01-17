@@ -27,6 +27,27 @@ Install the stable version of *SECAT* from the Python Package Index (PyPI):
 pip install secat
 ````
 
+Docker
+------
+
+SECAT is also available from [Dockerhub](https://hub.docker.com/repository/docker/grosenberger/secat):
+
+````
+docker pull grosenberger/secat:latest # "latest" can be replaced by the version number, e.g. "1.0.4"
+````
+
+Print the installed Python and R package versions:
+
+````
+docker run --name secat --rm -v $PWD:/data -i -t grosenberger/secat:latest Rscript -e 'installed.packages()[,"Version"]'
+docker run --name secat --rm -v $PWD:/data -i -t grosenberger/secat:latest pip list
+````
+
+Run SECAT:
+
+````
+docker run --name secat --rm -v $PWD:/data -i -t grosenberger/secat:latest secat --help
+````
 
 Running SECAT
 -------------
