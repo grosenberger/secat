@@ -211,6 +211,7 @@ def score(infile, outfile, monomer_threshold_factor, minimum_peptides, maximum_p
 @click.option('--ss_initial_fdr', default=0.1, show_default=True, type=float, help='Initial FDR cutoff for best scoring targets.')
 @click.option('--ss_iteration_fdr', default=0.05, show_default=True, type=float, help='Iteration FDR cutoff for best scoring targets.')
 @click.option('--ss_num_iter', default=10, show_default=True, type=int, help='Number of iterations for semi-supervised learning step.')
+@click.option('--xgb_autotune/--no-xgb_autotune', default=False, show_default=True, help='Autotune hyperparameters after semi-supervised learning.')
 # Statistics
 @click.option('--parametric/--no-parametric', default=False, show_default=True, help='Do parametric estimation of p-values.')
 @click.option('--pfdr/--no-pfdr', default=False, show_default=True, help='Compute positive false discovery rate (pFDR) instead of FDR.')
@@ -226,7 +227,7 @@ def score(infile, outfile, monomer_threshold_factor, minimum_peptides, maximum_p
 @click.option('--plot_reports/--no-plot_reports', default=False, show_default=True, help='Plot reports for all confidence bins.')
 @click.option('--threads', default=1, show_default=True, type=int, help='Number of threads used for parallel processing. -1 means all available CPUs.', callback=transform_threads)
 @click.option('--test/--no-test', default=False, show_default=True, help='Run in test mode with fixed seed to ensure reproducibility.')
-def learn(infile, outfile, apply_model, minimum_abundance_ratio, maximum_sec_shift, cb_decoys, xeval_fraction, xeval_num_iter, ss_initial_fdr, ss_iteration_fdr, ss_num_iter, parametric, pfdr, pi0_lambda, pi0_method, pi0_smooth_df, pi0_smooth_log_pi0, lfdr_truncate, lfdr_monotone, lfdr_transformation, lfdr_adj, lfdr_eps, plot_reports, threads, test):
+def learn(infile, outfile, apply_model, minimum_abundance_ratio, maximum_sec_shift, cb_decoys, xeval_fraction, xeval_num_iter, ss_initial_fdr, ss_iteration_fdr, ss_num_iter, xgb_autotune, parametric, pfdr, pi0_lambda, pi0_method, pi0_smooth_df, pi0_smooth_log_pi0, lfdr_truncate, lfdr_monotone, lfdr_transformation, lfdr_adj, lfdr_eps, plot_reports, threads, test):
     """
     Learn true/false interaction features in SEC data.
     """
@@ -247,7 +248,7 @@ def learn(infile, outfile, apply_model, minimum_abundance_ratio, maximum_sec_shi
     c.execute('DROP TABLE IF EXISTS FEATURE_SCORED;')
     con.close()
 
-    pyprophet(outfile, apply_model, minimum_abundance_ratio, maximum_sec_shift, cb_decoys, xeval_fraction, xeval_num_iter, ss_initial_fdr, ss_iteration_fdr, ss_num_iter, parametric, pfdr, pi0_lambda, pi0_method, pi0_smooth_df, pi0_smooth_log_pi0, lfdr_truncate, lfdr_monotone, lfdr_transformation, lfdr_adj, lfdr_eps, plot_reports, threads, test)
+    pyprophet(outfile, apply_model, minimum_abundance_ratio, maximum_sec_shift, cb_decoys, xeval_fraction, xeval_num_iter, ss_initial_fdr, ss_iteration_fdr, ss_num_iter, xgb_autotune, parametric, pfdr, pi0_lambda, pi0_method, pi0_smooth_df, pi0_smooth_log_pi0, lfdr_truncate, lfdr_monotone, lfdr_transformation, lfdr_adj, lfdr_eps, plot_reports, threads, test)
 
     # Combine all replicates
     click.echo("Info: Combine evidence across replicate runs.")

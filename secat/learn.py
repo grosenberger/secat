@@ -25,13 +25,14 @@ from pyprophet.stats import pemp, qvalue, pi0est
 from hyperopt import hp
 
 class pyprophet:
-    def __init__(self, outfile, apply_model, minimum_abundance_ratio, maximum_sec_shift, cb_decoys, xeval_fraction, xeval_num_iter, ss_initial_fdr, ss_iteration_fdr, ss_num_iter, parametric, pfdr, pi0_lambda, pi0_method, pi0_smooth_df, pi0_smooth_log_pi0, lfdr_truncate, lfdr_monotone, lfdr_transformation, lfdr_adj, lfdr_eps, plot_reports, threads, test):
+    def __init__(self, outfile, apply_model, minimum_abundance_ratio, maximum_sec_shift, cb_decoys, xeval_fraction, xeval_num_iter, ss_initial_fdr, ss_iteration_fdr, ss_num_iter, xgb_autotune, parametric, pfdr, pi0_lambda, pi0_method, pi0_smooth_df, pi0_smooth_log_pi0, lfdr_truncate, lfdr_monotone, lfdr_transformation, lfdr_adj, lfdr_eps, plot_reports, threads, test):
 
         self.outfile = outfile
         self.apply_model = apply_model
         self.classifier = 'XGBoost'
+        self.xgb_autotune = xgb_autotune
 
-        self.xgb_hyperparams = {'autotune': False, 'autotune_num_rounds': 10, 'num_boost_round': 100, 'early_stopping_rounds': 10, 'test_size': 0.33}
+        self.xgb_hyperparams = {'autotune': self.xgb_autotune, 'autotune_num_rounds': 10, 'num_boost_round': 100, 'early_stopping_rounds': 10, 'test_size': 0.33}
 
         self.xgb_params = {'eta': 1.0, 'gamma': 0, 'max_depth': 6, 'min_child_weight': 1, 'subsample': 1, 'colsample_bytree': 1, 'colsample_bylevel': 1, 'colsample_bynode': 1, 'lambda': 1, 'alpha': 0, 'scale_pos_weight': 1, 'silent': 1, 'objective': 'binary:logitraw', 'nthread': 1, 'eval_metric': 'auc'}
 
