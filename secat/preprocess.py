@@ -110,8 +110,8 @@ class stringdb:
     def read(self, stringdbfile, uniprot):
         df = pd.read_csv(stringdbfile, sep=" ")
 
-        _, df['protein1s'] = df['protein1'].str.split('.', 1).str
-        _, df['protein2s'] = df['protein2'].str.split('.', 1).str
+        df[['protein1o','protein1s']] = df.protein1.str.split('.', expand=True)
+        df[['protein2o','protein2s']] = df.protein2.str.split('.', expand=True)
 
         df = df[['protein1s','protein2s','combined_score']]
         df['combined_score'] = df['combined_score'] / 1000.0
@@ -213,7 +213,7 @@ class net:
         network['interaction_id'] = network.apply(get_interaction_id, axis=1)
 
         network = network.groupby('interaction_id')['interaction_confidence'].max().reset_index()
-        network['bait_id'], network['prey_id'] = network['interaction_id'].str.split('_', 1).str
+        network[['bait_id','prey_id']] = network.interaction_id.str.split('_', expand=True)
         return network[['bait_id','prey_id','interaction_confidence']]
 
     def to_df(self):

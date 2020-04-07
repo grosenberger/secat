@@ -10,7 +10,7 @@ with open(path.join(here, 'README.md'), encoding='utf-8') as f:
 
 setup(
     name='secat',
-    version='1.0.5',
+    version='1.0.6',
     description='Size-Exclusion Chromatography Algorithmic Toolkit',
     long_description=long_description,
     long_description_content_type='text/markdown',
@@ -26,10 +26,10 @@ setup(
         'Topic :: Scientific/Engineering :: Bio-Informatics',
         'Topic :: Scientific/Engineering :: Chemistry',
         'Programming Language :: Python :: 3',
-        'Programming Language :: Python :: 3.4',
         'Programming Language :: Python :: 3.5',
         'Programming Language :: Python :: 3.6',
         'Programming Language :: Python :: 3.7',
+        'Programming Language :: Python :: 3.8',
     ],
     packages=find_packages(exclude=['contrib', 'docs', 'tests']),
     include_package_data=True,

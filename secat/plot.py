@@ -285,10 +285,11 @@ class plot_features:
                 for peptide in peptides:
                     points = peptide_data[(peptide_data['peptide_id'] == peptide) & (peptide_data['tag'] == tag)].sort_values(by=['sec_id'])
 
-                    # background
-                    axarr[tags.index(tag)].plot(points['sec_id'], points['peptide_intensity'], color=background_color)
-                    # # picked proteins
-                    axarr[tags.index(tag)].plot(points[points['picked']]['sec_id'], points[points['picked']]['peptide_intensity'], color=protein_color)
+                    if points.shape[0] > 0:
+                        # background
+                        axarr[tags.index(tag)].plot(points['sec_id'], points['peptide_intensity'], color=background_color)
+                        # # picked proteins
+                        axarr[tags.index(tag)].plot(points[points['picked']]['sec_id'], points[points['picked']]['peptide_intensity'], color=protein_color)
 
             # plot legend and subtitle
             if bait_id is not prey_id:
