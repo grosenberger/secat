@@ -65,7 +65,7 @@ class mitab:
 
     def read(self, mitabfile):
         def _extract_uniprotkb(string):
-            return [u for u in string.split("|") if "uniprotkb" in u][0].split("uniprotkb:")[1].split("-")[0]
+            return [i.split("uniprotkb:")[1].split("-")[0] for i in [u for u in string.split("|") if "uniprotkb" in u]]
 
         def _extract_score(string):
             if 'intact-miscore:' in string:
@@ -96,6 +96,12 @@ class mitab:
         # Extract UniProtKB ids
         df.bait_id = df.bait_id.apply(_extract_uniprotkb)
         df.prey_id = df.prey_id.apply(_extract_uniprotkb)
+
+        # Explode lists
+        df = df.explode('bait_id').reset_index(drop=True)
+        df = df.explode('prey_id').reset_index(drop=True)
+
+        click.echo("Info: MITAB file contains %s entries considering all alternative identifiers." % df.shape[0])
 
         # Extract score
         df.interaction_confidence = df.interaction_confidence.apply(_extract_score)
