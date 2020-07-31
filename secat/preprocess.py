@@ -65,16 +65,25 @@ class mitab:
 
     def read(self, mitabfile):
         def _extract_uniprotkb(string):
-            return [u for u in string.split("|") if "uniprotkb" in u][0].split("uniprotkb:")[1]
+            return [u for u in string.split("|") if "uniprotkb" in u][0].split("uniprotkb:")[1].split("-")[0]
 
         def _extract_score(string):
-            if 'score:' in string:
+            if 'intact-miscore:' in string:
+                return float([u for u in string.split("|") if "intact-miscore" in u][0].split("intact-miscore:")[1])
+            elif 'score:' in string:
                 return float([u for u in string.split("|") if "score" in u][0].split("score:")[1])
             else:
                 return 0
 
-        df = pd.read_csv(mitabfile, sep="\t", header = None, usecols=[0,1,14])
-        df.columns = ["bait_id","prey_id","interaction_confidence"]
+        df = pd.read_csv(mitabfile, sep="\t", header = None, usecols=[0,1,2,3,14])
+        df.columns = ["bait_id","prey_id","bait_id_alt","prey_id_alt","interaction_confidence"]
+
+        df['bait_id_alt'] = df['bait_id_alt'].replace(np.nan,'',regex=True)
+        df['prey_id_alt'] = df['prey_id_alt'].replace(np.nan,'',regex=True)
+
+        df['bait_id'] = df['bait_id'] + "|" + df['bait_id_alt']
+        df['prey_id'] = df['prey_id'] + "|" + df['prey_id_alt']
+        df = df.drop(columns=['bait_id_alt','prey_id_alt'])
 
         # Reduce DB to UniProtKB entries with scores
         df = df[df['bait_id'].str.contains('uniprotkb:') & df['prey_id'].str.contains('uniprotkb:') & (df['interaction_confidence'].str.contains('score:') | df['interaction_confidence'].str.contains('shortestPath:'))]
@@ -208,12 +217,12 @@ class net:
 
     def unique_interactions(self, network):
         def get_interaction_id(x):
-            return '_'.join(sorted([x['bait_id'], x['prey_id']]))
+            return '__'.join(sorted([x['bait_id'], x['prey_id']]))
 
         network['interaction_id'] = network.apply(get_interaction_id, axis=1)
 
         network = network.groupby('interaction_id')['interaction_confidence'].max().reset_index()
-        network[['bait_id','prey_id']] = network.interaction_id.str.split('_', expand=True)
+        network[['bait_id','prey_id']] = network.interaction_id.str.split('__', expand=True)
         return network[['bait_id','prey_id','interaction_confidence']]
 
     def to_df(self):

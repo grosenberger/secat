@@ -163,7 +163,7 @@ class enrichment_test:
         con.close()
 
         if len(conditions) < 2:
-            sys.exit("Error: Your experimental design is not appropriate. At least two conditions are necessary for quantification.")
+            sys.exit("Error: Your experimental design is not supported. At least two conditions are necessary for differential analysis.")
 
         comparisons = []
         # prepare single-sample comparisons

@@ -167,12 +167,10 @@ class plot_features:
 
         if check_sqlite_table(con, 'EDGE') and self.mode == 'quantitative':
             df = pd.read_sql('SELECT DISTINCT bait_id || "_" || prey_id AS interaction_id, 0 as decoy FROM %s WHERE pvalue_adjusted < %s AND abs_log2fx > %s ORDER BY pvalue ASC;' % (table, self.max_qvalue, self.min_abs_log2fx), con)
-        elif self.mode == 'detection_integrated':
+        elif self.mode == 'detection':
             df = pd.read_sql('SELECT DISTINCT bait_id || "_" || prey_id AS interaction_id, decoy FROM FEATURE_SCORED_COMBINED WHERE qvalue < %s GROUP BY bait_id, prey_id ORDER BY qvalue ASC;' % (self.max_qvalue), con)
-        elif self.mode == 'detection_separate':
-            df = pd.read_sql('SELECT DISTINCT bait_id || "_" || prey_id AS interaction_id, decoy FROM FEATURE_SCORED WHERE qvalue < %s ORDER BY qvalue ASC;' % (self.max_qvalue), con)
         else:
-            sys.exit("Mode for interaction plotting not supported.")
+            sys.exit("Error: Mode for interaction plotting not supported.")
 
         con.close()
 
@@ -183,9 +181,9 @@ class plot_features:
 
         if check_sqlite_table(con, 'COMPLEX_QM') and (self.mode == 'quantitative'):
             df = pd.read_sql('SELECT FEATURE_SCORED_COMBINED.bait_id AS bait_id, FEATURE_SCORED_COMBINED.prey_id AS prey_id, FEATURE_SCORED_COMBINED.bait_id || "_" || FEATURE_SCORED_COMBINED.prey_id AS interaction_id, BAIT_META.protein_name AS bait_name, PREY_META.protein_name AS prey_name, min(FEATURE_SCORED_COMBINED.pvalue) AS pvalue, min(FEATURE_SCORED_COMBINED.qvalue) AS qvalue FROM FEATURE_SCORED_COMBINED INNER JOIN (SELECT * FROM PROTEIN) AS BAIT_META ON FEATURE_SCORED_COMBINED.bait_id = BAIT_META.protein_id INNER JOIN (SELECT * FROM PROTEIN) AS PREY_META ON FEATURE_SCORED_COMBINED.prey_id = PREY_META.protein_id INNER JOIN (SELECT DISTINCT bait_id, prey_id FROM COMPLEX_QM) AS COMPLEX_QM ON FEATURE_SCORED_COMBINED.bait_id = COMPLEX_QM.bait_id AND FEATURE_SCORED_COMBINED.prey_id = COMPLEX_QM.prey_id GROUP BY FEATURE_SCORED_COMBINED.bait_id, FEATURE_SCORED_COMBINED.prey_id;', con)
-        elif self.mode == 'detection_integrated':
+        elif self.mode == 'detection':
             df = pd.read_sql('SELECT FEATURE_SCORED_COMBINED.bait_id AS bait_id, FEATURE_SCORED_COMBINED.prey_id AS prey_id, FEATURE_SCORED_COMBINED.bait_id || "_" || FEATURE_SCORED_COMBINED.prey_id AS interaction_id, BAIT_META.protein_name AS bait_name, PREY_META.protein_name AS prey_name, min(FEATURE_SCORED_COMBINED.pvalue) AS pvalue, min(FEATURE_SCORED_COMBINED.qvalue) AS qvalue FROM FEATURE_SCORED_COMBINED INNER JOIN (SELECT * FROM PROTEIN) AS BAIT_META ON FEATURE_SCORED_COMBINED.bait_id = BAIT_META.protein_id INNER JOIN (SELECT * FROM PROTEIN) AS PREY_META ON FEATURE_SCORED_COMBINED.prey_id = PREY_META.protein_id GROUP BY FEATURE_SCORED_COMBINED.bait_id, FEATURE_SCORED_COMBINED.prey_id;', con)
-        elif self.mode == 'detection_separate':
+        else:
             df = None
 
         con.close()
@@ -222,6 +220,9 @@ class plot_features:
 
     def read_baits(self):
         con = sqlite3.connect(self.infile)
+
+        if not check_sqlite_table(con, 'NODE'):
+            sys.exit("Error: Your experimental design is not supported. At least two conditions are necessary for differential analysis. Switch 'level' to 'interaction' for visualization.")
 
         if self.combined:
             table = 'NODE'
