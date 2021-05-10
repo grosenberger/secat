@@ -38,26 +38,20 @@ class uniprot:
         accessions = root.xpath('//uniprot:entry/uniprot:accession/text()', namespaces = self.namespaces)
         names = root.xpath('//uniprot:entry/uniprot:name/text()', namespaces = self.namespaces)
         mw = root.xpath('//uniprot:entry/uniprot:sequence/@mass', namespaces = self.namespaces)
-        ensembl = root.xpath('//uniprot:entry/uniprot:dbReference[@type="Ensembl"]/uniprot:property[@type="protein sequence ID"]/@value', namespaces = self.namespaces)
+        string = root.xpath('//uniprot:entry/uniprot:dbReference[@type="STRING"]/@id', namespaces = self.namespaces)
 
         for entry in root.xpath('//uniprot:entry', namespaces = self.namespaces):
             accession = entry.xpath('./uniprot:accession/text()', namespaces = self.namespaces)
             name = entry.xpath('./uniprot:name/text()', namespaces = self.namespaces)
             mw = entry.xpath('./uniprot:sequence/@mass', namespaces = self.namespaces)
-            ensembl = entry.xpath('./uniprot:dbReference[@type="Ensembl"]/uniprot:property[@type="protein sequence ID"]/@value', namespaces = self.namespaces)
+            string = entry.xpath('./uniprot:dbReference[@type="STRING"]/@id', namespaces = self.namespaces)
 
-            df = df.append({'protein_id': _extract(accession), 'protein_name': _extract(name), 'ensembl_id': ensembl, 'protein_mw': float(_extract(mw))}, ignore_index=True)
+            df = df.append({'protein_id': _extract(accession), 'protein_name': _extract(name), 'string_id': _extract(string), 'protein_mw': float(_extract(mw))}, ignore_index=True)
 
         return df
 
     def to_df(self):
-        return self.df[['protein_id','protein_name','protein_mw']]
-
-    def expand(self):
-        ensembl = self.df.apply(lambda x: pd.Series(x['ensembl_id']),axis=1).stack().reset_index(level=1, drop=True)
-        ensembl.name = 'ensembl_id'
-
-        return self.df.drop('ensembl_id', axis=1).join(ensembl).reset_index(drop=True)[["protein_id", "protein_name", "ensembl_id", "protein_mw"]]
+        return self.df[['protein_id','protein_name','string_id','protein_mw']]
 
 class mitab:
     def __init__(self, mitabfile):
@@ -125,17 +119,13 @@ class stringdb:
     def read(self, stringdbfile, uniprot):
         df = pd.read_csv(stringdbfile, sep=" ")
 
-        df[['protein1o','protein1s']] = df.protein1.str.split('.', expand=True)
-        df[['protein2o','protein2s']] = df.protein2.str.split('.', expand=True)
-
-        df = df[['protein1s','protein2s','combined_score']]
         df['combined_score'] = df['combined_score'] / 1000.0
 
         # Map protein1
-        df = pd.merge(df, uniprot.expand(), left_on='protein1s', right_on='ensembl_id')[['protein_id','protein2s','combined_score']]
-        df.columns = ["bait_id","protein2s","combined_score"]
+        df = pd.merge(df, uniprot.to_df(), left_on='protein1', right_on='string_id')[['protein_id','protein2','combined_score']]
+        df.columns = ["bait_id","protein2","combined_score"]
         # Map protein2
-        df = pd.merge(df, uniprot.expand(), left_on='protein2s', right_on='ensembl_id')[['bait_id','protein_id','combined_score']]
+        df = pd.merge(df, uniprot.to_df(), left_on='protein2', right_on='string_id')[['bait_id','protein_id','combined_score']]
         df.columns = ["bait_id","prey_id","interaction_confidence"]
 
         return df
