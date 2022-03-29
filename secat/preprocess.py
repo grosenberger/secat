@@ -11,6 +11,7 @@ import itertools
 
 from pandas.api.types import is_numeric_dtype
 
+#New preprocess script
 try:
     import matplotlib
     matplotlib.use('Agg')
@@ -38,20 +39,30 @@ class uniprot:
         accessions = root.xpath('//uniprot:entry/uniprot:accession/text()', namespaces = self.namespaces)
         names = root.xpath('//uniprot:entry/uniprot:name/text()', namespaces = self.namespaces)
         mw = root.xpath('//uniprot:entry/uniprot:sequence/@mass', namespaces = self.namespaces)
-        string = root.xpath('//uniprot:entry/uniprot:dbReference[@type="STRING"]/@id', namespaces = self.namespaces)
+        if root.xpath('//uniprot:entry/uniprot:organism/uniprot:dbReference[@type="NCBI Taxonomy"]/@id', namespaces = self.namespaces)[0] == '559292':
+            ensembl = root.xpath('//uniprot:entry/uniprot:gene/uniprot:name[@type = "ordered locus"]/text()', namespaces = self.namespaces)
+            ensembl_path = './uniprot:gene/uniprot:name[@type = "ordered locus"]/text()'
+        else:
+            ensembl = root.xpath('//uniprot:entry/uniprot:dbReference[@type="Ensembl"]/uniprot:property[@type="protein sequence ID"]/@value', namespaces = self.namespaces)
+            ensembl_path = './uniprot:dbReference[@type="Ensembl"]/uniprot:property[@type="protein sequence ID"]/@value'
 
         for entry in root.xpath('//uniprot:entry', namespaces = self.namespaces):
             accession = entry.xpath('./uniprot:accession/text()', namespaces = self.namespaces)
             name = entry.xpath('./uniprot:name/text()', namespaces = self.namespaces)
             mw = entry.xpath('./uniprot:sequence/@mass', namespaces = self.namespaces)
-            string = entry.xpath('./uniprot:dbReference[@type="STRING"]/@id', namespaces = self.namespaces)
-
-            df = df.append({'protein_id': _extract(accession), 'protein_name': _extract(name), 'string_id': _extract(string), 'protein_mw': float(_extract(mw))}, ignore_index=True)
-
+            ensembl = entry.xpath(ensembl_path, namespaces = self.namespaces)
+            df = df.append({'protein_id': _extract(accession), 'protein_name': _extract(name), 'ensembl_id': ensembl, 'protein_mw': float(_extract(mw))}, ignore_index=True)
+        click.echo(type(df))  #added in case the first messes up...
         return df
 
     def to_df(self):
-        return self.df[['protein_id','protein_name','string_id','protein_mw']]
+        return self.df[['protein_id','protein_name','protein_mw']]
+
+    def expand(self):
+        ensembl = self.df.apply(lambda x: pd.Series(x['ensembl_id']),axis=1).stack().reset_index(level=1, drop=True)
+        ensembl.name = 'ensembl_id'
+
+        return self.df.drop('ensembl_id', axis=1).join(ensembl).reset_index(drop=True)[["protein_id", "protein_name", "ensembl_id", "protein_mw"]]
 
 class mitab:
     def __init__(self, mitabfile):
@@ -119,14 +130,37 @@ class stringdb:
     def read(self, stringdbfile, uniprot):
         df = pd.read_csv(stringdbfile, sep=" ")
 
+        df[['protein1o','protein1s']] = df.protein1.str.split('.', expand=True)
+        df[['protein2o','protein2s']] = df.protein2.str.split('.', expand=True)
+
+        df = df[['protein1s','protein2s','combined_score']]
         df['combined_score'] = df['combined_score'] / 1000.0
 
+        #uniprot_expanded = uniprot.expand()
+        #uniprot_expanded.to_csv('hela_uniprot_expanded_table.csv')
+
+        #df.to_csv('hela_df_table.csv')
+
+
+        #try:
+            # Map protein1
+        df = pd.merge(df, uniprot.expand(), left_on='protein1s', right_on='ensembl_id')[['protein_id','protein2s','combined_score']]
+        df.columns = ["bait_id","protein2s","combined_score"]
+        #except ValueError:
+            #click.echo("We got the same Vlue error again...")
+        #quit()
         # Map protein1
-        df = pd.merge(df, uniprot.to_df(), left_on='protein1', right_on='string_id')[['protein_id','protein2','combined_score']]
-        df.columns = ["bait_id","protein2","combined_score"]
+        #df = pd.merge(df, uniprot.expand(), left_on='protein1s', right_on='ensembl_id')[['protein_id','protein2s','combined_score']]
+        #df.columns = ["bait_id","protein2s","combined_score"]
         # Map protein2
-        df = pd.merge(df, uniprot.to_df(), left_on='protein2', right_on='string_id')[['bait_id','protein_id','combined_score']]
+        df = pd.merge(df, uniprot.expand(), left_on='protein2s', right_on='ensembl_id')[['bait_id','protein_id','combined_score']]
         df.columns = ["bait_id","prey_id","interaction_confidence"]
+
+        try:
+            df.to_csv('stringDB_mouse_table.csv')
+            click.echo("successfully saved stringDB as csv")
+        except AttributeError:
+            click.echo('attribute error stopped saving as csv')
 
         return df
 
@@ -306,6 +340,7 @@ class quantification:
 
         # Read data
         mx = pd.read_csv(infile, sep=None, engine='python')
+
         df = pd.melt(mx, id_vars=[self.protein_id_col, self.peptide_id_col], value_vars=run_id_columns, var_name=self.run_id_col, value_name=self.intensity_id_col)
 
         # Organize and rename columns

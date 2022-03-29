@@ -4,7 +4,7 @@ import click
 import sqlite3
 import os
 import sys
-
+#with checks
 try:
     import matplotlib
     matplotlib.use('Agg')
@@ -27,10 +27,13 @@ def check_sqlite_table(con, table):
     return(table_present)
 
 class plot_features:
+    #click.echo("plotting features...") #new check
     def __init__(self, infile, level, id, max_qvalue, min_abs_log2fx, mode, combined, peptide_rank):
         self.infile = infile
         self.level = level
         self.id = id
+        click.echo("check 1: id = %s" %id)
+        click.echo("check 2: max_qvalue = %s" %max_qvalue)
         self.max_qvalue = max_qvalue
         self.min_abs_log2fx = min_abs_log2fx
         self.mode = mode
@@ -52,19 +55,27 @@ class plot_features:
         self.monomer_qmeta = self.read_monomer_qmeta()
 
         if self.level == 'interaction' and self.id is not None:
+            #click.echo("check a")
             self.plot_interaction(self.id)
         elif self.level == 'bait' and self.id is not None:
+            #click.echo("check b")
             self.plot_bait(self.id, 0)
         elif self.level == 'interaction' and self.id is None and self.max_qvalue is not None:
+            #click.echo("check c")
             interaction_ids, result_ids, decoys = self.read_interactions()
+            #interaction_data = self.read_interactions() #new
+            #click.echo(interaction_data) #new
+            #sys.exit("stopping here...") #new
             for interaction_id, result_id, decoy in zip(interaction_ids, result_ids, decoys):
                 self.plot_interaction(interaction_id, result_id, decoy)
         elif self.level == 'bait' and self.id is None and self.max_qvalue is not None:
+            #click.echo("check d")
             bait_ids, result_ids = self.read_baits()
             for bait_id, result_id in zip(bait_ids, result_ids):
                 self.plot_bait(bait_id, result_id)
 
     def plot_interaction(self, interaction_id, result_id=000000, decoy=False):
+        #click.echo("plotting interactions")
         feature_data = self.feature_data
         protein_data = self.protein_data
         protein_data['picked'] = True
@@ -78,6 +89,17 @@ class plot_features:
 
         peptide_data = pd.merge(peptide_data, protein_data, on=['condition_id', 'replicate_id', 'protein_id', 'sec_id'], how='left')
         peptide_data.loc[peptide_data['picked'].isnull(), 'picked'] = False
+        #all added as a check 'try'
+        #try:
+        #feature_data.to_csv('feature_data.csv')
+        #try:
+        #protein_data.to_csv('protein_data.csv')
+        #try:
+        #peptide_data.to_csv('peptide_data.csv')
+        #try:
+        #click.echo("Interaction ID: %s" %interaction_id)
+        #try:
+        #proteins.to_csv('proteins.csv')
 
         if decoy:
             out = os.path.splitext(os.path.basename(self.infile))[0]+"_"+str(result_id).zfill(6)+"_DECOY_"+interaction_id+".pdf"
@@ -168,7 +190,8 @@ class plot_features:
         if check_sqlite_table(con, 'EDGE') and self.mode == 'quantitative':
             df = pd.read_sql('SELECT DISTINCT bait_id || "_" || prey_id AS interaction_id, 0 as decoy FROM %s WHERE pvalue_adjusted < %s AND abs_log2fx > %s ORDER BY pvalue ASC;' % (table, self.max_qvalue, self.min_abs_log2fx), con)
         elif self.mode == 'detection':
-            df = pd.read_sql('SELECT DISTINCT bait_id || "_" || prey_id AS interaction_id, decoy FROM FEATURE_SCORED_COMBINED WHERE qvalue < %s GROUP BY bait_id, prey_id ORDER BY qvalue ASC;' % (self.max_qvalue), con)
+           df = pd.read_sql('SELECT DISTINCT bait_id || "_" || prey_id AS interaction_id, decoy FROM FEATURE_SCORED_COMBINED WHERE qvalue < %s GROUP BY bait_id, prey_id ORDER BY qvalue ASC;' % (self.max_qvalue), con)
+           df.to_csv("bait_prey_id.csv") #new
         else:
             sys.exit("Error: Mode for interaction plotting not supported.")
 

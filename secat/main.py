@@ -37,6 +37,10 @@ def cli():
 @click.option('--negnet', 'negnetfile', required=False, type=click.Path(exists=True), help='Reference binary negative protein-protein interaction file in STRING-DB or HUPO-PSI MITAB (2.5-2.7) format.')
 @click.option('--uniprot', 'uniprotfile', required=True, type=click.Path(exists=True), help='Reference molecular weights file in UniProt XML format.')
 @click.option('--columns', default=["run_id","sec_id","sec_mw","condition_id","replicate_id","run_id","protein_id","peptide_id","peptide_intensity"], show_default=True, type=(str,str,str,str,str,str,str,str,str), help='Column names for SEC & peptide quantification files')
+@click.option('--save_uniprot/--no-save_uniprot', default=False, show_default=True, help='Choose whether to save the unprot upload or not.')
+@click.option('--parsed_uniprot_database', 'parsed_uniprot_database', required=False, type=click.Path(exists=True), help='Upload a uniprot file taht has previously been saved.')
+
+
 # Parameters for normalization
 @click.option('--normalize/--no-normalize', default=True, show_default=True, help='Normalize quantification data by sliding window cycling LOWESS normaklization.')
 @click.option('--normalize_window','normalize_window', default=5, show_default=True, type=int, help='Number of SEC fractions per sliding window.')
@@ -51,10 +55,7 @@ def cli():
 @click.option('--min_interaction_confidence', 'min_interaction_confidence', default=0.0, show_default=True, type=float, help='Minimum interaction confidence for prior information from network.')
 @click.option('--interaction_confidence_bins', 'interaction_confidence_bins', default=100, show_default=True, type=int, help='Number of interaction confidence bins for grouped error rate estimation.')
 @click.option('--interaction_confidence_quantile/--no-interaction_confidence_quantile', default=True, show_default=True, help='Whether interaction confidence bins should be grouped by quantiles.')
-
-#this is here...
-
-def preprocess(infiles, outfile, secfile, netfile, posnetfile, negnetfile, uniprotfile, columns, normalize, normalize_window, normalize_padded, decoy_intensity_bins, decoy_left_sec_bins, decoy_right_sec_bins, decoy_oversample, decoy_subsample, decoy_exclude, min_interaction_confidence, interaction_confidence_bins, interaction_confidence_quantile):
+def preprocess(infiles, outfile, secfile, netfile, posnetfile, negnetfile, uniprotfile, save_uniprot, parsed_uniprot_database, columns, normalize, normalize_window, normalize_padded, decoy_intensity_bins, decoy_left_sec_bins, decoy_right_sec_bins, decoy_oversample, decoy_subsample, decoy_exclude, min_interaction_confidence, interaction_confidence_bins, interaction_confidence_quantile):
     """
     Import and preprocess SEC data.
     """
@@ -97,8 +98,22 @@ def preprocess(infiles, outfile, secfile, netfile, posnetfile, negnetfile, unipr
 
     # Generate UniProt table
     click.echo("Info: Parsing UniProt XML file %s." % uniprotfile)
-    uniprot_data = uniprot(uniprotfile)
-    uniprot_data.to_df().to_sql('PROTEIN', con, index=False)
+    if save_uniprot != False:
+        click.echo("saving uniprot file")
+        uniprot_data = uniprot(uniprotfile)
+        try:
+            pd.DataFrame(uniprot_data).to_csv("saved_uniprot_file.csv")
+        except AttributeError:
+            click.echo("attribute error, was not able to save the DF")
+        uniprot_data.to_df().to_sql('PROTEIN', con, index=False)
+    elif parsed_uniprot_database != None:
+        click.echo("uploading parsed uniprot database file")
+        uniprot_data = pd.read_csv(parsed_uniprot_database, sep="\t")
+        uniprot_data.to_df().to_sql('PROTEIN', con, index=False)
+    else:
+        click.echo("doing normal uniprot parsing...")
+        uniprot_data = uniprot(uniprotfile)
+        uniprot_data.to_df().to_sql('PROTEIN', con, index=False)
 
     # Generate Network table
     if netfile != None:
@@ -298,6 +313,8 @@ def quantify(infile, outfile, control_condition, paired, maximum_interaction_qva
     click.echo("Info: Assess differential features.")
     et = enrichment_test(outfile, control_condition, paired, min_abs_log2fx, missing_peptides, peptide_log2fx, threads)
 
+    click.echo("B: finished enrichment test")
+
     con = sqlite3.connect(outfile)
     et.edge.to_sql('EDGE', con, index=False, if_exists='replace')
     et.edge_level.to_sql('EDGE_LEVEL', con, index=False, if_exists='replace')
@@ -315,6 +332,8 @@ def export(infile, maximum_interaction_qvalue):
     """
     Export SECAT results.
     """
+
+    click.echo("C: Starting to export features")
 
     outfile_interactions = os.path.splitext(infile)[0] + "_interactions.csv"
     outfile_network = os.path.splitext(infile)[0] + "_network.csv"
@@ -347,6 +366,8 @@ def export(infile, maximum_interaction_qvalue):
     if check_sqlite_table(con, 'PROTEIN_LEVEL'):
         protein_level_data = pd.read_sql('SELECT * FROM PROTEIN_LEVEL;' , con)
         protein_level_data.sort_values(by=['pvalue']).to_csv(outfile_proteins_level, index=False)
+
+    click.echo("D: Looks about done with the export")
     con.close()
 
 
