@@ -11,7 +11,7 @@ import itertools
 
 from pandas.api.types import is_numeric_dtype
 
-#New preprocess script
+
 try:
     import matplotlib
     matplotlib.use('Agg')
@@ -136,31 +136,13 @@ class stringdb:
         df = df[['protein1s','protein2s','combined_score']]
         df['combined_score'] = df['combined_score'] / 1000.0
 
-        #uniprot_expanded = uniprot.expand()
-        #uniprot_expanded.to_csv('hela_uniprot_expanded_table.csv')
-
-        #df.to_csv('hela_df_table.csv')
-
-
-        #try:
-            # Map protein1
+        #Map protein 1
         df = pd.merge(df, uniprot.expand(), left_on='protein1s', right_on='ensembl_id')[['protein_id','protein2s','combined_score']]
         df.columns = ["bait_id","protein2s","combined_score"]
-        #except ValueError:
-            #click.echo("We got the same Vlue error again...")
-        #quit()
-        # Map protein1
-        #df = pd.merge(df, uniprot.expand(), left_on='protein1s', right_on='ensembl_id')[['protein_id','protein2s','combined_score']]
-        #df.columns = ["bait_id","protein2s","combined_score"]
-        # Map protein2
+        #Map protein 2
         df = pd.merge(df, uniprot.expand(), left_on='protein2s', right_on='ensembl_id')[['bait_id','protein_id','combined_score']]
         df.columns = ["bait_id","prey_id","interaction_confidence"]
 
-        try:
-            df.to_csv('stringDB_mouse_table.csv')
-            click.echo("successfully saved stringDB as csv")
-        except AttributeError:
-            click.echo('attribute error stopped saving as csv')
 
         return df
 

@@ -13,8 +13,6 @@ from scipy.stats import ttest_ind, ttest_rel
 
 from statsmodels.stats.multitest import multipletests
 
-#with a few checks...
-
 class quantitative_matrix:
     def __init__(self, outfile, maximum_interaction_qvalue, minimum_peptides, maximum_peptides):
         self.outfile = outfile
@@ -89,19 +87,16 @@ class quantitative_matrix:
 
     def quantify_complexes(self):
         def sec_summarize(df):
-            #click.echo("check 2: sec_summarize funcion starting") #new check
             def aggregate(x):
                 peptide_ix = (x['peptide_intensity']-x['peptide_intensity'].max()).abs().argsort()[:self.maximum_peptides]
                 return pd.DataFrame({'peptide_id': x.iloc[peptide_ix]['peptide_id'], 'peptide_intensity': x.iloc[peptide_ix]['peptide_intensity']})
 
             # Remove monomer fractions for complex-centric quantification
             df = df[df['sec_id'] < df['monomer_sec_id']]
-            #click.echo("check 3") #new check
             # Find SEC intersections
             bait_sec = df[df['is_bait']]['sec_id'].unique()
             prey_sec = df[~df['is_bait']]['sec_id'].unique()
             intersection = pd.DataFrame({'sec_id': list(set(bait_sec) & set(prey_sec))})
-            #click.echo("check 4") #new check
             # There needs to be at least one fraction where peptides from both proteins are measured.
             if intersection.shape[0] > 0:
                 # Summarize intersection peptide intensities
@@ -110,12 +105,10 @@ class quantitative_matrix:
                 peptide_is.columns = ['peptide_id','peptide_intensity']
 
                 peptide = pd.merge(df[['condition_id','replicate_id','bait_id','prey_id','is_bait','peptide_id']].drop_duplicates(), peptide_is, on='peptide_id')
-                #click.echo("check 5") #new check
                 # Ensure that minimum peptides are present for both interactors for quantification.
                 if peptide[peptide['is_bait']].shape[0] >= self.minimum_peptides and peptide[~peptide['is_bait']].shape[0] >= self.minimum_peptides:
                     # Select representative closest to max and aggregate
                     peptide = peptide.groupby(['is_bait']).apply(aggregate).reset_index(level=['is_bait'])
-                    #click.echo("check 6: end of sec_summarize function") #new check
                     return peptide
 
         def peptide_summarize(df):
@@ -136,9 +129,7 @@ class quantitative_matrix:
         preys['is_bait'] = False
 
         complexes = pd.concat([baits, preys]).reset_index()
-        #click.echo("Check 1: creating complexes_sec variable") #new check
         complexes_sec = complexes.groupby(['condition_id','replicate_id','bait_id','prey_id']).apply(sec_summarize).reset_index(level=['condition_id','replicate_id','bait_id','prey_id'])
-        #click.echo("check 7: passed the complexes_sec variable?") #new check
         complexes_peptides = peptide_summarize(complexes_sec)
 
         return complexes_peptides
@@ -163,8 +154,6 @@ class enrichment_test:
     def contrast(self):
         con = sqlite3.connect(self.outfile)
         conditions = pd.read_sql('SELECT DISTINCT condition_id FROM SEC;' , con)['condition_id'].values.tolist()
-        #click.echo("Trying to see conditions...") #added
-        #click.echo(conditions) #added
 
         con.close()
 
@@ -352,10 +341,7 @@ class enrichment_test:
                         results = pd.merge(results, results_pvalue, on=['query_id','is_bait','level'])
 
                         # Set p-value to 1.0 if invalid
-                        ###############################################
-                        results.to_csv('results_error_table.csv')
                         results.loc[np.isnan(results['pvalue']),'pvalue'] = 1.0
-                        results.to_csv('results_error_table_after.csv')
 
                         # Append meta information
                         results = pd.merge(results, dat[['query_id','bait_id','prey_id']].drop_duplicates(), on='query_id')
@@ -406,7 +392,4 @@ class enrichment_test:
             click.echo("%s (at FDR < 0.05)" % (df_node_level_filtered[(df_node_level_filtered['level'] == level) & (df_node_level_filtered['pvalue_adjusted'] < 0.05)][['bait_id']].drop_duplicates().shape[0]))
             click.echo("%s (at FDR < 0.1)" % (df_node_level_filtered[(df_node_level_filtered['level'] == level) & (df_node_level_filtered['pvalue_adjusted'] < 0.1)][['bait_id']].drop_duplicates().shape[0]))
 
-        click.echo("A: finished the loop at least")
-
         return df_edge_level[['condition_1','condition_2','level','bait_id','prey_id','log2fx','abs_log2fx','interactor_ratio','pvalue','pvalue_adjusted']+[c for c in df_edge_level.columns if c.startswith("viper_")]], df_edge[['condition_1','condition_2','level','bait_id','prey_id','log2fx','abs_log2fx','interactor_ratio','pvalue','pvalue_adjusted']], df_node_level[['condition_1','condition_2','level','bait_id','log2fx','abs_log2fx','interactor_ratio','num_interactors','pvalue','pvalue_adjusted']], df_node[['condition_1','condition_2','level','bait_id','log2fx','abs_log2fx','interactor_ratio','num_interactors','pvalue','pvalue_adjusted']], df_protein_level[['condition_1','condition_2','level','bait_id','log2fx','abs_log2fx','interactor_ratio','pvalue','pvalue_adjusted'] + [c for c in df_protein_level.columns if c.startswith("viper_")]]
-
