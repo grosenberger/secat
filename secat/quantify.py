@@ -93,12 +93,10 @@ class quantitative_matrix:
 
             # Remove monomer fractions for complex-centric quantification
             df = df[df['sec_id'] < df['monomer_sec_id']]
-
             # Find SEC intersections
             bait_sec = df[df['is_bait']]['sec_id'].unique()
             prey_sec = df[~df['is_bait']]['sec_id'].unique()
             intersection = pd.DataFrame({'sec_id': list(set(bait_sec) & set(prey_sec))})
-            
             # There needs to be at least one fraction where peptides from both proteins are measured.
             if intersection.shape[0] > 0:
                 # Summarize intersection peptide intensities
@@ -107,12 +105,10 @@ class quantitative_matrix:
                 peptide_is.columns = ['peptide_id','peptide_intensity']
 
                 peptide = pd.merge(df[['condition_id','replicate_id','bait_id','prey_id','is_bait','peptide_id']].drop_duplicates(), peptide_is, on='peptide_id')
-
                 # Ensure that minimum peptides are present for both interactors for quantification.
                 if peptide[peptide['is_bait']].shape[0] >= self.minimum_peptides and peptide[~peptide['is_bait']].shape[0] >= self.minimum_peptides:
                     # Select representative closest to max and aggregate
                     peptide = peptide.groupby(['is_bait']).apply(aggregate).reset_index(level=['is_bait'])
-
                     return peptide
 
         def peptide_summarize(df):
@@ -133,9 +129,7 @@ class quantitative_matrix:
         preys['is_bait'] = False
 
         complexes = pd.concat([baits, preys]).reset_index()
-
         complexes_sec = complexes.groupby(['condition_id','replicate_id','bait_id','prey_id']).apply(sec_summarize).reset_index(level=['condition_id','replicate_id','bait_id','prey_id'])
-
         complexes_peptides = peptide_summarize(complexes_sec)
 
         return complexes_peptides
@@ -160,6 +154,7 @@ class enrichment_test:
     def contrast(self):
         con = sqlite3.connect(self.outfile)
         conditions = pd.read_sql('SELECT DISTINCT condition_id FROM SEC;' , con)['condition_id'].values.tolist()
+
         con.close()
 
         if len(conditions) < 2:
@@ -203,7 +198,6 @@ class enrichment_test:
                 tfmode = robjects.FloatVector(np.asarray(subunit_tfm[subunit]).astype(float))
                 tfmode.names = robjects.StrVector(subunit_set[subunit])
                 likelihood = robjects.FloatVector(np.repeat(1.0,len(subunit_set[subunit])))
-                
                 regulon = robjects.ListVector({'tfmode': tfmode, 'likelihood': likelihood})
                 regulons.append(regulon)
 
@@ -399,4 +393,3 @@ class enrichment_test:
             click.echo("%s (at FDR < 0.1)" % (df_node_level_filtered[(df_node_level_filtered['level'] == level) & (df_node_level_filtered['pvalue_adjusted'] < 0.1)][['bait_id']].drop_duplicates().shape[0]))
 
         return df_edge_level[['condition_1','condition_2','level','bait_id','prey_id','log2fx','abs_log2fx','interactor_ratio','pvalue','pvalue_adjusted']+[c for c in df_edge_level.columns if c.startswith("viper_")]], df_edge[['condition_1','condition_2','level','bait_id','prey_id','log2fx','abs_log2fx','interactor_ratio','pvalue','pvalue_adjusted']], df_node_level[['condition_1','condition_2','level','bait_id','log2fx','abs_log2fx','interactor_ratio','num_interactors','pvalue','pvalue_adjusted']], df_node[['condition_1','condition_2','level','bait_id','log2fx','abs_log2fx','interactor_ratio','num_interactors','pvalue','pvalue_adjusted']], df_protein_level[['condition_1','condition_2','level','bait_id','log2fx','abs_log2fx','interactor_ratio','pvalue','pvalue_adjusted'] + [c for c in df_protein_level.columns if c.startswith("viper_")]]
-

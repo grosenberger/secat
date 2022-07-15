@@ -37,6 +37,8 @@ def cli():
 @click.option('--negnet', 'negnetfile', required=False, type=click.Path(exists=True), help='Reference binary negative protein-protein interaction file in STRING-DB or HUPO-PSI MITAB (2.5-2.7) format.')
 @click.option('--uniprot', 'uniprotfile', required=True, type=click.Path(exists=True), help='Reference molecular weights file in UniProt XML format.')
 @click.option('--columns', default=["run_id","sec_id","sec_mw","condition_id","replicate_id","run_id","protein_id","peptide_id","peptide_intensity"], show_default=True, type=(str,str,str,str,str,str,str,str,str), help='Column names for SEC & peptide quantification files')
+
+
 # Parameters for normalization
 @click.option('--normalize/--no-normalize', default=True, show_default=True, help='Normalize quantification data by sliding window cycling LOWESS normaklization.')
 @click.option('--normalize_window','normalize_window', default=5, show_default=True, type=int, help='Number of SEC fractions per sliding window.')
@@ -295,6 +297,7 @@ def quantify(infile, outfile, control_condition, paired, maximum_interaction_qva
     click.echo("Info: Assess differential features.")
     et = enrichment_test(outfile, control_condition, paired, min_abs_log2fx, missing_peptides, peptide_log2fx, threads)
 
+
     con = sqlite3.connect(outfile)
     et.edge.to_sql('EDGE', con, index=False, if_exists='replace')
     et.edge_level.to_sql('EDGE_LEVEL', con, index=False, if_exists='replace')
@@ -312,6 +315,7 @@ def export(infile, maximum_interaction_qvalue):
     """
     Export SECAT results.
     """
+
 
     outfile_interactions = os.path.splitext(infile)[0] + "_interactions.csv"
     outfile_network = os.path.splitext(infile)[0] + "_network.csv"
@@ -344,6 +348,7 @@ def export(infile, maximum_interaction_qvalue):
     if check_sqlite_table(con, 'PROTEIN_LEVEL'):
         protein_level_data = pd.read_sql('SELECT * FROM PROTEIN_LEVEL;' , con)
         protein_level_data.sort_values(by=['pvalue']).to_csv(outfile_proteins_level, index=False)
+
     con.close()
 
 

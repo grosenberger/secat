@@ -27,6 +27,7 @@ def check_sqlite_table(con, table):
     return(table_present)
 
 class plot_features:
+
     def __init__(self, infile, level, id, max_qvalue, min_abs_log2fx, mode, combined, peptide_rank):
         self.infile = infile
         self.level = level
