@@ -1,3 +1,5 @@
+import multiprocessing
+from tqdm import tqdm
 import numpy as np
 import pandas as pd
 import click
@@ -24,7 +26,7 @@ class uniprot:
     def __init__(self, uniprotfile):
         self.namespaces = {'uniprot': "http://uniprot.org/uniprot"}
         self.df = self.read(uniprotfile)
-
+    
     def read(self, uniprotfile):
         def _extract(lst):
             if len(lst) >= 1:
@@ -46,7 +48,8 @@ class uniprot:
             ensembl = root.xpath('//uniprot:entry/uniprot:dbReference[@type="Ensembl"]/uniprot:property[@type="protein sequence ID"]/@value', namespaces = self.namespaces)
             ensembl_path = './uniprot:dbReference[@type="Ensembl"]/uniprot:property[@type="protein sequence ID"]/@value'
 
-        for entry in root.xpath('//uniprot:entry', namespaces = self.namespaces):
+        entries = root.xpath('//uniprot:entry', namespaces = self.namespaces)
+        for entry in tqdm(entries, total=len(entries)):
             accession = entry.xpath('./uniprot:accession/text()', namespaces = self.namespaces)
             name = entry.xpath('./uniprot:name/text()', namespaces = self.namespaces)
             mw = entry.xpath('./uniprot:sequence/@mass', namespaces = self.namespaces)
@@ -80,7 +83,7 @@ class mitab:
             else:
                 return 0
 
-        df = pd.read_csv(mitabfile, sep="\t", header = None, usecols=[0,1,2,3,14])
+        df = pd.read_csv(mitabfile, sep="\t", header = None, usecols=[0,1,2,3,14], engine='c')
         df.columns = ["bait_id","prey_id","bait_id_alt","prey_id_alt","interaction_confidence"]
 
         df['bait_id_alt'] = df['bait_id_alt'].replace(np.nan,'',regex=True)
@@ -128,7 +131,7 @@ class stringdb:
         self.df = self.read(stringdbfile, uniprot)
 
     def read(self, stringdbfile, uniprot):
-        df = pd.read_csv(stringdbfile, sep=" ")
+        df = pd.read_csv(stringdbfile, sep=" ", engine='c')
 
         df[['protein1o','protein1s']] = df.protein1.str.split('.', expand=True)
         df[['protein2o','protein2s']] = df.protein2.str.split('.', expand=True)
@@ -227,12 +230,20 @@ class net:
         else:
             sys.exit("Error: Reference network file format is not supported.")
 
+    def get_interaction_id(self, x):
+        return '__'.join(sorted([x[0], x[1]]))
+    
     def unique_interactions(self, network):
-        def get_interaction_id(x):
-            return '__'.join(sorted([x['bait_id'], x['prey_id']]))
-
-        network['interaction_id'] = network.apply(get_interaction_id, axis=1)
-
+        # Subset network to bait_id and prey_id columns
+        bait_prey = network[["bait_id", "prey_id"]]
+        
+        # Turn subset into list of lists where each sublist is of length 2 (one bait_id one prey_id) 
+        bait_prey = bait_prey.values.tolist()
+        
+        # Use multiprocessing.Pool to distribute get_interaction_id() across list of lists
+        with multiprocessing.Pool(os.cpu_count()) as p:
+            network['interaction_id'] = p.map(self.get_interaction_id, bait_prey)
+        
         network = network.groupby('interaction_id')['interaction_confidence'].max().reset_index()
         network[['bait_id','prey_id']] = network.interaction_id.str.split('__', expand=True)
         return network[['bait_id','prey_id','interaction_confidence']]
@@ -330,7 +341,8 @@ class quantification:
         df.columns = ['run_id', 'protein_id', 'peptide_id', 'peptide_intensity']
 
         # run_id, condition_id and replicate_id are categorial values, peptide_intensity must be float
-        df['run_id'] = df['run_id'].apply(lambda x: os.path.basename(str(x)))
+        if sum([1 for id in df['run_id'] if not isinstance(id, str)]) > 0:
+            df['run_id'] = df['run_id'].apply(lambda x: os.path.basename(str(x)))
         df['protein_id'] = df['protein_id'].apply(str)
         df['peptide_id'] = df['peptide_id'].apply(str)
         df['peptide_intensity'] = df['peptide_intensity'].apply(float)
@@ -361,7 +373,7 @@ class quantification:
                 return x
 
         # Read data
-        df = pd.read_csv(infile, sep="\t")
+        df = pd.read_csv(infile, sep="\t", engine='c')
 
         # Exclude decoys if present
         if 'decoy' in df.columns:
@@ -372,7 +384,8 @@ class quantification:
         df.columns = ['run_id', 'protein_id', 'peptide_id', 'peptide_intensity']
 
         # run_id, condition_id and replicate_id are categorial values, peptide_intensity must be float
-        df['run_id'] = df['run_id'].apply(lambda x: os.path.basename(str(x)))
+        if sum([1 for id in df['run_id'] if not isinstance(id, str)]) > 0:
+            df['run_id'] = df['run_id'].apply(lambda x: os.path.basename(str(x)))
         df['protein_id'] = df['protein_id'].apply(str)
         df['peptide_id'] = df['peptide_id'].apply(str)
         df['peptide_intensity'] = df['peptide_intensity'].apply(float)
@@ -430,9 +443,6 @@ class normalization:
 
         quantification_data = self.quantification_data.copy()
         quantification_data['peptide_intensity'] = np.log2(quantification_data['peptide_intensity'])
-
-        quantification_list = []
-
         if padded:
             # Add padding to lower and upper boundaries to ensure that each fractions is covered by equal number of windows
             min_sec_id = min(self.sec_data['sec_id']) - self.window_size + 1
@@ -440,17 +450,23 @@ class normalization:
         else:
             min_sec_id = min(self.sec_data['sec_id'])
             max_sec_id = max(self.sec_data['sec_id'])+1
-
-        for w in window(range(min_sec_id, max_sec_id),  n=self.window_size):
+        
+        windows = [w for w in window(range(min_sec_id, max_sec_id),  n=self.window_size)]
+        mx_to_normalize = []
+        for w in windows:
             runs = self.sec_data.loc[self.sec_data['sec_id'].isin(w)]['run_id']
-            mx_norm = self.normalize(quantification_data.loc[quantification_data['run_id'].isin(runs)])
-            quantification_list.append(mx_norm)
-
+            mx = quantification_data.loc[quantification_data['run_id'].isin(runs)]
+            mx_to_normalize.append(mx)
+        
+        # With multiprocessing
+        with multiprocessing.Pool(os.cpu_count()) as p:
+            quantification_list = p.map(self.normalize, mx_to_normalize)
+        
         quantification_norm = pd.concat(quantification_list)
         quantification_norm = quantification_norm.groupby(['run_id','protein_id','peptide_id'])['peptide_intensity'].mean().reset_index()
 
         quantification_norm['peptide_intensity'] = np.exp2(quantification_norm['peptide_intensity'])
-
+        
         return(quantification_norm)
 
     def normalize(self, quantification_data):
