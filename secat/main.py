@@ -1,11 +1,12 @@
 import click
 
-import sqlite3
-import os
+from sqlite3 import connect
+from os import remove, path
+from sys import exit
 from shutil import copyfile
 
-import pandas as pd
-import numpy as np
+from pandas import concat, read_sql
+from numpy import power
 
 from .preprocess import uniprot, net, sec, quantification, normalization, meta, query
 from .score import monomer, scoring
@@ -60,11 +61,11 @@ def preprocess(infiles, outfile, secfile, netfile, posnetfile, negnetfile, unipr
 
     # Prepare output file
     try:
-        os.remove(outfile)
+        remove(outfile)
     except OSError:
         pass
 
-    con = sqlite3.connect(outfile)
+    con = connect(outfile)
 
     # Generate SEC definition table
     click.echo("Info: Parsing SEC definition file %s." % secfile)
@@ -78,7 +79,7 @@ def preprocess(infiles, outfile, secfile, netfile, posnetfile, negnetfile, unipr
     for infile in infiles:
         click.echo("Info: Parsing peptide quantification file %s." % infile)
         quantification_list.append(quantification(infile, columns, run_ids).to_df())
-    quantification_data = pd.concat(quantification_list)
+    quantification_data = concat(quantification_list)
 
     # Normalize quantitative data
     if normalize:
@@ -182,7 +183,7 @@ def score(infile, outfile, monomer_threshold_factor, minimum_peptides, maximum_p
     click.echo("Info: Detect monomers.")
     monomer_data = monomer(outfile, monomer_threshold_factor)
 
-    con = sqlite3.connect(outfile)
+    con = connect(outfile)
     monomer_data.df.to_sql('MONOMER', con, index=False, if_exists='replace')
     con.close()
 
@@ -190,7 +191,7 @@ def score(infile, outfile, monomer_threshold_factor, minimum_peptides, maximum_p
     click.echo("Info: Signal processing.")
 
     # Drop features if they already exist
-    con = sqlite3.connect(outfile)
+    con = connect(outfile)
     c = con.cursor()
     c.execute('DROP TABLE IF EXISTS FEATURE;')
     con.close()
@@ -225,7 +226,7 @@ def score(infile, outfile, monomer_threshold_factor, minimum_peptides, maximum_p
 @click.option('--lfdr_monotone/--no-lfdr_monotone', show_default=True, default=True, help='If True, local FDR values are non-decreasing with increasing p-values.')
 @click.option('--lfdr_transformation', default='probit', show_default=True, type=click.Choice(['probit', 'logit']), help='Either a "probit" or "logit" transformation is applied to the p-values so that a local FDR estimate can be formed that does not involve edge effects of the [0,1] interval in which the p-values lie.')
 @click.option('--lfdr_adj', default=1.5, show_default=True, type=float, help='Numeric value that is applied as a multiple of the smoothing bandwidth used in the density estimation.')
-@click.option('--lfdr_eps', default=np.power(10.0,-8), show_default=True, type=float, help='Numeric value that is threshold for the tails of the empirical p-value distribution.')
+@click.option('--lfdr_eps', default=power(10.0,-8), show_default=True, type=float, help='Numeric value that is threshold for the tails of the empirical p-value distribution.')
 @click.option('--plot_reports/--no-plot_reports', default=False, show_default=True, help='Plot reports for all confidence bins.')
 @click.option('--threads', default=1, show_default=True, type=int, help='Number of threads used for parallel processing. -1 means all available CPUs.', callback=transform_threads)
 @click.option('--test/--no-test', default=False, show_default=True, help='Run in test mode with fixed seed to ensure reproducibility.')
@@ -245,7 +246,7 @@ def learn(infile, outfile, apply_model, minimum_abundance_ratio, maximum_sec_shi
     click.echo("Info: Running PyProphet.")
 
     # Drop feature scores if they already exist
-    con = sqlite3.connect(outfile)
+    con = connect(outfile)
     c = con.cursor()
     c.execute('DROP TABLE IF EXISTS FEATURE_SCORED;')
     con.close()
@@ -257,7 +258,7 @@ def learn(infile, outfile, apply_model, minimum_abundance_ratio, maximum_sec_shi
 
     combined_data = combine(outfile, pi0_lambda, pi0_method, pi0_smooth_df, pi0_smooth_log_pi0, pfdr)
 
-    con = sqlite3.connect(outfile)
+    con = connect(outfile)
     combined_data.df.to_sql('FEATURE_SCORED_COMBINED', con, index=False, if_exists='replace')
     con.close()
 
@@ -289,7 +290,7 @@ def quantify(infile, outfile, control_condition, paired, maximum_interaction_qva
     click.echo("Info: Prepare quantitative matrices.")
     qm = quantitative_matrix(outfile, maximum_interaction_qvalue, minimum_peptides, maximum_peptides)
 
-    con = sqlite3.connect(outfile)
+    con = connect(outfile)
     qm.monomer_peptide.to_sql('MONOMER_QM', con, index=False, if_exists='replace')
     qm.complex_peptide.to_sql('COMPLEX_QM', con, index=False, if_exists='replace')
     con.close()
@@ -298,7 +299,7 @@ def quantify(infile, outfile, control_condition, paired, maximum_interaction_qva
     et = enrichment_test(outfile, control_condition, paired, min_abs_log2fx, missing_peptides, peptide_log2fx, threads)
 
 
-    con = sqlite3.connect(outfile)
+    con = connect(outfile)
     et.edge.to_sql('EDGE', con, index=False, if_exists='replace')
     et.edge_level.to_sql('EDGE_LEVEL', con, index=False, if_exists='replace')
     et.node.to_sql('NODE', con, index=False, if_exists='replace')
@@ -317,36 +318,36 @@ def export(infile, maximum_interaction_qvalue):
     """
 
 
-    outfile_interactions = os.path.splitext(infile)[0] + "_interactions.csv"
-    outfile_network = os.path.splitext(infile)[0] + "_network.csv"
-    outfile_nodes = os.path.splitext(infile)[0] + "_differential_nodes.csv"
-    outfile_nodes_level = os.path.splitext(infile)[0] + "_differential_nodes_level.csv"
-    outfile_edges = os.path.splitext(infile)[0] + "_differential_edges.csv"
-    outfile_edges_level = os.path.splitext(infile)[0] + "_differential_edges_level.csv"
-    outfile_proteins_level = os.path.splitext(infile)[0] + "_differential_proteins_level.csv"
+    outfile_interactions = path.splitext(infile)[0] + "_interactions.csv"
+    outfile_network = path.splitext(infile)[0] + "_network.csv"
+    outfile_nodes = path.splitext(infile)[0] + "_differential_nodes.csv"
+    outfile_nodes_level = path.splitext(infile)[0] + "_differential_nodes_level.csv"
+    outfile_edges = path.splitext(infile)[0] + "_differential_edges.csv"
+    outfile_edges_level = path.splitext(infile)[0] + "_differential_edges_level.csv"
+    outfile_proteins_level = path.splitext(infile)[0] + "_differential_proteins_level.csv"
 
-    con = sqlite3.connect(infile)
+    con = connect(infile)
 
     if check_sqlite_table(con, 'FEATURE_SCORED_COMBINED'):
-        interaction_data = pd.read_sql('SELECT DISTINCT bait_id, prey_id FROM FEATURE_SCORED_COMBINED WHERE decoy == 0 and qvalue <= %s;' % maximum_interaction_qvalue , con)
+        interaction_data = read_sql('SELECT DISTINCT bait_id, prey_id FROM FEATURE_SCORED_COMBINED WHERE decoy == 0 and qvalue <= %s;' % maximum_interaction_qvalue , con)
         interaction_data.to_csv(outfile_interactions, index=False)
     if check_sqlite_table(con, 'FEATURE_SCORED_COMBINED') and check_sqlite_table(con, 'MONOMER_QM'):
-        network_data = pd.read_sql('SELECT DISTINCT bait_id, prey_id FROM FEATURE_SCORED_COMBINED WHERE decoy == 0 and qvalue <= %s UNION SELECT DISTINCT bait_id, prey_id FROM MONOMER_QM;' % maximum_interaction_qvalue , con)
+        network_data = read_sql('SELECT DISTINCT bait_id, prey_id FROM FEATURE_SCORED_COMBINED WHERE decoy == 0 and qvalue <= %s UNION SELECT DISTINCT bait_id, prey_id FROM MONOMER_QM;' % maximum_interaction_qvalue , con)
         network_data.to_csv(outfile_network, index=False)
     if check_sqlite_table(con, 'NODE'):
-        node_data = pd.read_sql('SELECT * FROM NODE;' , con)
+        node_data = read_sql('SELECT * FROM NODE;' , con)
         node_data.sort_values(by=['pvalue']).to_csv(outfile_nodes, index=False)
     if check_sqlite_table(con, 'NODE_LEVEL'):
-        node_level_data = pd.read_sql('SELECT * FROM NODE_LEVEL;' , con)
+        node_level_data = read_sql('SELECT * FROM NODE_LEVEL;' , con)
         node_level_data.sort_values(by=['pvalue']).to_csv(outfile_nodes_level, index=False)
     if check_sqlite_table(con, 'EDGE'):
-        edge_data = pd.read_sql('SELECT * FROM EDGE;' , con)
+        edge_data = read_sql('SELECT * FROM EDGE;' , con)
         edge_data.sort_values(by=['pvalue']).to_csv(outfile_edges, index=False)
     if check_sqlite_table(con, 'EDGE_LEVEL'):
-        edge_level_data = pd.read_sql('SELECT * FROM EDGE_LEVEL;' , con)
+        edge_level_data = read_sql('SELECT * FROM EDGE_LEVEL;' , con)
         edge_level_data.sort_values(by=['pvalue']).to_csv(outfile_edges_level, index=False)
     if check_sqlite_table(con, 'PROTEIN_LEVEL'):
-        protein_level_data = pd.read_sql('SELECT * FROM PROTEIN_LEVEL;' , con)
+        protein_level_data = read_sql('SELECT * FROM PROTEIN_LEVEL;' , con)
         protein_level_data.sort_values(by=['pvalue']).to_csv(outfile_proteins_level, index=False)
 
     con.close()
@@ -378,12 +379,12 @@ def statistics(infile, min_abs_log2fx):
     Print SECAT statistics
     """
 
-    con = sqlite3.connect(infile)
+    con = connect(infile)
 
     if check_sqlite_table(con, 'QUANTIFICATION') and check_sqlite_table(con, 'SEC') and check_sqlite_table(con, 'PROTEIN'):
         click.echo("Protein information")
         click.echo(10*"-")
-        pepprot = pd.read_sql('SELECT * FROM QUANTIFICATION INNER JOIN SEC ON QUANTIFICATION.run_id = SEC.run_id WHERE protein_id IN (SELECT DISTINCT protein_id FROM PROTEIN);' , con)
+        pepprot = read_sql('SELECT * FROM QUANTIFICATION INNER JOIN SEC ON QUANTIFICATION.run_id = SEC.run_id WHERE protein_id IN (SELECT DISTINCT protein_id FROM PROTEIN);' , con)
 
         click.echo("Total proteins: %s" % len(pepprot['protein_id'].drop_duplicates()))
         click.echo("Total proteins per run:")
@@ -398,8 +399,8 @@ def statistics(infile, min_abs_log2fx):
     if check_sqlite_table(con, 'FEATURE_SCORED_COMBINED'):
         click.echo("PPI Information")
         click.echo(10*"-")
-        intact_combined = pd.read_sql('SELECT *, bait_id || "_" || prey_id AS interaction_id FROM FEATURE_SCORED_COMBINED WHERE decoy==0;' , con)
-        intact = pd.read_sql('SELECT *, bait_id || "_" || prey_id AS interaction_id FROM FEATURE_SCORED WHERE decoy==0;' , con)
+        intact_combined = read_sql('SELECT *, bait_id || "_" || prey_id AS interaction_id FROM FEATURE_SCORED_COMBINED WHERE decoy==0;' , con)
+        intact = read_sql('SELECT *, bait_id || "_" || prey_id AS interaction_id FROM FEATURE_SCORED WHERE decoy==0;' , con)
 
         click.echo("Total interactions (q-value<0.01): %s" % intact_combined[intact_combined['qvalue']<0.01]['interaction_id'].nunique())
         click.echo("Total interactions per run (q-value<0.01):")
@@ -420,7 +421,7 @@ def statistics(infile, min_abs_log2fx):
         click.echo("Quantitative Information (min_abs_log2fx > %s)" % min_abs_log2fx)
         click.echo(10*"-")
 
-        df_node_level = pd.read_sql('SELECT * FROM NODE_LEVEL;', con)
+        df_node_level = read_sql('SELECT * FROM NODE_LEVEL;', con)
 
         df_node_level_filtered = df_node_level[df_node_level['abs_log2fx'] > min_abs_log2fx]
         df_node = df_node_level_filtered.sort_values('pvalue_adjusted').groupby(['condition_1','condition_2','bait_id']).head(1).reset_index()
