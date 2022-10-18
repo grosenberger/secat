@@ -1,10 +1,10 @@
 import pandas as pd
 import numpy as np
 import click
+import pdb
 import sqlite3
-import os
 import sys
-import warnings
+from decoupler.method_viper import viper
 
 from .EmpiricalBrownsMethod import EmpiricalBrownsMethod
 import itertools
@@ -175,6 +175,33 @@ class enrichment_test:
         return comparisons
 
     def viper(self, data_mx, subunit_set, subunit_tfms):
+        # Conduct VIPER analysis
+        r_networks = robjects.ListVector.from_length(len(subunit_tfms)) # Creating an empty list of the same length as subunit_tfms
+
+        for i, subunit_tfm in enumerate(subunit_tfms):
+            regulons = [] # construct each regulon by...
+            for subunit in subunit_set:
+                # converting each subunit_tfms into a float vector
+                tfmode = robjects.FloatVector(np.asarray(subunit_tfm[subunit]).astype(float))
+                
+                # not sure why we need a string vector
+                tfmode.names = robjects.StrVector(subunit_set[subunit])
+
+                # Each tf is equally likely?
+                likelihood = robjects.FloatVector(np.repeat(1.0,len(subunit_set[subunit])))
+                
+                # Creating a list of 
+                regulon = robjects.ListVector({'tfmode': tfmode, 'likelihood': likelihood})
+                regulons.append(regulon)
+
+            # Generate R regulon
+            r_networks[i] = robjects.ListVector(zip(subunit_set.keys(), regulons))
+
+        # Compute VIPER profile
+        return viper(data_mx, r_networks, verbose = False, minsize = 1)
+    
+    # Decprecated
+    def _viper(self, data_mx, subunit_set, subunit_tfms):
         from rpy2 import robjects
         from rpy2.robjects import r, pandas2ri
         from rpy2.robjects.conversion import localconverter
@@ -189,6 +216,8 @@ class enrichment_test:
             biocinstaller.biocLite("viper")
             vp = importr("viper")
 
+        pdb.set_trace()
+        
         # Conduct VIPER analysis
         r_networks = robjects.ListVector.from_length(len(subunit_tfms))
 
@@ -284,8 +313,9 @@ class enrichment_test:
                         subunit_set = query_set.groupby(['query_id'])['query_peptide_id'].apply(lambda x: x.unique().tolist()).to_dict()
                         subunit_tfm = query_set.groupby(['query_id'])['query_peptide_id'].apply(lambda x: np.repeat(1,len(x.unique()))).to_dict()
 
-                    # Run VIPER
-                    results = self.viper(data_mx, subunit_set, [subunit_tfm])
+                    
+                    results = self._viper(data_mx, subunit_set, [subunit_tfm]) # Run VIPER (R version)
+                    # results = self.viper(data_mx, subunit_set, [subunit_tfm]) # Run VIPER (python decoupler)
 
                     results[['query_id','is_bait']] = results['query_id'].str.split("+", expand=True)
                     results['is_bait'] = results['is_bait'].astype('int')
