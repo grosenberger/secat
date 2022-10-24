@@ -11,7 +11,7 @@ DEBIAN_FRONTEND=noninteractive
 
 # Install R
 apt update -qq
-apt install -y --no-install-recommends software-properties-common dirmngr gnupg wget
+apt install -y --no-install-recommends software-properties-common dirmngr gnupg wget git
 # add the signing key (by Michael Rutter) for these repos
 # To verify key, run gpg --show-keys /etc/apt/trusted.gpg.d/cran_ubuntu_key.asc 
 # Fingerprint: E298A3A825C0D65DFD57CBB651716619E084DAB9
@@ -37,16 +37,20 @@ pip install pyprophet
 
 # install SECAT and dependencies
 mkdir -p /secat
+git clone https://github.com/grosenberger/secat.git /secat
 cd /secat
 python setup.py install
 mkdir -p /
 cd /
 rm -rf /secat
+
 %environment
 export DEBIAN_FRONTEND=noninteractive
+
 %runscript
 cd /
 exec /bin/bash "$@"
+
 %startscript
 cd /
 exec /bin/bash "$@"
