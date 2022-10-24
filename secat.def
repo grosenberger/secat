@@ -7,6 +7,7 @@ Stage: spython-base
 %post
 # SECAT Dockerfile
 
+# Random comment
 DEBIAN_FRONTEND=noninteractive
 
 # Install R
