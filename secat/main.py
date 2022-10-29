@@ -1,7 +1,9 @@
 import click
+import pdb
 
 from sqlite3 import connect
-from os import remove, path
+from os import remove, path, getpid
+from psutil import Process
 from sys import exit
 from shutil import copyfile
 
@@ -94,6 +96,9 @@ def preprocess(infiles, outfile, secfile, netfile, posnetfile, negnetfile, unipr
     meta_data = meta(quantification_data, sec_data.to_df(), decoy_intensity_bins, decoy_left_sec_bins, decoy_right_sec_bins)
     meta_data.peptide_meta.to_sql('PEPTIDE_META', con, index=False)
     meta_data.protein_meta.to_sql('PROTEIN_META', con, index=False)
+    
+    del sec_data
+    del quantification_data
 
     # Generate UniProt table
     click.echo("Info: Parsing UniProt XML file %s." % uniprotfile)
