@@ -1,3 +1,4 @@
+import pdb
 import multiprocessing
 from tqdm import tqdm
 import numpy as np
@@ -48,14 +49,23 @@ class uniprot:
             ensembl = root.xpath('//uniprot:entry/uniprot:dbReference[@type="Ensembl"]/uniprot:property[@type="protein sequence ID"]/@value', namespaces = self.namespaces)
             ensembl_path = './uniprot:dbReference[@type="Ensembl"]/uniprot:property[@type="protein sequence ID"]/@value'
 
+        # TODO: Need to make this parsing more memory efficient
         entries = root.xpath('//uniprot:entry', namespaces = self.namespaces)
         for entry in tqdm(entries, total=len(entries)):
             accession = entry.xpath('./uniprot:accession/text()', namespaces = self.namespaces)
             name = entry.xpath('./uniprot:name/text()', namespaces = self.namespaces)
             mw = entry.xpath('./uniprot:sequence/@mass', namespaces = self.namespaces)
             ensembl = entry.xpath(ensembl_path, namespaces = self.namespaces)
-            df = df.append({'protein_id': _extract(accession), 'protein_name': _extract(name), 'ensembl_id': ensembl, 'protein_mw': float(_extract(mw))}, ignore_index=True)
-        click.echo(type(df))  #added in case the first messes up...
+
+            data = {'protein_id': _extract(accession), 'protein_name': _extract(name), 'ensembl_id': ensembl, 'protein_mw': np.uint32(_extract(mw))}
+            new_row = pd.Series(data)
+            df = pd.concat([df, new_row.to_frame().T], ignore_index=True)
+        
+        # Casting to more efficient data types to save memory without losing meaningful quality
+        df['protein_id'] = df['protein_id'].astype('string')
+        df['protein_name'] = df['protein_name'].astype('string')
+        df['ensembl_id'] = df['ensembl_id'].astype('string')
+        df['protein_mw'] = df['protein_mw'].astype(np.uint32) # Values are np.uint32, but Series needs to be cast
         return df
 
     def to_df(self):
