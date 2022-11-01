@@ -14,7 +14,6 @@ import itertools
 
 from pandas.api.types import is_numeric_dtype
 
-
 try:
     import matplotlib
     matplotlib.use('Agg')
@@ -24,11 +23,21 @@ except ImportError:
     plt = None
 
 class uniprot:
-    def __init__(self, uniprotfile):
+    def __init__(self, uniprotfile, cache):
         self.namespaces = {'uniprot': "http://uniprot.org/uniprot"}
+        self.cache = cache
         self.df = self.read(uniprotfile)
     
     def read(self, uniprotfile):
+        if uniprotfile.endswith("xml.gz"):
+            cache_filename = uniprotfile.strip("xml.gz") + "parquet"
+        elif uniprotfile.endswith("xml"):
+            cache_filename = uniprotfile.strip("xml") + "parquet"
+        
+        if self.cache and os.path.exists(cache_filename):
+            print("Found cached table")
+            return pd.read_parquet(cache_filename)
+        
         def _extract(lst):
             if len(lst) >= 1:
                 return lst[0]
@@ -61,11 +70,13 @@ class uniprot:
             new_row = pd.Series(data)
             df = pd.concat([df, new_row.to_frame().T], ignore_index=True)
         
-        # Casting to more efficient data types to save memory without losing meaningful quality
-        df['protein_id'] = df['protein_id'].astype('string')
-        df['protein_name'] = df['protein_name'].astype('string')
-        df['ensembl_id'] = df['ensembl_id'].astype('string')
         df['protein_mw'] = df['protein_mw'].astype(np.uint32) # Values are np.uint32, but Series needs to be cast
+
+        # In case a cached version doesn't exist, make one
+        if self.cache and not os.path.exists(cache_filename):
+            print("Caching table")
+            df.to_parquet(cache_filename)
+
         return df
 
     def to_df(self):
@@ -478,7 +489,7 @@ class normalization:
         quantification_norm['peptide_intensity'] = np.exp2(quantification_norm['peptide_intensity'])
         
         return(quantification_norm)
-
+ 
     def normalize(self, quantification_data):
         def normalizeCyclicLoess(x, span=0.7, iterations = 3):
             n = len(x.columns)
@@ -534,7 +545,7 @@ class meta:
         self.decoy_right_sec_bins = decoy_right_sec_bins
 
         self.peptide_meta, self.protein_meta = self.generate(quantification_data, sec_data)
-
+ 
     def generate(self, quantification_data, sec_data):
         df = pd.merge(quantification_data, sec_data, on='run_id')
 
@@ -588,7 +599,7 @@ class query:
         self.decoy_subsample = decoy_subsample
         self.decoy_exclude = decoy_exclude
         self.df = self.generate_query(net_data, posnet_data, negnet_data, protein_meta_data)
-
+ 
     def generate_query(self, net_data, posnet_data, negnet_data, protein_meta_data):
         def _random_nonidentical_array(data):
             np.random.shuffle(data['bait_id'].values)
