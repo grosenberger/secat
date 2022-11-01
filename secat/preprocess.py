@@ -48,9 +48,6 @@ class uniprot:
 
         root = etree.parse(uniprotfile)
 
-        accessions = root.xpath('//uniprot:entry/uniprot:accession/text()', namespaces = self.namespaces)
-        names = root.xpath('//uniprot:entry/uniprot:name/text()', namespaces = self.namespaces)
-        mw = root.xpath('//uniprot:entry/uniprot:sequence/@mass', namespaces = self.namespaces)
         if root.xpath('//uniprot:entry/uniprot:organism/uniprot:dbReference[@type="NCBI Taxonomy"]/@id', namespaces = self.namespaces)[0] == '559292':
             ensembl = root.xpath('//uniprot:entry/uniprot:gene/uniprot:name[@type = "ordered locus"]/text()', namespaces = self.namespaces)
             ensembl_path = './uniprot:gene/uniprot:name[@type = "ordered locus"]/text()'
