@@ -8,6 +8,7 @@ from sklearn import preprocessing
 import statsmodels.api as sm
 import sys
 import os
+import numpy as np
 
 from lxml import etree
 import itertools
@@ -80,7 +81,10 @@ class uniprot:
         return self.df[['protein_id','protein_name','protein_mw']]
 
     def expand(self):
-        ensembl = self.df.apply(lambda x: pd.Series(x['ensembl_id']),axis=1).stack().reset_index(level=1, drop=True)
+        ensembl = self.df.apply(
+            lambda x: pd.Series(x['ensembl_id']),
+            axis=1
+        ).stack().reset_index(level=1, drop=True)
         ensembl.name = 'ensembl_id'
 
         return self.df.drop('ensembl_id', axis=1).join(ensembl).reset_index(drop=True)[["protein_id", "protein_name", "ensembl_id", "protein_mw"]]
