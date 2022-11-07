@@ -5,6 +5,7 @@ import pdb
 import sqlite3
 import sys
 from decoupler.method_viper import viper
+import os
 
 from .EmpiricalBrownsMethod import EmpiricalBrownsMethod
 import itertools
@@ -27,12 +28,59 @@ class quantitative_matrix:
     def read(self):
         con = sqlite3.connect(self.outfile)
 
-        interactions = pd.read_sql('SELECT DISTINCT bait_id, prey_id FROM FEATURE_SCORED_COMBINED WHERE qvalue <= %s AND bait_id != prey_id AND decoy == 0;' % (self.maximum_interaction_qvalue), con)
+        click.echo("Getting interations table")
+        interactions = pd.read_sql(
+            f"""
+            SELECT DISTINCT bait_id, prey_id 
+            FROM FEATURE_SCORED_COMBINED 
+            WHERE qvalue <= {self.maximum_interaction_qvalue} 
+            AND bait_id != prey_id 
+            AND decoy == 0;
+            """, 
+            con
+        )
 
-        detections = pd.read_sql('SELECT DISTINCT condition_id, replicate_id, FEATURE_SCORED.bait_id, FEATURE_SCORED.prey_id FROM FEATURE_SCORED INNER JOIN (SELECT DISTINCT bait_id, prey_id FROM FEATURE_SCORED_COMBINED WHERE qvalue <= %s AND bait_id != prey_id AND decoy == 0) AS FEATURE_SCORED_COMBINED ON FEATURE_SCORED.bait_id = FEATURE_SCORED_COMBINED.bait_id AND FEATURE_SCORED.prey_id = FEATURE_SCORED_COMBINED.prey_id;' % (self.maximum_interaction_qvalue), con)
+        click.echo("Getting detections table")
+        detections = pd.read_sql(
+            f"""
+            SELECT DISTINCT condition_id, replicate_id, FEATURE_SCORED.bait_id, FEATURE_SCORED.prey_id 
+            FROM FEATURE_SCORED 
+            INNER JOIN (
+                SELECT DISTINCT bait_id, prey_id 
+                FROM FEATURE_SCORED_COMBINED 
+                WHERE qvalue <= {self.maximum_interaction_qvalue} 
+                AND bait_id != prey_id 
+                AND decoy == 0
+            ) AS FEATURE_SCORED_COMBINED 
+            ON FEATURE_SCORED.bait_id = FEATURE_SCORED_COMBINED.bait_id 
+            AND FEATURE_SCORED.prey_id = FEATURE_SCORED_COMBINED.prey_id;
+            """, 
+            con
+        )
 
-        chromatograms = pd.read_sql('SELECT SEC.condition_id, SEC.replicate_id, SEC.sec_id, QUANTIFICATION.protein_id, QUANTIFICATION.peptide_id, peptide_intensity, MONOMER.sec_id AS monomer_sec_id FROM QUANTIFICATION INNER JOIN PROTEIN_META ON QUANTIFICATION.protein_id = PROTEIN_META.protein_id INNER JOIN PEPTIDE_META ON QUANTIFICATION.peptide_id = PEPTIDE_META.peptide_id INNER JOIN SEC ON QUANTIFICATION.RUN_ID = SEC.RUN_ID INNER JOIN MONOMER ON QUANTIFICATION.protein_id = MONOMER.protein_id and SEC.condition_id = MONOMER.condition_id AND SEC.replicate_id = MONOMER.replicate_id WHERE peptide_count >= %s AND peptide_rank <= %s;' % (self.minimum_peptides, self.maximum_peptides), con)
+        click.echo("Getting chromatograms table")
+        chromatograms = pd.read_sql(
+            f"""
+            SELECT 
+                SEC.condition_id, 
+                SEC.replicate_id, 
+                SEC.sec_id, 
+                QUANTIFICATION.protein_id, 
+                QUANTIFICATION.peptide_id, 
+                peptide_intensity, 
+                MONOMER.sec_id AS monomer_sec_id 
+            FROM QUANTIFICATION 
+            INNER JOIN PROTEIN_META ON QUANTIFICATION.protein_id = PROTEIN_META.protein_id 
+            INNER JOIN PEPTIDE_META ON QUANTIFICATION.peptide_id = PEPTIDE_META.peptide_id 
+            INNER JOIN SEC ON QUANTIFICATION.RUN_ID = SEC.RUN_ID 
+            INNER JOIN MONOMER ON QUANTIFICATION.protein_id = MONOMER.protein_id AND SEC.condition_id = MONOMER.condition_id AND SEC.replicate_id = MONOMER.replicate_id 
+            WHERE peptide_count >= {self.minimum_peptides} 
+            AND peptide_rank <= {self.maximum_peptides};
+            """, 
+            con
+        )
 
+        click.echo("Getting peaks table")
         peaks = pd.read_sql('SELECT * FROM PROTEIN_PEAKS;', con)
 
         con.close()
@@ -88,7 +136,7 @@ class quantitative_matrix:
     def quantify_complexes(self):
         def sec_summarize(df):
             def aggregate(x):
-                peptide_ix = (x['peptide_intensity']-x['peptide_intensity'].max()).abs().argsort()[:self.maximum_peptides]
+                peptide_ix = (x['peptide_intensity'] - x['peptide_intensity'].max()).abs().argsort().iloc[:self.maximum_peptides]
                 return pd.DataFrame({'peptide_id': x.iloc[peptide_ix]['peptide_id'], 'peptide_intensity': x.iloc[peptide_ix]['peptide_intensity']})
 
             # Remove monomer fractions for complex-centric quantification
@@ -108,7 +156,7 @@ class quantitative_matrix:
                 # Ensure that minimum peptides are present for both interactors for quantification.
                 if peptide[peptide['is_bait']].shape[0] >= self.minimum_peptides and peptide[~peptide['is_bait']].shape[0] >= self.minimum_peptides:
                     # Select representative closest to max and aggregate
-                    peptide = peptide.groupby(['is_bait']).apply(aggregate).reset_index(level=['is_bait'])
+                    peptide = peptide.groupby(['is_bait'], group_keys=True).apply(aggregate).reset_index(level=['is_bait'])
                     return peptide
 
         def peptide_summarize(df):
@@ -129,7 +177,10 @@ class quantitative_matrix:
         preys['is_bait'] = False
 
         complexes = pd.concat([baits, preys]).reset_index()
-        complexes_sec = complexes.groupby(['condition_id','replicate_id','bait_id','prey_id']).apply(sec_summarize).reset_index(level=['condition_id','replicate_id','bait_id','prey_id'])
+        complexes_sec = complexes.groupby(
+            ['condition_id','replicate_id','bait_id','prey_id'], 
+            group_keys=True
+        ).apply(sec_summarize).reset_index(level=['condition_id','replicate_id','bait_id','prey_id'])
         complexes_peptides = peptide_summarize(complexes_sec)
 
         return complexes_peptides
@@ -200,23 +251,26 @@ class enrichment_test:
         # Compute VIPER profile
         return viper(data_mx, r_networks, verbose = False, minsize = 1)
     
-    # Decprecated
+    # FutureWarning: VipeR will be deprecated
     def _viper(self, data_mx, subunit_set, subunit_tfms):
         from rpy2 import robjects
         from rpy2.robjects import r, pandas2ri
         from rpy2.robjects.conversion import localconverter
-        from rpy2.robjects.packages import importr
-
-        base = importr('base')
-        try:
-            vp = importr("viper")
-        except:
-            base.source("http://www.bioconductor.org/biocLite.R")
-            biocinstaller = importr("BiocInstaller")
-            biocinstaller.biocLite("viper")
-            vp = importr("viper")
+        import rpy2.robjects.packages as rpackages
 
         pdb.set_trace()
+        base = rpackages.importr('base')
+        try:
+            vp = rpackages.importr("viper", lib_loc='/burg/home/dsg2157/R/x86_64-pc-linux-gnu-library/4.2/viper')
+        except:
+            # base.source("http://www.bioconductor.org/biocLite.R")
+            # biocinstaller = rpackages.importr("BiocInstaller")
+            # biocinstaller.biocLite("viper")
+            # vp = robjects.r("library('viper')")
+            
+            # robjects.r("install.packages('BiocManager')")
+            # robjects.r("BiocManager::install('viper')")
+            vp = rpackages.importr("viper", lib_loc='/burg/home/dsg2157/R/x86_64-pc-linux-gnu-library/4.2/viper')
         
         # Conduct VIPER analysis
         r_networks = robjects.ListVector.from_length(len(subunit_tfms))
@@ -313,7 +367,6 @@ class enrichment_test:
                         subunit_set = query_set.groupby(['query_id'])['query_peptide_id'].apply(lambda x: x.unique().tolist()).to_dict()
                         subunit_tfm = query_set.groupby(['query_id'])['query_peptide_id'].apply(lambda x: np.repeat(1,len(x.unique()))).to_dict()
 
-                    
                     results = self._viper(data_mx, subunit_set, [subunit_tfm]) # Run VIPER (R version)
                     # results = self.viper(data_mx, subunit_set, [subunit_tfm]) # Run VIPER (python decoupler)
 

@@ -7,7 +7,7 @@ from psutil import Process
 from sys import exit
 from shutil import copyfile
 
-from pandas import concat, read_sql
+from pandas import concat, read_sql, read_parquet
 from numpy import power
 
 from .preprocess import uniprot, net, sec, quantification, normalization, meta, query
@@ -56,7 +56,29 @@ def cli():
 @click.option('--min_interaction_confidence', 'min_interaction_confidence', default=0.0, show_default=True, type=float, help='Minimum interaction confidence for prior information from network.')
 @click.option('--interaction_confidence_bins', 'interaction_confidence_bins', default=100, show_default=True, type=int, help='Number of interaction confidence bins for grouped error rate estimation.')
 @click.option('--interaction_confidence_quantile/--no-interaction_confidence_quantile', default=True, show_default=True, help='Whether interaction confidence bins should be grouped by quantiles.')
-def preprocess(infiles, outfile, secfile, netfile, posnetfile, negnetfile, uniprotfile, columns, normalize, normalize_window, normalize_padded, decoy_intensity_bins, decoy_left_sec_bins, decoy_right_sec_bins, decoy_oversample, decoy_subsample, decoy_exclude, min_interaction_confidence, interaction_confidence_bins, interaction_confidence_quantile):
+@click.option('--use_cached_uniprot', 'cache', default=True, required=False, show_default=True, type=bool, help='Whether to use the Uniprot table parsed from a previous run')
+def preprocess(
+    infiles,
+    outfile,
+    secfile, 
+    netfile, 
+    posnetfile, 
+    negnetfile, 
+    uniprotfile, 
+    columns, 
+    normalize, 
+    normalize_window, 
+    normalize_padded, 
+    decoy_intensity_bins, 
+    decoy_left_sec_bins, 
+    decoy_right_sec_bins, 
+    decoy_oversample, 
+    decoy_subsample, 
+    decoy_exclude, 
+    min_interaction_confidence, 
+    interaction_confidence_bins, 
+    interaction_confidence_quantile,
+    cache):
     """
     Import and preprocess SEC data.
     """
@@ -102,7 +124,7 @@ def preprocess(infiles, outfile, secfile, netfile, posnetfile, negnetfile, unipr
 
     # Generate UniProt table
     click.echo("Info: Parsing UniProt XML file %s." % uniprotfile)
-    uniprot_data = uniprot(uniprotfile)
+    uniprot_data = uniprot(uniprotfile, cache)
     uniprot_data.to_df().to_sql('PROTEIN', con, index=False)
 
     # Generate Network table
@@ -172,7 +194,15 @@ def preprocess(infiles, outfile, secfile, netfile, posnetfile, negnetfile, unipr
 @click.option('--peakpicking', default='none', show_default=True, type=click.Choice(['none', 'detrend_zero', 'detrend_drop', 'localmax_conditions', 'localmax_replicates']), help='Either "none", "detrend_zero", "detrend_drop", "localmax_conditions" or "localmax_replicates"; the method for peakpicking of the peptide chromatograms. detrend_drop averages over all fractions with peptides; detrend_zero averages over all fractions (less agressive). localmax_conditions averages peak-picking over replicates of the same conditions; localmax_replicates conducts peak-picking for all samples separately.')
 @click.option('--chunck_size', 'chunck_size', default=50000, show_default=True, type=int, help='Chunck size for processing.')
 @click.option('--threads', default=1, show_default=True, type=int, help='Number of threads used for parallel processing. -1 means all available CPUs.', callback=transform_threads)
-def score(infile, outfile, monomer_threshold_factor, minimum_peptides, maximum_peptides, peakpicking, chunck_size, threads):
+def score(
+    infile, 
+    outfile, 
+    monomer_threshold_factor, 
+    minimum_peptides, 
+    maximum_peptides, 
+    peakpicking, 
+    chunck_size, 
+    threads):
     """
     Score interaction features in SEC data.
     """
@@ -235,7 +265,17 @@ def score(infile, outfile, monomer_threshold_factor, minimum_peptides, maximum_p
 @click.option('--plot_reports/--no-plot_reports', default=False, show_default=True, help='Plot reports for all confidence bins.')
 @click.option('--threads', default=1, show_default=True, type=int, help='Number of threads used for parallel processing. -1 means all available CPUs.', callback=transform_threads)
 @click.option('--test/--no-test', default=False, show_default=True, help='Run in test mode with fixed seed to ensure reproducibility.')
-def learn(infile, outfile, apply_model, minimum_abundance_ratio, maximum_sec_shift, cb_decoys, xeval_fraction, xeval_num_iter, ss_initial_fdr, ss_iteration_fdr, ss_num_iter, xgb_autotune, parametric, pfdr, pi0_lambda, pi0_method, pi0_smooth_df, pi0_smooth_log_pi0, lfdr_truncate, lfdr_monotone, lfdr_transformation, lfdr_adj, lfdr_eps, plot_reports, threads, test):
+def learn(
+    infile, 
+    outfile, 
+    apply_model, 
+    minimum_abundance_ratio, 
+    maximum_sec_shift, 
+    cb_decoys, 
+    xeval_fraction, 
+    xeval_num_iter, 
+    ss_initial_fdr, 
+    ss_iteration_fdr, ss_num_iter, xgb_autotune, parametric, pfdr, pi0_lambda, pi0_method, pi0_smooth_df, pi0_smooth_log_pi0, lfdr_truncate, lfdr_monotone, lfdr_transformation, lfdr_adj, lfdr_eps, plot_reports, threads, test):
     """
     Learn true/false interaction features in SEC data.
     """
@@ -265,6 +305,8 @@ def learn(infile, outfile, apply_model, minimum_abundance_ratio, maximum_sec_shi
 
     con = connect(outfile)
     combined_data.df.to_sql('FEATURE_SCORED_COMBINED', con, index=False, if_exists='replace')
+    # Add index to FEATURE_SCORED_COMBINED table for faster reads in quantify step e.g.
+    # con.execute('CREATE INDEX IF NOT EXISTS idx_query_bait_id_prey_id ON FEATURE_SCORED_COMBINED (bait_id, prey_id);')
     con.close()
 
 # SECAT quantify features
@@ -280,7 +322,18 @@ def learn(infile, outfile, apply_model, minimum_abundance_ratio, maximum_sec_shi
 @click.option('--missing_peptides', 'missing_peptides', default="zero", type=str, help='Whether missing peptide abundances should be set to 0 ("zero") or dropped ("drop") for fold change computation.')
 @click.option('--peptide_log2fx/--no-peptide_log2fx', default=True, show_default=True, help='Whether peptide-level log2fx should be computed instead of protein-level. Protein-level is more robust if measured peptides are variable between conditions or replicates.')
 @click.option('--threads', default=1, show_default=True, type=int, help='Number of threads used for parallel processing. -1 means all available CPUs.', callback=transform_threads)
-def quantify(infile, outfile, control_condition, paired, maximum_interaction_qvalue, min_abs_log2fx, minimum_peptides, maximum_peptides, missing_peptides, peptide_log2fx, threads):
+def quantify(
+    infile, 
+    outfile, 
+    control_condition, 
+    paired, 
+    maximum_interaction_qvalue, 
+    min_abs_log2fx, 
+    minimum_peptides, 
+    maximum_peptides, 
+    missing_peptides, 
+    peptide_log2fx, 
+    threads):
     """
     Quantify protein and interaction features in SEC data.
     """
@@ -293,16 +346,33 @@ def quantify(infile, outfile, control_condition, paired, maximum_interaction_qva
         outfile = outfile
 
     click.echo("Info: Prepare quantitative matrices.")
-    qm = quantitative_matrix(outfile, maximum_interaction_qvalue, minimum_peptides, maximum_peptides)
+    monomer_peptide_path = "/burg/mjlab/users/dsg2157/secat-dev/monomer_peptide.parquet"
+    complex_peptide_path = "/burg/mjlab/users/dsg2157/secat-dev/complex_peptide.parquet"
+    if path.exists(monomer_peptide_path) and path.exists(complex_peptide_path):
+        click.echo("Reading from cached tables")
+        monomer_peptide = read_parquet(monomer_peptide_path)
+        complex_peptide = read_parquet(complex_peptide_path)
+    else:
+        click.echo("Preparing quantitative matrices from scratch")
+        qm = quantitative_matrix(outfile, maximum_interaction_qvalue, minimum_peptides, maximum_peptides)
+        monomer_peptide = qm.monomer_peptide
+        complex_peptide = qm.complex_peptide   
 
     con = connect(outfile)
-    qm.monomer_peptide.to_sql('MONOMER_QM', con, index=False, if_exists='replace')
-    qm.complex_peptide.to_sql('COMPLEX_QM', con, index=False, if_exists='replace')
+    monomer_peptide.to_sql('MONOMER_QM', con, index=False, if_exists='replace')
+    complex_peptide.to_sql('COMPLEX_QM', con, index=False, if_exists='replace')
     con.close()
 
     click.echo("Info: Assess differential features.")
-    et = enrichment_test(outfile, control_condition, paired, min_abs_log2fx, missing_peptides, peptide_log2fx, threads)
-
+    et = enrichment_test(
+        outfile, 
+        control_condition, 
+        paired, 
+        min_abs_log2fx, 
+        missing_peptides, 
+        peptide_log2fx, 
+        threads
+    )
 
     con = connect(outfile)
     et.edge.to_sql('EDGE', con, index=False, if_exists='replace')
