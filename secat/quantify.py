@@ -346,29 +346,56 @@ class enrichment_test:
                     # Generate matrix for VIPER
                     data_mx = dat.pivot_table(index='query_peptide_id', columns='quantification_id', values=level, fill_value=0)
 
+                    net = pd.DataFrame(columns=["source", "target", "weight"])
+                    
                     # Generate subunit set for VIPER
                     if level == 'complex_abundance':
                         # Complex abundance testing combines bait and prey peptides into a single regulon with positive tfmode sign
                         query_set = dat[['query_id','is_bait','query_peptide_id']].copy()
                         query_set['query_id'] = query_set['query_id'] + "+1"
-                        subunit_set = query_set.groupby(['query_id'])['query_peptide_id'].apply(lambda x: x.unique().tolist()).to_dict()
-                        subunit_tfm = query_set.groupby(['query_id'])['query_peptide_id'].apply(lambda x: np.repeat(1,len(x.unique()))).to_dict()
+
+                        net['source'] = query_set['query_id']
+                        net['target'] = query_set['query_peptide_id']
+                        net['weight'] = [1 for _ in range(query_set.shape[0])]
+                        net = net.groupby(['source', 'target']).sum('weight').reset_index()
+
+                        # # For R viper method
+                        # subunit_set = query_set.groupby(['query_id'])['query_peptide_id'].apply(lambda x: x.unique().tolist()).to_dict()
+                        # subunit_tfm = query_set.groupby(['query_id'])['query_peptide_id'].apply(lambda x: np.repeat(1,len(x.unique()))).to_dict()
                     elif level == 'interactor_ratio':
                         # Complex stoichiometry testing combines bait and prey peptides into a single regulon but with different tfmode signs
                         query_set = dat[['query_id','is_bait','query_peptide_id']].copy()
                         query_set.loc[query_set['is_bait']==0,'is_bait'] = -1
                         query_set['query_id'] = query_set['query_id'] + "+1"
-                        subunit_set = query_set.groupby(['query_id'])['query_peptide_id'].apply(lambda x: x.unique().tolist()).to_dict()
-                        subunit_tfm = query_set.groupby(['query_id'])[['query_peptide_id','is_bait']].apply(lambda x: x.drop_duplicates()['is_bait'].tolist()).to_dict()
+                        filtered_query_set = query_set.groupby(['query_id']).apply(lambda x: x.drop_duplicates(['is_bait', 'query_peptide_id'])).reset_index(drop=True)
+
+                        net['source'] = filtered_query_set['query_id']
+                        net['target'] = filtered_query_set['query_peptide_id']
+                        net['weight'] = filtered_query_set['is_bait'].apply(lambda x: 1 if x == True else -1)
+                        net = net.groupby(['source', 'target']).sum('weight').reset_index() # Not sure if this is needed
+                        
+                        # # For R viper method
+                        # subunit_set = query_set.groupby(['query_id'])['query_peptide_id'].apply(lambda x: x.unique().tolist()).to_dict()
+                        # subunit_tfm = query_set.groupby(['query_id'])[['query_peptide_id','is_bait']].apply(lambda x: x.drop_duplicates()['is_bait'].tolist()).to_dict()
                     else:
                         # All other modalities are assessed on protein-level, separately for bait and prey proteins
                         query_set = dat[['query_id','is_bait','query_peptide_id']].copy()
                         query_set['query_id'] = query_set['query_id'] + "+" + query_set['is_bait'].astype(int).astype(str)
-                        subunit_set = query_set.groupby(['query_id'])['query_peptide_id'].apply(lambda x: x.unique().tolist()).to_dict()
-                        subunit_tfm = query_set.groupby(['query_id'])['query_peptide_id'].apply(lambda x: np.repeat(1,len(x.unique()))).to_dict()
 
-                    results = self._viper(data_mx, subunit_set, [subunit_tfm]) # Run VIPER (R version)
-                    # results = self.viper(data_mx, subunit_set, [subunit_tfm]) # Run VIPER (python decoupler)
+                        net['source'] = query_set['query_id']
+                        net['target'] = query_set['query_peptide_id']
+                        net['weight'] = [1 for _ in range(query_set.shape[0])]
+                        net = net.groupby(['source', 'target']).sum('weight').reset_index()
+
+                        # # For R viper method
+                        # subunit_set = query_set.groupby(['query_id'])['query_peptide_id'].apply(lambda x: x.unique().tolist()).to_dict()
+                        # subunit_tfm = query_set.groupby(['query_id'])['query_peptide_id'].apply(lambda x: np.repeat(1,len(x.unique()))).to_dict()
+
+                    # results = self._viper(data_mx, subunit_set, [subunit_tfm]) # Run VIPER (R version)
+                    results = run_viper(data_mx.T, net, verbose=False, pleiotropy=False, min_n=1) # Run VIPER (python decoupler)
+                    results = results[0].T.reset_index()
+                    results['query_id'] = results['index']
+                    results.drop('index', inplace=True, axis=1)
 
                     results[['query_id','is_bait']] = results['query_id'].str.split("+", expand=True)
                     results['is_bait'] = results['is_bait'].astype('int')
