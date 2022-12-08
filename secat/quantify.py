@@ -4,7 +4,7 @@ import click
 import pdb
 import sqlite3
 import sys
-from decoupler.method_viper import viper
+from decoupler.method_viper import run_viper
 import os
 
 from .EmpiricalBrownsMethod import EmpiricalBrownsMethod
