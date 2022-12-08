@@ -177,6 +177,7 @@ def score(infile, outfile, monomer_threshold_factor, minimum_peptides, maximum_p
     if outfile is None:
         outfile = infile
     else:
+        # TODO: Consider replacing this with subprocess.call(["cp", "infile", "outfile"]) for speed improvement
         copyfile(infile, outfile)
         outfile = outfile
 
@@ -240,6 +241,7 @@ def learn(infile, outfile, apply_model, minimum_abundance_ratio, maximum_sec_shi
     if outfile is None:
         outfile = infile
     else:
+        # TODO: Consider replacing this with subprocess.call(["cp", "infile", "outfile"]) for speed improvement
         copyfile(infile, outfile)
         outfile = outfile
 
@@ -285,6 +287,7 @@ def quantify(infile, outfile, control_condition, paired, maximum_interaction_qva
     if outfile is None:
         outfile = infile
     else:
+        # TODO: Consider replacing this with subprocess.call(["cp", "infile", "outfile"]) for speed improvement
         copyfile(infile, outfile)
         outfile = outfile
 
@@ -317,7 +320,6 @@ def export(infile, maximum_interaction_qvalue):
     """
     Export SECAT results.
     """
-
 
     outfile_interactions = path.splitext(infile)[0] + "_interactions.csv"
     outfile_network = path.splitext(infile)[0] + "_network.csv"
