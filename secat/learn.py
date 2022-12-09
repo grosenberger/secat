@@ -25,7 +25,7 @@ from pyprophet.stats import pemp, qvalue, pi0est
 from hyperopt import hp
 
 class pyprophet:
-    def __init__(self, outfile, apply_model, minimum_abundance_ratio, maximum_sec_shift, cb_decoys, xeval_fraction, xeval_num_iter, ss_initial_fdr, ss_iteration_fdr, ss_num_iter, xgb_autotune, parametric, pfdr, pi0_lambda, pi0_method, pi0_smooth_df, pi0_smooth_log_pi0, lfdr_truncate, lfdr_monotone, lfdr_transformation, lfdr_adj, lfdr_eps, plot_reports, threads, test):
+    def __init__(self, outfile, apply_model, minimum_abundance_ratio, maximum_sec_shift, cb_decoys, xeval_fraction, xeval_num_iter, ss_initial_fdr, ss_iteration_fdr, ss_num_iter, xgb_autotune, parametric, pfdr, pi0_lambda, pi0_method, pi0_smooth_df, pi0_smooth_log_pi0, lfdr_truncate, lfdr_monotone, lfdr_transformation, lfdr_adj, lfdr_eps, plot_reports, threads, test, export_tables):
 
         self.outfile = outfile
         self.apply_model = apply_model
@@ -61,6 +61,7 @@ class pyprophet:
         self.threads = threads
         self.plot_reports = plot_reports
         self.test = test
+        self.export_tables = export_tables
         self.has_learning = self.has_learning()
 
         # Load pretrained model if available
@@ -207,6 +208,10 @@ class pyprophet:
 
         df = result.scored_tables[['condition_id','replicate_id','bait_id','prey_id','decoy','confidence_bin','d_score','p_value','q_value','pep']]
         df.columns = ['condition_id','replicate_id','bait_id','prey_id','decoy','confidence_bin','score','pvalue','qvalue','pep']
+
+        if self.export_tables:
+            learning_interaction_name = "learn_int_scored.csv"
+            result.scored_tables.to_csv(learning_interaction_name, index=False)
 
         if self.plot_reports:
             self.plot(result, scorer.pi0, condition_id + "_" + replicate_id + "_" + "detecting_" + str(detecting_data['confidence_bin'].values[0]))
