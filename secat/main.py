@@ -106,6 +106,7 @@ def preprocess(infiles, outfile, secfile, netfile, posnetfile, negnetfile, unipr
         click.echo("Info: Parsing network file %s." % netfile)
     else:
         click.echo("Info: No reference network file was provided.")
+        decoy_exclude = False
     net_data = net(netfile, uniprot_data, meta_data)
     net_data.to_df().to_sql('NETWORK', con, index=False)
 
