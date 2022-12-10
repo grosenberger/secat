@@ -84,7 +84,7 @@ class uniprot:
 
     def expand(self):
         ensembl = self.df.apply(
-            lambda x: pd.Series(x['ensembl_id'], dtype="object"),
+            lambda x: pd.Series(x['ensembl_id']),
             axis=1
         ).stack().reset_index(level=1, drop=True)
         ensembl.name = 'ensembl_id'
