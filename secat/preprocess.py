@@ -44,7 +44,7 @@ class uniprot:
             else:
                 return None
 
-        df = pd.DataFrame(columns=["protein_id", "protein_name", "ensembl_id", "protein_mw"])
+        df = pd.DataFrame(columns=["protein_id", "protein_name", "gene", "ensembl_id", "protein_mw"])
 
         root = etree.parse(uniprotfile)
 
