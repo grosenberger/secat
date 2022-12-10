@@ -92,9 +92,9 @@ class pyprophet:
             data = self.read_data(learning=False, condition_id=run[1]['condition_id'], replicate_id=run[1]['replicate_id'])
 
             if self.has_learning:
-                scored_data = data[data['learning'] == 0].groupby('confidence_bin').apply(self.apply, condition_id=run[1]['condition_id'], replicate_id=run[1]['replicate_id'])
+                scored_data = data[data['learning'] == 0].groupby('confidence_bin', group_keys=True).apply(self.apply, condition_id=run[1]['condition_id'], replicate_id=run[1]['replicate_id'])
             else:
-                scored_data = data.groupby('confidence_bin').apply(self.apply, condition_id=run[1]['condition_id'], replicate_id=run[1]['replicate_id'])
+                scored_data = data.groupby('confidence_bin', group_keys=True).apply(self.apply, condition_id=run[1]['condition_id'], replicate_id=run[1]['replicate_id'])
 
             con = sqlite3.connect(outfile)
             scored_data.to_sql('FEATURE_SCORED', con, index=False, if_exists='append')
@@ -129,7 +129,7 @@ class pyprophet:
         con.close()
 
         # Filter according to boundaries
-        df_filter = df.groupby(["bait_id","prey_id","decoy"])[["var_xcorr_shift","var_abundance_ratio","var_total_abundance_ratio"]].mean().reset_index(level=["bait_id","prey_id","decoy"])
+        df_filter = df.groupby(["bait_id","prey_id","decoy"], group_keys=True)[["var_xcorr_shift","var_abundance_ratio","var_total_abundance_ratio"]].mean(numeric_only=True).reset_index(level=["bait_id","prey_id","decoy"])
 
         df_filter = df_filter[(df_filter['var_xcorr_shift'] <= self.maximum_sec_shift) & (df_filter['var_abundance_ratio'] >= self.minimum_abundance_ratio) & (df_filter['var_total_abundance_ratio'] >= self.minimum_abundance_ratio)]
 
@@ -285,7 +285,7 @@ class combine:
         self.pfdr = pfdr
 
         scores = self.read()
-        self.df = scores.groupby('confidence_bin').apply(self.combine_scores)
+        self.df = scores.groupby('confidence_bin', group_keys=True).apply(self.combine_scores)
 
     def read(self):
         con = sqlite3.connect(self.outfile)
@@ -295,7 +295,7 @@ class combine:
         return df
 
     def combine_scores(self, scores):
-        combined_scores = scores.groupby(['condition_id','bait_id','prey_id','decoy','confidence_bin'])['score'].mean().reset_index()
+        combined_scores = scores.groupby(['condition_id','bait_id','prey_id','decoy','confidence_bin'], group_keys=True)['score'].mean(numeric_only=True).reset_index()
 
         combined_scores.loc[combined_scores['decoy'] == 0,'pvalue'] = pemp(combined_scores[combined_scores['decoy'] == 0]['score'], combined_scores[combined_scores['decoy'] == 1]['score'])
 
