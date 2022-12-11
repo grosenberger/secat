@@ -25,7 +25,7 @@ from pyprophet.stats import pemp, qvalue, pi0est
 from hyperopt import hp
 
 class pyprophet:
-    def __init__(self, outfile, apply_model, minimum_abundance_ratio, maximum_sec_shift, cb_decoys, xeval_fraction, xeval_num_iter, ss_initial_fdr, ss_iteration_fdr, ss_num_iter, xgb_autotune, parametric, pfdr, pi0_lambda, pi0_method, pi0_smooth_df, pi0_smooth_log_pi0, lfdr_truncate, lfdr_monotone, lfdr_transformation, lfdr_adj, lfdr_eps, plot_reports, threads, test):
+    def __init__(self, outfile, apply_model, minimum_abundance_ratio, maximum_sec_shift, cb_decoys, xeval_fraction, xeval_num_iter, ss_initial_fdr, ss_iteration_fdr, ss_num_iter, xgb_autotune, parametric, pfdr, pi0_lambda, pi0_method, pi0_smooth_df, pi0_smooth_log_pi0, lfdr_truncate, lfdr_monotone, lfdr_transformation, lfdr_adj, lfdr_eps, plot_reports, threads, test, export_tables):
 
         self.outfile = outfile
         self.apply_model = apply_model
@@ -61,6 +61,7 @@ class pyprophet:
         self.threads = threads
         self.plot_reports = plot_reports
         self.test = test
+        self.export_tables = export_tables
         self.has_learning = self.has_learning()
 
         # Load pretrained model if available
@@ -91,9 +92,9 @@ class pyprophet:
             data = self.read_data(learning=False, condition_id=run[1]['condition_id'], replicate_id=run[1]['replicate_id'])
 
             if self.has_learning:
-                scored_data = data[data['learning'] == 0].groupby('confidence_bin').apply(self.apply, condition_id=run[1]['condition_id'], replicate_id=run[1]['replicate_id'])
+                scored_data = data[data['learning'] == 0].groupby('confidence_bin', group_keys=False).apply(self.apply, condition_id=run[1]['condition_id'], replicate_id=run[1]['replicate_id'])
             else:
-                scored_data = data.groupby('confidence_bin').apply(self.apply, condition_id=run[1]['condition_id'], replicate_id=run[1]['replicate_id'])
+                scored_data = data.groupby('confidence_bin', group_keys=False).apply(self.apply, condition_id=run[1]['condition_id'], replicate_id=run[1]['replicate_id'])
 
             con = sqlite3.connect(outfile)
             scored_data.to_sql('FEATURE_SCORED', con, index=False, if_exists='append')
@@ -128,7 +129,7 @@ class pyprophet:
         con.close()
 
         # Filter according to boundaries
-        df_filter = df.groupby(["bait_id","prey_id","decoy"])[["var_xcorr_shift","var_abundance_ratio","var_total_abundance_ratio"]].mean().reset_index(level=["bait_id","prey_id","decoy"])
+        df_filter = df.groupby(["bait_id","prey_id","decoy"], group_keys=False)[["var_xcorr_shift","var_abundance_ratio","var_total_abundance_ratio"]].mean(numeric_only=True).reset_index(level=["bait_id","prey_id","decoy"])
 
         df_filter = df_filter[(df_filter['var_xcorr_shift'] <= self.maximum_sec_shift) & (df_filter['var_abundance_ratio'] >= self.minimum_abundance_ratio) & (df_filter['var_total_abundance_ratio'] >= self.minimum_abundance_ratio)]
 
@@ -208,6 +209,10 @@ class pyprophet:
         df = result.scored_tables[['condition_id','replicate_id','bait_id','prey_id','decoy','confidence_bin','d_score','p_value','q_value','pep']]
         df.columns = ['condition_id','replicate_id','bait_id','prey_id','decoy','confidence_bin','score','pvalue','qvalue','pep']
 
+        if self.export_tables:
+            learning_interaction_name = "learn_int_scored.csv"
+            result.scored_tables.to_csv(learning_interaction_name, index=False)
+
         if self.plot_reports:
             self.plot(result, scorer.pi0, condition_id + "_" + replicate_id + "_" + "detecting_" + str(detecting_data['confidence_bin'].values[0]))
             self.plot_scores(result.scored_tables, condition_id + "_" + replicate_id + "_" + "detecting_" + str(detecting_data['confidence_bin'].values[0]))
@@ -280,7 +285,7 @@ class combine:
         self.pfdr = pfdr
 
         scores = self.read()
-        self.df = scores.groupby('confidence_bin').apply(self.combine_scores)
+        self.df = scores.groupby('confidence_bin', group_keys=False).apply(self.combine_scores)
 
     def read(self):
         con = sqlite3.connect(self.outfile)
@@ -290,7 +295,7 @@ class combine:
         return df
 
     def combine_scores(self, scores):
-        combined_scores = scores.groupby(['condition_id','bait_id','prey_id','decoy','confidence_bin'])['score'].mean().reset_index()
+        combined_scores = scores.groupby(['condition_id','bait_id','prey_id','decoy','confidence_bin'], group_keys=False)['score'].mean(numeric_only=True).reset_index()
 
         combined_scores.loc[combined_scores['decoy'] == 0,'pvalue'] = pemp(combined_scores[combined_scores['decoy'] == 0]['score'], combined_scores[combined_scores['decoy'] == 1]['score'])
 
