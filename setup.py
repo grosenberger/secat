@@ -34,7 +34,7 @@ setup(
     ],
     packages=find_packages(exclude=['contrib', 'docs', 'tests']),
     include_package_data=True,
-    install_requires=['Click','tqdm','tzlocal','lxml','numpy','scipy','pandas','sklearn','statsmodels','pyprophet','minepy','rpy2','matplotlib','ggplot', 'decoupler', 'fastparquet'],
+    install_requires=['Click','tqdm','tzlocal','lxml','numpy','scipy','pandas','sklearn','statsmodels','pyprophet','minepy','matplotlib','ggplot', 'decoupler', 'fastparquet'],
     # extras_require={  # Optional
     #     'dev': ['check-manifest'],
     #     'test': ['coverage'],
