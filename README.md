@@ -6,9 +6,7 @@ SECAT: Size-Exclusion Chromatography Algorithmic Toolkit
 Dependencies
 ------------
 
-*SECAT* depends on several Python packages (listed in ``setup.py``) and the ``viper`` R/Bioconductor package, accessed via ``rpy2``. SECAT has been tested on Linux (CentOS 7) and macOS (10.14) operating systems and might run on other versions too.
-
-Please install ``viper`` from [Bioconductor](https://doi.org/doi:10.18129/B9.bioc.viper) prior to SECAT.
+*SECAT* depends on several Python packages (listed in ``setup.py``). SECAT has been tested on Linux (CentOS 7) and macOS (10.14) operating systems and might run on other versions too.
 
 Installation
 ------------
@@ -27,6 +25,12 @@ Install the stable version of *SECAT* from the Python Package Index (PyPI):
 pip install secat
 ````
 
+You can alternatively create a `conda` environment with SECAT and all its dependencies with the command below. Note: you should be in the root directory of this repository when executing this command or replace `environment.yml` with the proper full path or relative path to the `environment.yml` file.
+
+```
+conda env create -f environment.yml
+```
+
 Docker
 ------
 
@@ -36,10 +40,15 @@ SECAT is also available from [Dockerhub](https://hub.docker.com/repository/docke
 docker pull grosenberger/secat:latest # "latest" can be replaced by the version number, e.g. "1.0.4"
 ````
 
-Print the installed Python and R package versions:
+You can also build the Docker image on your machine with the command below. Again, make sure you are at the root level of this repository when executing this command. When building locally, feel free to replace the part after `-t` with anything you find convenient. This is simply a tag to easily identify the Docker container on your machine. Here it is tagged as `grosenberg/secat:latest` to remain interoperable with the other instructions in the `README.md`.
+
+```
+docker build . -t grosenberg/secat:latest
+```
+
+Print the installed Python versions:
 
 ````
-docker run --name secat --rm -v $PWD:/data -i -t grosenberger/secat:latest Rscript -e 'installed.packages()[,"Version"]'
 docker run --name secat --rm -v $PWD:/data -i -t grosenberger/secat:latest pip list
 ````
 
