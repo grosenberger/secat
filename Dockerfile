@@ -1,11 +1,5 @@
 # SECAT Dockerfile
-FROM python:3.7.3
-
-# install R
-RUN apt-get update && apt-get install -y --no-install-recommends build-essential r-base
-
-# install VIPER
-RUN Rscript -e 'source("http://bioconductor.org/biocLite.R")' -e 'biocLite("viper")'
+FROM python:3.10.9
 
 # install numpy
 RUN pip install numpy cython

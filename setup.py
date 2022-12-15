@@ -30,10 +30,11 @@ setup(
         'Programming Language :: Python :: 3.6',
         'Programming Language :: Python :: 3.7',
         'Programming Language :: Python :: 3.8',
+        'Programming Language :: Python :: 3.10',
     ],
     packages=find_packages(exclude=['contrib', 'docs', 'tests']),
     include_package_data=True,
-    install_requires=['Click','tqdm','tzlocal','lxml','numpy','scipy','pandas','sklearn','statsmodels','pyprophet','minepy','rpy2','matplotlib','ggplot'],
+    install_requires=['Click','tqdm','tzlocal','lxml','numpy','scipy','pandas','sklearn','statsmodels','pyprophet','minepy','matplotlib','ggplot', 'decoupler', 'fastparquet'],
     # extras_require={  # Optional
     #     'dev': ['check-manifest'],
     #     'test': ['coverage'],

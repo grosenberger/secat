@@ -7,12 +7,12 @@ from sklearn import preprocessing
 import statsmodels.api as sm
 import sys
 import os
+import numpy as np
 
 from lxml import etree
 import itertools
 
 from pandas.api.types import is_numeric_dtype
-
 
 try:
     import matplotlib
@@ -23,23 +23,31 @@ except ImportError:
     plt = None
 
 class uniprot:
-    def __init__(self, uniprotfile):
+    def __init__(self, uniprotfile, cache):
         self.namespaces = {'uniprot': "http://uniprot.org/uniprot"}
+        self.cache = cache
         self.df = self.read(uniprotfile)
     
     def read(self, uniprotfile):
+        if uniprotfile.endswith("xml.gz"):
+            cache_filename = uniprotfile.strip("xml.gz") + "parquet"
+        elif uniprotfile.endswith("xml"):
+            cache_filename = uniprotfile.strip("xml") + "parquet"
+        
+        if self.cache and os.path.exists(cache_filename):
+            print("Found cached table")
+            return pd.read_parquet(cache_filename)
+        
         def _extract(lst):
             if len(lst) >= 1:
                 return lst[0]
             else:
                 return None
 
-        df = pd.DataFrame(columns=["protein_id", "protein_name", "ensembl_id", "protein_mw"])
+        df = pd.DataFrame(columns=["protein_id", "protein_name", "gene", "ensembl_id", "protein_mw"])
 
         root = etree.parse(uniprotfile)
 
-        accessions = root.xpath('//uniprot:entry/uniprot:accession/text()', namespaces = self.namespaces)
-        names = root.xpath('//uniprot:entry/uniprot:name/text()', namespaces = self.namespaces)
         mw = root.xpath('//uniprot:entry/uniprot:sequence/@mass', namespaces = self.namespaces)
         if root.xpath('//uniprot:entry/uniprot:organism/uniprot:dbReference[@type="NCBI Taxonomy"]/@id', namespaces = self.namespaces)[0] == '559292':
             ensembl = root.xpath('//uniprot:entry/uniprot:gene/uniprot:name[@type = "ordered locus"]/text()', namespaces = self.namespaces)
@@ -48,24 +56,40 @@ class uniprot:
             ensembl = root.xpath('//uniprot:entry/uniprot:dbReference[@type="Ensembl"]/uniprot:property[@type="protein sequence ID"]/@value', namespaces = self.namespaces)
             ensembl_path = './uniprot:dbReference[@type="Ensembl"]/uniprot:property[@type="protein sequence ID"]/@value'
 
+        # TODO: Need to make this parsing more memory efficient
         entries = root.xpath('//uniprot:entry', namespaces = self.namespaces)
+        rows = []
         for entry in tqdm(entries, total=len(entries)):
             accession = entry.xpath('./uniprot:accession/text()', namespaces = self.namespaces)
             name = entry.xpath('./uniprot:name/text()', namespaces = self.namespaces)
+            gene = entry.xpath('./uniprot:gene/uniprot:name/text()', namespaces = self.namespaces)
             mw = entry.xpath('./uniprot:sequence/@mass', namespaces = self.namespaces)
             ensembl = entry.xpath(ensembl_path, namespaces = self.namespaces)
-            df = df.append({'protein_id': _extract(accession), 'protein_name': _extract(name), 'ensembl_id': ensembl, 'protein_mw': float(_extract(mw))}, ignore_index=True)
-        click.echo(type(df))  #added in case the first messes up...
+
+            row = pd.Series({
+                'protein_id': _extract(accession), 
+                'protein_name': _extract(name), 
+                'gene': _extract(gene), 
+                'ensembl_id': ensembl, 
+                'protein_mw': float(_extract(mw))
+            })
+            rows.append(row)
+        
+        # Append each Series object as a new row to df
+        df = pd.concat([df, *[row.to_frame().T for row in rows]], ignore_index=True)
         return df
 
     def to_df(self):
-        return self.df[['protein_id','protein_name','protein_mw']]
+        return self.df[['protein_id','protein_name', 'gene', 'protein_mw']]
 
     def expand(self):
-        ensembl = self.df.apply(lambda x: pd.Series(x['ensembl_id']),axis=1).stack().reset_index(level=1, drop=True)
+        ensembl = self.df.apply(
+            lambda x: pd.Series(x['ensembl_id'], dtype='object'),
+            axis=1
+        ).stack().reset_index(level=1, drop=True)
         ensembl.name = 'ensembl_id'
 
-        return self.df.drop('ensembl_id', axis=1).join(ensembl).reset_index(drop=True)[["protein_id", "protein_name", "ensembl_id", "protein_mw"]]
+        return self.df.drop('ensembl_id', axis=1).join(ensembl).reset_index(drop=True)[["protein_id", "protein_name", "gene", "ensembl_id", "protein_mw"]]
 
 class mitab:
     def __init__(self, mitabfile):
@@ -179,9 +203,21 @@ class preppi:
 
         return df
 
+class binary:
+    def __init__(self, binaryfile):
+        self.df = self.read(binaryfile)
+
+    def read(self, binaryfile):
+        df = pd.read_csv(binaryfile, sep=" ")
+
+        df.columns = ["bait_id","prey_id"]
+        df['interaction_confidence'] = 1
+
+        return df
+
 class net:
     def __init__(self, netfile, uniprot, meta):
-        self.formats = ['mitab','stringdb','bioplex','preppi','none']
+        self.formats = ['mitab','stringdb','bioplex','preppi', 'binary','none']
         self.format = self.identify(netfile)
 
         if self.format == 'mitab':
@@ -192,6 +228,8 @@ class net:
             network = bioplex(netfile).df
         elif self.format == 'preppi':
             network = preppi(netfile).df
+        elif self.format == 'binary':
+            network = binary(netfile).df
         elif self.format == 'none':
             protein_ids = sorted(list(meta.protein_meta['protein_id'].unique()))
             full_queries = list(itertools.combinations(protein_ids, 2))
@@ -209,7 +247,7 @@ class net:
 
     def identify(self, netfile):
         if netfile == None:
-            return self.formats[4]
+            return self.formats[5]
 
         header = pd.read_csv(netfile, sep=None, nrows=1, engine='python')
 
@@ -227,6 +265,9 @@ class net:
         # MITAB 2.5, 2.6, 2.7
         elif len(header.columns) in [11, 15, 35, 36, 42]:
             return self.formats[0]
+        # Binary
+        elif len(header.columns) == 2:
+            return self.formats[4]
         else:
             sys.exit("Error: Reference network file format is not supported.")
 
@@ -428,6 +469,8 @@ class normalization:
         self.plot(self.quantification_data, self.sec_data, os.path.splitext(os.path.basename(outfile))[0]+"_raw.pdf")
         # plot normalized data
         self.plot(self.df, self.sec_data, os.path.splitext(os.path.basename(outfile))[0]+"_norm.pdf")
+        # plot number of pep identifications
+        self.plot_count(self.df, self.sec_data, os.path.splitext(os.path.basename(outfile))[0]+"_count.pdf")
 
     def slide_normalize(self, padded):
         def window(seq, n=2):
@@ -443,6 +486,8 @@ class normalization:
 
         quantification_data = self.quantification_data.copy()
         quantification_data['peptide_intensity'] = np.log2(quantification_data['peptide_intensity'])
+        quantification_list = []
+
         if padded:
             # Add padding to lower and upper boundaries to ensure that each fractions is covered by equal number of windows
             min_sec_id = min(self.sec_data['sec_id']) - self.window_size + 1
@@ -468,7 +513,7 @@ class normalization:
         quantification_norm['peptide_intensity'] = np.exp2(quantification_norm['peptide_intensity'])
         
         return(quantification_norm)
-
+ 
     def normalize(self, quantification_data):
         def normalizeCyclicLoess(x, span=0.7, iterations = 3):
             n = len(x.columns)
@@ -514,6 +559,26 @@ class normalization:
             plt.clf()
             plt.close()
 
+    def plot_count(self, quantification_data, sec_data, filename):
+        if plt is None:
+            raise ImportError("Error: The matplotlib package is required to create a report.")
+        
+        quantification_count = quantification_data.groupby(['run_id'])['peptide_intensity'].count().reset_index() #edit
+        dfcount = pd.merge(quantification_count, sec_data, on='run_id') #edit
+        dfcount['sample_id'] = dfcount['condition_id'].astype(str) + '_' + dfcount['replicate_id'].astype(str) #edit
+        dfplot_count = pd.pivot_table(dfcount, values='peptide_intensity', index='sec_id', columns='sample_id').reset_index() #edit
+        
+        with PdfPages(filename) as pdf: #all new edit
+            plt.figure(figsize=(10, 5))
+            for sample in dfplot_count.drop('sec_id', axis=1):
+                plt.plot(dfplot_count['sec_id'], dfplot_count[sample], label=sample)
+            plt.legend()
+            plt.xlabel("SEC fraction")
+            plt.ylabel("number of peptides")
+            pdf.savefig()
+            plt.clf()
+            plt.close()
+
     def to_df(self):
         return self.df
 
@@ -524,7 +589,7 @@ class meta:
         self.decoy_right_sec_bins = decoy_right_sec_bins
 
         self.peptide_meta, self.protein_meta = self.generate(quantification_data, sec_data)
-
+ 
     def generate(self, quantification_data, sec_data):
         df = pd.merge(quantification_data, sec_data, on='run_id')
 
@@ -578,7 +643,7 @@ class query:
         self.decoy_subsample = decoy_subsample
         self.decoy_exclude = decoy_exclude
         self.df = self.generate_query(net_data, posnet_data, negnet_data, protein_meta_data)
-
+ 
     def generate_query(self, net_data, posnet_data, negnet_data, protein_meta_data):
         def _random_nonidentical_array(data):
             np.random.shuffle(data['bait_id'].values)

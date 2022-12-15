@@ -54,7 +54,8 @@ def cli():
 @click.option('--min_interaction_confidence', 'min_interaction_confidence', default=0.0, show_default=True, type=float, help='Minimum interaction confidence for prior information from network.')
 @click.option('--interaction_confidence_bins', 'interaction_confidence_bins', default=100, show_default=True, type=int, help='Number of interaction confidence bins for grouped error rate estimation.')
 @click.option('--interaction_confidence_quantile/--no-interaction_confidence_quantile', default=True, show_default=True, help='Whether interaction confidence bins should be grouped by quantiles.')
-def preprocess(infiles, outfile, secfile, netfile, posnetfile, negnetfile, uniprotfile, columns, normalize, normalize_window, normalize_padded, decoy_intensity_bins, decoy_left_sec_bins, decoy_right_sec_bins, decoy_oversample, decoy_subsample, decoy_exclude, min_interaction_confidence, interaction_confidence_bins, interaction_confidence_quantile):
+@click.option('--use_cached_uniprot', 'cache', default=True, required=False, show_default=True, type=bool, help='Whether to use the Uniprot table parsed from a previous run')
+def preprocess(infiles, outfile, secfile, netfile, posnetfile, negnetfile, uniprotfile, columns, normalize, normalize_window, normalize_padded, decoy_intensity_bins, decoy_left_sec_bins, decoy_right_sec_bins, decoy_oversample, decoy_subsample, decoy_exclude, min_interaction_confidence, interaction_confidence_bins, interaction_confidence_quantile, cache):
     """
     Import and preprocess SEC data.
     """
@@ -97,7 +98,7 @@ def preprocess(infiles, outfile, secfile, netfile, posnetfile, negnetfile, unipr
 
     # Generate UniProt table
     click.echo("Info: Parsing UniProt XML file %s." % uniprotfile)
-    uniprot_data = uniprot(uniprotfile)
+    uniprot_data = uniprot(uniprotfile, cache)
     uniprot_data.to_df().to_sql('PROTEIN', con, index=False)
 
     # Generate Network table
@@ -105,6 +106,7 @@ def preprocess(infiles, outfile, secfile, netfile, posnetfile, negnetfile, unipr
         click.echo("Info: Parsing network file %s." % netfile)
     else:
         click.echo("Info: No reference network file was provided.")
+        decoy_exclude = False
     net_data = net(netfile, uniprot_data, meta_data)
     net_data.to_df().to_sql('NETWORK', con, index=False)
 
@@ -176,6 +178,7 @@ def score(infile, outfile, monomer_threshold_factor, minimum_peptides, maximum_p
     if outfile is None:
         outfile = infile
     else:
+        # TODO: Consider replacing this with subprocess.call(["cp", "infile", "outfile"]) for speed improvement
         copyfile(infile, outfile)
         outfile = outfile
 
@@ -227,10 +230,12 @@ def score(infile, outfile, monomer_threshold_factor, minimum_peptides, maximum_p
 @click.option('--lfdr_transformation', default='probit', show_default=True, type=click.Choice(['probit', 'logit']), help='Either a "probit" or "logit" transformation is applied to the p-values so that a local FDR estimate can be formed that does not involve edge effects of the [0,1] interval in which the p-values lie.')
 @click.option('--lfdr_adj', default=1.5, show_default=True, type=float, help='Numeric value that is applied as a multiple of the smoothing bandwidth used in the density estimation.')
 @click.option('--lfdr_eps', default=power(10.0,-8), show_default=True, type=float, help='Numeric value that is threshold for the tails of the empirical p-value distribution.')
+#other
 @click.option('--plot_reports/--no-plot_reports', default=False, show_default=True, help='Plot reports for all confidence bins.')
 @click.option('--threads', default=1, show_default=True, type=int, help='Number of threads used for parallel processing. -1 means all available CPUs.', callback=transform_threads)
 @click.option('--test/--no-test', default=False, show_default=True, help='Run in test mode with fixed seed to ensure reproducibility.')
-def learn(infile, outfile, apply_model, minimum_abundance_ratio, maximum_sec_shift, cb_decoys, xeval_fraction, xeval_num_iter, ss_initial_fdr, ss_iteration_fdr, ss_num_iter, xgb_autotune, parametric, pfdr, pi0_lambda, pi0_method, pi0_smooth_df, pi0_smooth_log_pi0, lfdr_truncate, lfdr_monotone, lfdr_transformation, lfdr_adj, lfdr_eps, plot_reports, threads, test):
+@click.option('--export_tables/--no-export_tables', default=False, show_default=True, help='Saves two csv tables. One for the interations in used for modeling interactions, and another of the target interactions. Including all scores.')
+def learn(infile, outfile, apply_model, minimum_abundance_ratio, maximum_sec_shift, cb_decoys, xeval_fraction, xeval_num_iter, ss_initial_fdr, ss_iteration_fdr, ss_num_iter, xgb_autotune, parametric, pfdr, pi0_lambda, pi0_method, pi0_smooth_df, pi0_smooth_log_pi0, lfdr_truncate, lfdr_monotone, lfdr_transformation, lfdr_adj, lfdr_eps, plot_reports, threads, test, export_tables):
     """
     Learn true/false interaction features in SEC data.
     """
@@ -239,6 +244,7 @@ def learn(infile, outfile, apply_model, minimum_abundance_ratio, maximum_sec_shi
     if outfile is None:
         outfile = infile
     else:
+        # TODO: Consider replacing this with subprocess.call(["cp", "infile", "outfile"]) for speed improvement
         copyfile(infile, outfile)
         outfile = outfile
 
@@ -251,7 +257,7 @@ def learn(infile, outfile, apply_model, minimum_abundance_ratio, maximum_sec_shi
     c.execute('DROP TABLE IF EXISTS FEATURE_SCORED;')
     con.close()
 
-    pyprophet(outfile, apply_model, minimum_abundance_ratio, maximum_sec_shift, cb_decoys, xeval_fraction, xeval_num_iter, ss_initial_fdr, ss_iteration_fdr, ss_num_iter, xgb_autotune, parametric, pfdr, pi0_lambda, pi0_method, pi0_smooth_df, pi0_smooth_log_pi0, lfdr_truncate, lfdr_monotone, lfdr_transformation, lfdr_adj, lfdr_eps, plot_reports, threads, test)
+    pyprophet(outfile, apply_model, minimum_abundance_ratio, maximum_sec_shift, cb_decoys, xeval_fraction, xeval_num_iter, ss_initial_fdr, ss_iteration_fdr, ss_num_iter, xgb_autotune, parametric, pfdr, pi0_lambda, pi0_method, pi0_smooth_df, pi0_smooth_log_pi0, lfdr_truncate, lfdr_monotone, lfdr_transformation, lfdr_adj, lfdr_eps, plot_reports, threads, test, export_tables)
 
     # Combine all replicates
     click.echo("Info: Combine evidence across replicate runs.")
@@ -259,6 +265,9 @@ def learn(infile, outfile, apply_model, minimum_abundance_ratio, maximum_sec_shi
     combined_data = combine(outfile, pi0_lambda, pi0_method, pi0_smooth_df, pi0_smooth_log_pi0, pfdr)
 
     con = connect(outfile)
+    if export_tables != False:
+        network_interaction_name = path.splitext(infile)[0] + "_net_int_scored.csv"
+        combined_data.df.to_csv(network_interaction_name, index=False)
     combined_data.df.to_sql('FEATURE_SCORED_COMBINED', con, index=False, if_exists='replace')
     con.close()
 
@@ -284,6 +293,7 @@ def quantify(infile, outfile, control_condition, paired, maximum_interaction_qva
     if outfile is None:
         outfile = infile
     else:
+        # TODO: Consider replacing this with subprocess.call(["cp", "infile", "outfile"]) for speed improvement
         copyfile(infile, outfile)
         outfile = outfile
 
@@ -317,7 +327,6 @@ def export(infile, maximum_interaction_qvalue):
     Export SECAT results.
     """
 
-
     outfile_interactions = path.splitext(infile)[0] + "_interactions.csv"
     outfile_network = path.splitext(infile)[0] + "_network.csv"
     outfile_nodes = path.splitext(infile)[0] + "_differential_nodes.csv"
@@ -335,10 +344,10 @@ def export(infile, maximum_interaction_qvalue):
         network_data = read_sql('SELECT DISTINCT bait_id, prey_id FROM FEATURE_SCORED_COMBINED WHERE decoy == 0 and qvalue <= %s UNION SELECT DISTINCT bait_id, prey_id FROM MONOMER_QM;' % maximum_interaction_qvalue , con)
         network_data.to_csv(outfile_network, index=False)
     if check_sqlite_table(con, 'NODE'):
-        node_data = read_sql('SELECT * FROM NODE;' , con)
+        node_data = read_sql('SELECT * FROM NODE LEFT OUTER JOIN PROTEIN ON bait_id = protein_id;' , con)
         node_data.sort_values(by=['pvalue']).to_csv(outfile_nodes, index=False)
     if check_sqlite_table(con, 'NODE_LEVEL'):
-        node_level_data = read_sql('SELECT * FROM NODE_LEVEL;' , con)
+        node_level_data = read_sql('SELECT * FROM NODE_LEVEL LEFT OUTER JOIN PROTEIN ON bait_id = protein_id;' , con)
         node_level_data.sort_values(by=['pvalue']).to_csv(outfile_nodes_level, index=False)
     if check_sqlite_table(con, 'EDGE'):
         edge_data = read_sql('SELECT * FROM EDGE;' , con)
@@ -347,7 +356,7 @@ def export(infile, maximum_interaction_qvalue):
         edge_level_data = read_sql('SELECT * FROM EDGE_LEVEL;' , con)
         edge_level_data.sort_values(by=['pvalue']).to_csv(outfile_edges_level, index=False)
     if check_sqlite_table(con, 'PROTEIN_LEVEL'):
-        protein_level_data = read_sql('SELECT * FROM PROTEIN_LEVEL;' , con)
+        protein_level_data = read_sql('SELECT * FROM PROTEIN_LEVEL LEFT OUTER JOIN PROTEIN ON bait_id = protein_id;' , con)
         protein_level_data.sort_values(by=['pvalue']).to_csv(outfile_proteins_level, index=False)
 
     con.close()

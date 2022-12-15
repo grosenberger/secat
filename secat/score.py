@@ -26,7 +26,7 @@ class monomer:
     def protein_thresholds(self):
         def get_sec_ids(protein_mw, sec_meta):
             def condition_replicate_sec_ids(protein_mw, run_sec_meta):
-                return pd.Series({'sec_id': (run_sec_meta['sec_mw']-self.monomer_threshold_factor*protein_mw).abs().argsort()[:1].values[0]})
+                return pd.Series({'sec_id': (run_sec_meta['sec_mw']-self.monomer_threshold_factor*protein_mw).abs().argsort().iloc[:1].values[0]})
 
             return sec_meta.groupby(['condition_id','replicate_id']).apply(lambda x: condition_replicate_sec_ids(protein_mw, x[['sec_id','sec_mw']])).reset_index()
 

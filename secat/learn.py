@@ -25,7 +25,7 @@ from pyprophet.stats import pemp, qvalue, pi0est
 from hyperopt import hp
 
 class pyprophet:
-    def __init__(self, outfile, apply_model, minimum_abundance_ratio, maximum_sec_shift, cb_decoys, xeval_fraction, xeval_num_iter, ss_initial_fdr, ss_iteration_fdr, ss_num_iter, xgb_autotune, parametric, pfdr, pi0_lambda, pi0_method, pi0_smooth_df, pi0_smooth_log_pi0, lfdr_truncate, lfdr_monotone, lfdr_transformation, lfdr_adj, lfdr_eps, plot_reports, threads, test):
+    def __init__(self, outfile, apply_model, minimum_abundance_ratio, maximum_sec_shift, cb_decoys, xeval_fraction, xeval_num_iter, ss_initial_fdr, ss_iteration_fdr, ss_num_iter, xgb_autotune, parametric, pfdr, pi0_lambda, pi0_method, pi0_smooth_df, pi0_smooth_log_pi0, lfdr_truncate, lfdr_monotone, lfdr_transformation, lfdr_adj, lfdr_eps, plot_reports, threads, test, export_tables):
 
         self.outfile = outfile
         self.apply_model = apply_model
@@ -34,7 +34,7 @@ class pyprophet:
 
         self.xgb_hyperparams = {'autotune': self.xgb_autotune, 'autotune_num_rounds': 10, 'num_boost_round': 100, 'early_stopping_rounds': 10, 'test_size': 0.33}
 
-        self.xgb_params = {'eta': 1.0, 'gamma': 0, 'max_depth': 6, 'min_child_weight': 1, 'subsample': 1, 'colsample_bytree': 1, 'colsample_bylevel': 1, 'colsample_bynode': 1, 'lambda': 1, 'alpha': 0, 'scale_pos_weight': 1, 'silent': 1, 'objective': 'binary:logitraw', 'nthread': 1, 'eval_metric': 'auc'}
+        self.xgb_params = {'eta': 1.0, 'gamma': 0, 'max_depth': 6, 'min_child_weight': 1, 'subsample': 1, 'colsample_bytree': 1, 'colsample_bylevel': 1, 'colsample_bynode': 1, 'lambda': 1, 'alpha': 0, 'scale_pos_weight': 1, 'objective': 'binary:logitraw', 'nthread': 1, 'eval_metric': 'auc'}
 
         self.xgb_params_space = {'eta': hp.uniform('eta', 0.5, 1.0), 'gamma': hp.uniform('gamma', 0.0, 0.5), 'max_depth': hp.quniform('max_depth', 2, 8, 1), 'min_child_weight': hp.quniform('min_child_weight', 1, 5, 1), 'subsample': hp.uniform('subsample', 0.5, 1.0), 'colsample_bytree': 1.0, 'colsample_bylevel': 1.0, 'colsample_bynode': 1.0, 'lambda': hp.uniform('lambda', 0.0, 1.0), 'alpha': hp.uniform('alpha', 0.0, 1.0), 'scale_pos_weight': 1.0, 'silent': 1, 'objective': 'binary:logitraw', 'nthread': 1, 'eval_metric': 'auc'}
 
@@ -61,6 +61,7 @@ class pyprophet:
         self.threads = threads
         self.plot_reports = plot_reports
         self.test = test
+        self.export_tables = export_tables
         self.has_learning = self.has_learning()
 
         # Load pretrained model if available
@@ -91,9 +92,9 @@ class pyprophet:
             data = self.read_data(learning=False, condition_id=run[1]['condition_id'], replicate_id=run[1]['replicate_id'])
 
             if self.has_learning:
-                scored_data = data[data['learning'] == 0].groupby('confidence_bin').apply(self.apply, condition_id=run[1]['condition_id'], replicate_id=run[1]['replicate_id'])
+                scored_data = data[data['learning'] == 0].groupby('confidence_bin', group_keys=False).apply(self.apply, condition_id=run[1]['condition_id'], replicate_id=run[1]['replicate_id'])
             else:
-                scored_data = data.groupby('confidence_bin').apply(self.apply, condition_id=run[1]['condition_id'], replicate_id=run[1]['replicate_id'])
+                scored_data = data.groupby('confidence_bin', group_keys=False).apply(self.apply, condition_id=run[1]['condition_id'], replicate_id=run[1]['replicate_id'])
 
             con = sqlite3.connect(outfile)
             scored_data.to_sql('FEATURE_SCORED', con, index=False, if_exists='append')
@@ -128,7 +129,7 @@ class pyprophet:
         con.close()
 
         # Filter according to boundaries
-        df_filter = df.groupby(["bait_id","prey_id","decoy"])[["var_xcorr_shift","var_abundance_ratio","var_total_abundance_ratio"]].mean().reset_index(level=["bait_id","prey_id","decoy"])
+        df_filter = df.groupby(["bait_id","prey_id","decoy"], group_keys=False)[["var_xcorr_shift","var_abundance_ratio","var_total_abundance_ratio"]].mean(numeric_only=True).reset_index(level=["bait_id","prey_id","decoy"])
 
         df_filter = df_filter[(df_filter['var_xcorr_shift'] <= self.maximum_sec_shift) & (df_filter['var_abundance_ratio'] >= self.minimum_abundance_ratio) & (df_filter['var_total_abundance_ratio'] >= self.minimum_abundance_ratio)]
 
@@ -142,7 +143,34 @@ class pyprophet:
         return df
 
     def learn(self, learning_data):
-        (result, scorer, weights) = PyProphet(self.classifier, self.xgb_hyperparams, self.xgb_params, self.xgb_params_space, self.xeval_fraction, self.xeval_num_iter, self.ss_initial_fdr, self.ss_iteration_fdr, self.ss_num_iter, self.group_id, self.parametric, self.pfdr, self.pi0_lambda, self.pi0_method, self.pi0_smooth_df, self.pi0_smooth_log_pi0, self.lfdr_truncate, self.lfdr_monotone, self.lfdr_transformation, self.lfdr_adj, self.lfdr_eps, False, self.threads, self.test, ss_score_filter = '').learn_and_apply(learning_data)
+        (result, scorer, weights) = PyProphet(
+            self.classifier, 
+            self.xgb_hyperparams, 
+            self.xgb_params, 
+            self.xgb_params_space, 
+            self.xeval_fraction, 
+            self.xeval_num_iter, 
+            self.ss_initial_fdr, 
+            self.ss_iteration_fdr, 
+            self.ss_num_iter, 
+            self.group_id, 
+            self.parametric, 
+            self.pfdr, 
+            self.pi0_lambda, 
+            self.pi0_method, 
+            self.pi0_smooth_df, 
+            self.pi0_smooth_log_pi0, 
+            self.lfdr_truncate, 
+            self.lfdr_monotone, 
+            self.lfdr_transformation, 
+            self.lfdr_adj, 
+            self.lfdr_eps, 
+            False, 
+            self.threads, 
+            self.test, 
+            ss_score_filter = '', 
+            color_palette='normal'
+        ).learn_and_apply(learning_data)
 
         self.plot(result, scorer.pi0, "learning")
         self.plot_scores(result.scored_tables, "learning")
@@ -176,10 +204,14 @@ class pyprophet:
         return pickle.loads(data[0])
 
     def apply(self, detecting_data, condition_id, replicate_id):
-        (result, scorer, weights) = PyProphet(self.classifier, self.xgb_hyperparams, self.xgb_params, self.xgb_params_space, self.xeval_fraction, self.xeval_num_iter, self.ss_initial_fdr, self.ss_iteration_fdr, self.ss_num_iter, self.group_id, self.parametric, self.pfdr, self.pi0_lambda, self.pi0_method, self.pi0_smooth_df, self.pi0_smooth_log_pi0, self.lfdr_truncate, self.lfdr_monotone, self.lfdr_transformation, self.lfdr_adj, self.lfdr_eps, False, self.threads, self.test, ss_score_filter = '').apply_weights(detecting_data, self.weights)
+        (result, scorer, weights) = PyProphet(self.classifier, self.xgb_hyperparams, self.xgb_params, self.xgb_params_space, self.xeval_fraction, self.xeval_num_iter, self.ss_initial_fdr, self.ss_iteration_fdr, self.ss_num_iter, self.group_id, self.parametric, self.pfdr, self.pi0_lambda, self.pi0_method, self.pi0_smooth_df, self.pi0_smooth_log_pi0, self.lfdr_truncate, self.lfdr_monotone, self.lfdr_transformation, self.lfdr_adj, self.lfdr_eps, False, self.threads, self.test, ss_score_filter = '', color_palette='normal').apply_weights(detecting_data, self.weights)
 
         df = result.scored_tables[['condition_id','replicate_id','bait_id','prey_id','decoy','confidence_bin','d_score','p_value','q_value','pep']]
         df.columns = ['condition_id','replicate_id','bait_id','prey_id','decoy','confidence_bin','score','pvalue','qvalue','pep']
+
+        if self.export_tables:
+            learning_interaction_name = "learn_int_scored.csv"
+            result.scored_tables.to_csv(learning_interaction_name, index=False)
 
         if self.plot_reports:
             self.plot(result, scorer.pi0, condition_id + "_" + replicate_id + "_" + "detecting_" + str(detecting_data['confidence_bin'].values[0]))
@@ -253,7 +285,7 @@ class combine:
         self.pfdr = pfdr
 
         scores = self.read()
-        self.df = scores.groupby('confidence_bin').apply(self.combine_scores)
+        self.df = scores.groupby('confidence_bin', group_keys=False).apply(self.combine_scores)
 
     def read(self):
         con = sqlite3.connect(self.outfile)
@@ -263,7 +295,7 @@ class combine:
         return df
 
     def combine_scores(self, scores):
-        combined_scores = scores.groupby(['condition_id','bait_id','prey_id','decoy','confidence_bin'])['score'].mean().reset_index()
+        combined_scores = scores.groupby(['condition_id','bait_id','prey_id','decoy','confidence_bin'], group_keys=False)['score'].mean(numeric_only=True).reset_index()
 
         combined_scores.loc[combined_scores['decoy'] == 0,'pvalue'] = pemp(combined_scores[combined_scores['decoy'] == 0]['score'], combined_scores[combined_scores['decoy'] == 1]['score'])
 
