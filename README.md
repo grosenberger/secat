@@ -40,10 +40,10 @@ SECAT is also available from [Dockerhub](https://hub.docker.com/repository/docke
 docker pull grosenberger/secat:latest # "latest" can be replaced by the version number, e.g. "1.0.4"
 ````
 
-You can also build the Docker image on your machine with the command below. Again, make sure you are at the root level of this repository when executing this command. When building locally, feel free to replace the part after `-t` with anything you find convenient. This is simply a tag to easily identify the Docker container on your machine. Here it is tagged as `grosenberg/secat:latest` to remain interoperable with the other instructions in the `README.md`.
+You can also build the Docker image on your machine with the command below. Again, make sure you are at the root level of this repository when executing this command. When building locally, feel free to replace the part after `-t` with anything you find convenient. This is simply a tag to easily identify the Docker container on your machine. Here it is tagged as `grosenberger/secat:latest` to remain interoperable with the other instructions in the `README.md`.
 
 ```
-docker build . -t grosenberg/secat:latest
+docker build . -t grosenberger/secat:latest
 ```
 
 Print the installed Python versions:
