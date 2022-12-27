@@ -44,7 +44,7 @@ class uniprot:
             else:
                 return None
 
-        df = pd.DataFrame(columns=["protein_id", "protein_name", "ensembl_id", "protein_mw"])
+        df = pd.DataFrame(columns=["protein_id", "protein_name", "gene", "ensembl_id", "protein_mw"])
 
         root = etree.parse(uniprotfile)
 
@@ -58,13 +58,25 @@ class uniprot:
 
         # TODO: Need to make this parsing more memory efficient
         entries = root.xpath('//uniprot:entry', namespaces = self.namespaces)
+        rows = []
         for entry in tqdm(entries, total=len(entries)):
             accession = entry.xpath('./uniprot:accession/text()', namespaces = self.namespaces)
             name = entry.xpath('./uniprot:name/text()', namespaces = self.namespaces)
             gene = entry.xpath('./uniprot:gene/uniprot:name/text()', namespaces = self.namespaces)
             mw = entry.xpath('./uniprot:sequence/@mass', namespaces = self.namespaces)
             ensembl = entry.xpath(ensembl_path, namespaces = self.namespaces)
-            df = df.append({'protein_id': _extract(accession), 'protein_name': _extract(name), 'gene': _extract(gene), 'ensembl_id': ensembl, 'protein_mw': float(_extract(mw))}, ignore_index=True)
+
+            row = pd.Series({
+                'protein_id': _extract(accession), 
+                'protein_name': _extract(name), 
+                'gene': _extract(gene), 
+                'ensembl_id': ensembl, 
+                'protein_mw': float(_extract(mw))
+            })
+            rows.append(row)
+        
+        # Append each Series object as a new row to df
+        df = pd.concat([df, *[row.to_frame().T for row in rows]], ignore_index=True)
         return df
 
     def to_df(self):
@@ -72,7 +84,7 @@ class uniprot:
 
     def expand(self):
         ensembl = self.df.apply(
-            lambda x: pd.Series(x['ensembl_id']),
+            lambda x: pd.Series(x['ensembl_id'], dtype='object'),
             axis=1
         ).stack().reset_index(level=1, drop=True)
         ensembl.name = 'ensembl_id'

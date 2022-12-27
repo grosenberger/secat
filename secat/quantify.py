@@ -80,6 +80,7 @@ class quantitative_matrix:
             con
         )
 
+        # TODO: Consider replacing pd.read_sql with https://github.com/sfu-db/connector-x to improve read speeds and utilize concurrency
         click.echo("Getting peaks table")
         peaks = pd.read_sql('SELECT * FROM PROTEIN_PEAKS;', con)
 
@@ -157,6 +158,7 @@ class quantitative_matrix:
                 if peptide[peptide['is_bait']].shape[0] >= self.minimum_peptides and peptide[~peptide['is_bait']].shape[0] >= self.minimum_peptides:
                     # Select representative closest to max and aggregate
                     peptide = peptide.groupby(['is_bait'], group_keys=True).apply(aggregate).reset_index(level=['is_bait'])
+                    
                     return peptide
 
         def peptide_summarize(df):
@@ -177,10 +179,7 @@ class quantitative_matrix:
         preys['is_bait'] = False
 
         complexes = pd.concat([baits, preys]).reset_index()
-        complexes_sec = complexes.groupby(
-            ['condition_id','replicate_id','bait_id','prey_id'], 
-            group_keys=True
-        ).apply(sec_summarize).reset_index(level=['condition_id','replicate_id','bait_id','prey_id'])
+        complexes_sec = complexes.groupby(['condition_id','replicate_id','bait_id','prey_id']).apply(sec_summarize).reset_index(level=['condition_id','replicate_id','bait_id','prey_id'])
         complexes_peptides = peptide_summarize(complexes_sec)
 
         return complexes_peptides
@@ -225,84 +224,6 @@ class enrichment_test:
 
         return comparisons
 
-    def viper(self, data_mx, subunit_set, subunit_tfms):
-        # Conduct VIPER analysis
-        r_networks = robjects.ListVector.from_length(len(subunit_tfms)) # Creating an empty list of the same length as subunit_tfms
-
-        for i, subunit_tfm in enumerate(subunit_tfms):
-            regulons = [] # construct each regulon by...
-            for subunit in subunit_set:
-                # converting each subunit_tfms into a float vector
-                tfmode = robjects.FloatVector(np.asarray(subunit_tfm[subunit]).astype(float))
-                
-                # not sure why we need a string vector
-                tfmode.names = robjects.StrVector(subunit_set[subunit])
-
-                # Each tf is equally likely?
-                likelihood = robjects.FloatVector(np.repeat(1.0,len(subunit_set[subunit])))
-                
-                # Creating a list of 
-                regulon = robjects.ListVector({'tfmode': tfmode, 'likelihood': likelihood})
-                regulons.append(regulon)
-
-            # Generate R regulon
-            r_networks[i] = robjects.ListVector(zip(subunit_set.keys(), regulons))
-
-        # Compute VIPER profile
-        return viper(data_mx, r_networks, verbose = False, minsize = 1)
-    
-    # FutureWarning: VipeR will be deprecated
-    def _viper(self, data_mx, subunit_set, subunit_tfms):
-        from rpy2 import robjects
-        from rpy2.robjects import r, pandas2ri
-        from rpy2.robjects.conversion import localconverter
-        import rpy2.robjects.packages as rpackages
-
-        pdb.set_trace()
-        base = rpackages.importr('base')
-        try:
-            vp = rpackages.importr("viper", lib_loc='/burg/home/dsg2157/R/x86_64-pc-linux-gnu-library/4.2/viper')
-        except:
-            # base.source("http://www.bioconductor.org/biocLite.R")
-            # biocinstaller = rpackages.importr("BiocInstaller")
-            # biocinstaller.biocLite("viper")
-            # vp = robjects.r("library('viper')")
-            
-            # robjects.r("install.packages('BiocManager')")
-            # robjects.r("BiocManager::install('viper')")
-            vp = rpackages.importr("viper", lib_loc='/burg/home/dsg2157/R/x86_64-pc-linux-gnu-library/4.2/viper')
-        
-        # Conduct VIPER analysis
-        r_networks = robjects.ListVector.from_length(len(subunit_tfms))
-
-        for i, subunit_tfm in enumerate(subunit_tfms):
-            regulons = []
-            for subunit in subunit_set:
-                tfmode = robjects.FloatVector(np.asarray(subunit_tfm[subunit]).astype(float))
-                tfmode.names = robjects.StrVector(subunit_set[subunit])
-                likelihood = robjects.FloatVector(np.repeat(1.0,len(subunit_set[subunit])))
-                regulon = robjects.ListVector({'tfmode': tfmode, 'likelihood': likelihood})
-                regulons.append(regulon)
-
-            # Generate R regulon
-            r_networks[i] = robjects.ListVector(zip(subunit_set.keys(), regulons))
-
-        # Generate R matrix
-        mx_nr, mx_nc = data_mx.shape
-        mx_vec = robjects.FloatVector(data_mx.values.transpose().reshape((data_mx.size)))
-        r_mx = robjects.r.matrix(mx_vec, nrow=mx_nr, ncol=mx_nc)
-        r_mx.rownames = robjects.StrVector(data_mx.index)
-        r_mx.colnames = robjects.StrVector(data_mx.columns)
-
-        # Compute VIPER profile
-        vpres = vp.viper(r_mx, r_networks, verbose = False, minsize = 1, cores = self.threads)
-
-        with localconverter(robjects.default_converter + pandas2ri.converter):
-            vpres_df = robjects.conversion.rpy2py(vpres)
-        pd_mx = pd.DataFrame(vpres_df, columns = vpres.colnames)
-        pd_mx['query_id'] = vpres.rownames
-        return(pd_mx)
-
     def read(self):
         con = sqlite3.connect(self.outfile)
 
@@ -314,6 +235,7 @@ class enrichment_test:
         return monomer_qm, complex_qm
 
     def compare(self):
+        # TODO: Add tqdm progress bar to better visualize compare() progress
         dfs = []
         for level in self.levels:
             for state in [self.monomer_qm, self.complex_qm]:
@@ -358,10 +280,6 @@ class enrichment_test:
                         net['target'] = query_set['query_peptide_id']
                         net['weight'] = [1 for _ in range(query_set.shape[0])]
                         net = net.groupby(['source', 'target']).sum('weight').reset_index()
-
-                        # # For R viper method
-                        # subunit_set = query_set.groupby(['query_id'])['query_peptide_id'].apply(lambda x: x.unique().tolist()).to_dict()
-                        # subunit_tfm = query_set.groupby(['query_id'])['query_peptide_id'].apply(lambda x: np.repeat(1,len(x.unique()))).to_dict()
                     elif level == 'interactor_ratio':
                         # Complex stoichiometry testing combines bait and prey peptides into a single regulon but with different tfmode signs
                         query_set = dat[['query_id','is_bait','query_peptide_id']].copy()
@@ -373,10 +291,6 @@ class enrichment_test:
                         net['target'] = filtered_query_set['query_peptide_id']
                         net['weight'] = filtered_query_set['is_bait'].apply(lambda x: 1 if x == True else -1)
                         net = net.groupby(['source', 'target']).sum('weight').reset_index() # Not sure if this is needed
-                        
-                        # # For R viper method
-                        # subunit_set = query_set.groupby(['query_id'])['query_peptide_id'].apply(lambda x: x.unique().tolist()).to_dict()
-                        # subunit_tfm = query_set.groupby(['query_id'])[['query_peptide_id','is_bait']].apply(lambda x: x.drop_duplicates()['is_bait'].tolist()).to_dict()
                     else:
                         # All other modalities are assessed on protein-level, separately for bait and prey proteins
                         query_set = dat[['query_id','is_bait','query_peptide_id']].copy()
@@ -387,12 +301,7 @@ class enrichment_test:
                         net['weight'] = [1 for _ in range(query_set.shape[0])]
                         net = net.groupby(['source', 'target']).sum('weight').reset_index()
 
-                        # # For R viper method
-                        # subunit_set = query_set.groupby(['query_id'])['query_peptide_id'].apply(lambda x: x.unique().tolist()).to_dict()
-                        # subunit_tfm = query_set.groupby(['query_id'])['query_peptide_id'].apply(lambda x: np.repeat(1,len(x.unique()))).to_dict()
-
-                    # results = self._viper(data_mx, subunit_set, [subunit_tfm]) # Run VIPER (R version)
-                    results = run_viper(data_mx.T, net, verbose=False, pleiotropy=False, min_n=1) # Run VIPER (python decoupler)
+                    results = run_viper(data_mx.T, net, verbose=False, pleiotropy=False, min_n=1)
                     results = results[0].T.reset_index()
                     results['query_id'] = results['index']
                     results.drop('index', inplace=True, axis=1)
@@ -417,7 +326,7 @@ class enrichment_test:
                         if self.peptide_log2fx:
                             quant_mx_log2fx = quant_mx_avg.groupby(['query_id','is_bait','query_peptide_id']).apply(lambda x: np.log2((x['comparison_0'])/(x['comparison_1']))).reset_index(level=['query_id','is_bait','query_peptide_id'])
 
-                            quant_mx_log2fx_prot = quant_mx_log2fx.groupby(['query_id','is_bait']).mean().reset_index()
+                            quant_mx_log2fx_prot = quant_mx_log2fx.groupby(['query_id','is_bait']).mean(numeric_only=True).reset_index()
                             quant_mx_log2fx_prot.columns = ['query_id','is_bait','log2fx']
                             quant_mx_log2fx_prot['abs_log2fx'] = np.abs(quant_mx_log2fx_prot['log2fx'])
                         else:
@@ -480,16 +389,16 @@ class enrichment_test:
         df_protein_level = self.tests[self.tests['bait_id'] == self.tests['prey_id']]
         df_edge_full = pd.concat([df_protein_level, df_edge_level, df_edge_level_rev], sort=False)
         df_edge_level = pd.concat([df_edge_level, df_edge_level_rev[df_edge_level_rev['level']=='interactor_abundance']], sort=False)
-        df_node_level = df_edge_full.groupby(['condition_1', 'condition_2','level','bait_id']).apply(collapse).reset_index()
+        df_node_level = df_edge_full.groupby(['condition_1', 'condition_2','level','bait_id'], group_keys=False).apply(collapse).reset_index()
 
         # Multi-testing correction and pooling
-        df_protein_level = df_protein_level.groupby(['condition_1', 'condition_2','level']).apply(mtcorrect).reset_index()
-        df_edge_level = df_edge_level.groupby(['condition_1', 'condition_2','level']).apply(mtcorrect).reset_index()
+        df_protein_level = df_protein_level.groupby(['condition_1', 'condition_2','level'], group_keys=False).apply(mtcorrect).reset_index()
+        df_edge_level = df_edge_level.groupby(['condition_1', 'condition_2','level'], group_keys=False).apply(mtcorrect).reset_index()
         df_edge = df_edge_level.sort_values('pvalue').groupby(['condition_1','condition_2','bait_id','prey_id']).head(1).reset_index()
-        df_node_level = df_node_level.groupby(['condition_1', 'condition_2','level']).apply(mtcorrect).reset_index()
+        df_node_level = df_node_level.groupby(['condition_1', 'condition_2','level'], group_keys=False).apply(mtcorrect).reset_index()
 
         df_node_level_filtered = df_node_level[df_node_level['abs_log2fx'] > self.min_abs_log2fx]
-        df_node = df_node_level_filtered.sort_values('pvalue_adjusted').groupby(['condition_1','condition_2','bait_id']).head(1).reset_index()
+        df_node = df_node_level_filtered.sort_values('pvalue_adjusted').groupby(['condition_1','condition_2','bait_id'], group_keys=False).head(1).reset_index()
 
         click.echo("Info: Total dysregulated proteins detected:")
         click.echo("%s (at FDR < 0.01)" % (df_node[df_node['pvalue_adjusted'] < 0.01][['bait_id']].drop_duplicates().shape[0]))
