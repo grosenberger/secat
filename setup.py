@@ -10,7 +10,7 @@ with open(path.join(here, 'README.md'), encoding='utf-8') as f:
 
 setup(
     name='secat',
-    version='1.1.1',
+    version='1.1.2',
     description='Size-Exclusion Chromatography Algorithmic Toolkit',
     long_description=long_description,
     long_description_content_type='text/markdown',
@@ -34,7 +34,7 @@ setup(
     ],
     packages=find_packages(exclude=['contrib', 'docs', 'tests']),
     include_package_data=True,
-    install_requires=['Click','tqdm','tzlocal','lxml','numpy','scipy','pandas','sklearn','statsmodels','pyprophet','minepy','matplotlib','ggplot', 'decoupler', 'fastparquet'],
+    install_requires=['Click','tqdm','tzlocal','lxml','numpy','scipy','pandas','sklearn','statsmodels','pyprophet==2.1.12','minepy','matplotlib','ggplot', 'decoupler', 'fastparquet'],
     # extras_require={  # Optional
     #     'dev': ['check-manifest'],
     #     'test': ['coverage'],
