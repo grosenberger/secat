@@ -110,11 +110,11 @@ class export_tables:
         peptide_data.loc[peptide_data['picked'].isnull(), 'picked'] = False
 
         if decoy:
-            peptide_out = os.path.splitext(os.path.basename(self.infile))[0]+"_"+str(result_id).zfill(6)+"_DECOY_"+interaction_id+"_peptide"+".csv"
-            feature_out = os.path.splitext(os.path.basename(self.infile))[0]+"_"+str(result_id).zfill(6)+"_DECOY_"+interaction_id+"_feature"+".csv"
+            peptide_out = os.path.splitext(os.path.basename(self.infile))[0]+"_DECOY_"+interaction_id+"_peptide"+".csv"
+            feature_out = os.path.splitext(os.path.basename(self.infile))[0]+"_DECOY_"+interaction_id+"_feature"+".csv"
         else:
-            peptide_out = os.path.splitext(os.path.basename(self.infile))[0]+"_"+str(result_id).zfill(6)+"_"+interaction_id+"_peptide"+".csv"
-            feature_out = os.path.splitext(os.path.basename(self.infile))[0]+"_"+str(result_id).zfill(6)+"_"+interaction_id+"_feature"+".csv"
+            peptide_out = os.path.splitext(os.path.basename(self.infile))[0]+"_"+interaction_id+"_peptide"+".csv"
+            feature_out = os.path.splitext(os.path.basename(self.infile))[0]+"_"+interaction_id+"_feature"+".csv"
             
         peptide_data.to_csv(peptide_out, index=False)
         feature_data.to_csv(feature_out, index=False)
@@ -164,8 +164,8 @@ class export_tables:
         
         peptide_df = pd.concat(peptide_dfs)
         feature_df = pd.concat(feature_dfs)
-        peptide_out = os.path.splitext(os.path.basename(self.infile))[0]+"_"+str(result_id).zfill(6)+"_"+bait_id+"_peptide"+".csv"
-        feature_out = os.path.splitext(os.path.basename(self.infile))[0]+"_"+str(result_id).zfill(6)+"_"+bait_id+"_feature"+".csv"                
+        peptide_out = os.path.splitext(os.path.basename(self.infile))[0]+"_"+bait_id+"_peptide"+".csv"
+        feature_out = os.path.splitext(os.path.basename(self.infile))[0]+"_"+bait_id+"_feature"+".csv"                
         
         peptide_df.to_csv(peptide_out, index=False)
         feature_df.to_csv(feature_out, index=False)
