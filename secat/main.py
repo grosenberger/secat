@@ -322,14 +322,14 @@ def quantify(infile, outfile, control_condition, paired, maximum_interaction_qva
 # SECAT export features
 @cli.command()
 @click.option('--in', 'infile', required=True, type=click.Path(exists=True), help='Input SECAT file.')
-@click.option('--level', default='bait', show_default=True, type=click.Choice(['bait', 'interaction']), help='Plot either all interactions of bait proteins or individual interactions')
-@click.option('--id', required=False, type=str, help='Plot specific UniProt bait_id (Q10000) or interaction_id (Q10000_P10000)')
-@click.option('--max_qvalue', default=0.01, show_default=True, type=float, help='Maximum q-value to plot baits or interactions.')
+@click.option('--level', default='bait', show_default=True, type=click.Choice(['bait', 'interaction']), help='Export either all interactions of bait proteins or individual interactions')
+@click.option('--id', required=False, type=str, help='Export specific UniProt bait_id (Q10000) or interaction_id (Q10000_P10000)')
+@click.option('--max_qvalue', default=0.01, show_default=True, type=float, help='Maximum q-value to export baits or interactions.')
 @click.option('--min_abs_log2fx', default=1.0, show_default=True, type=float, help='Minimum absolute log2 fold-change for integrated nodes.')
-@click.option('--mode', default='quantitative', show_default=True, type=click.Choice(['quantitative', 'detection']), help='Select mode to order interaction plots by.')
+@click.option('--mode', default='quantitative', show_default=True, type=click.Choice(['quantitative', 'detection']), help='Select mode to order interaction exported tables by.')
 @click.option('--combined/--no-combined', default=False, show_default=True, help='Select interactions and baits according to combined q-values.')
-@click.option('--peptide_rank', default=6, show_default=True, type=int, help='Number of most intense peptides to plot.')
-@click.option('--extras', default=True, show_default=True, type=bool, help='Whether or not to export raw csv files of data used in `secat plot`')
+@click.option('--peptide_rank', default=6, show_default=True, type=int, help='Number of most intense peptides to export.')
+@click.option('--extra', default=False, show_default=True, type=bool, help='Whether or not to export raw csv files of data used in `secat plot`')
 def export(infile, level, id, max_qvalue, min_abs_log2fx, mode, combined, peptide_rank, extras):
     """
     Export SECAT results.
