@@ -25,10 +25,20 @@ Install the stable version of *SECAT* from the Python Package Index (PyPI):
 pip install secat
 ````
 
-You can alternatively create a `conda` environment with SECAT and all its dependencies with the command below. Note: you should be in the root directory of this repository when executing this command or replace `environment.yml` with the proper full path or relative path to the `environment.yml` file.
+You can alternatively create a `conda` environment with SECAT. First create a new conda environment and install python, numpy and pip.
 
 ```
-conda env create -f environment.yml
+conda create -n secat python=3.10.8 numpy pip -y
+```
+
+Activate the secat environment
+```
+conda activate secat
+```
+
+Install secat and its dependencies.
+```
+pip install secat
 ```
 
 Docker

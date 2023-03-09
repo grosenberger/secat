@@ -172,6 +172,10 @@ class pyprophet:
             color_palette='normal'
         ).learn_and_apply(learning_data)
 
+        if self.export_tables:
+            file_name = os.path.splitext(os.path.basename(self.outfile))[0]+"_learn_int_scored.csv"
+            result.scored_tables.to_csv(file_name, index=False)
+
         self.plot(result, scorer.pi0, "learning")
         self.plot_scores(result.scored_tables, "learning")
 
@@ -208,10 +212,6 @@ class pyprophet:
 
         df = result.scored_tables[['condition_id','replicate_id','bait_id','prey_id','decoy','confidence_bin','d_score','p_value','q_value','pep']]
         df.columns = ['condition_id','replicate_id','bait_id','prey_id','decoy','confidence_bin','score','pvalue','qvalue','pep']
-
-        if self.export_tables:
-            learning_interaction_name = "learn_int_scored.csv"
-            result.scored_tables.to_csv(learning_interaction_name, index=False)
 
         if self.plot_reports:
             self.plot(result, scorer.pi0, condition_id + "_" + replicate_id + "_" + "detecting_" + str(detecting_data['confidence_bin'].values[0]))

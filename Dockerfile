@@ -1,8 +1,8 @@
 # SECAT Dockerfile
-FROM python:3.10.9
+FROM python:3.10.8
 
 # install numpy
-RUN pip install numpy cython
+RUN pip install numpy==1.23.5 cython
 
 # install pyprophet
 RUN pip install pyprophet

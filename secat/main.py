@@ -13,6 +13,7 @@ from .score import monomer, scoring
 from .learn import pyprophet, combine
 from .quantify import quantitative_matrix, enrichment_test
 from .plot import plot_features, check_sqlite_table
+from .export import export_tables
 
 from pyprophet.data_handling import transform_threads, transform_pi0_lambda
 
@@ -22,7 +23,7 @@ from pyprophet.data_handling import transform_threads, transform_pi0_lambda
 @click.version_option()
 def cli():
     """
-    SECAT: Size-Exclusion Chromatography Algorithmic Toolkit.
+    SECAT: Size-Exclusion Chromatography Algorithmic Toolkit. test
 
     Visit https://github.com/grosenberger/secat for usage instructions and help.
     """
@@ -50,12 +51,12 @@ def cli():
 @click.option('--decoy_right_sec_bins', 'decoy_right_sec_bins', default=1, show_default=True, type=int, help='Number of decoy bins for right SEC fraction.')
 @click.option('--decoy_oversample','decoy_oversample', default=2, show_default=True, type=int, help='Number of iterations to sample decoys.')
 @click.option('--decoy_subsample/--no-decoy_subsample', default=False, show_default=True, help='Whether decoys should be subsampled to be approximately of similar number as targets.')
-@click.option('--decoy_exclude/--no-decoy_exclude', default=True, show_default=True, help='Whether decoy interactions also covered by targets should be excluded.')
+# @click.option('--decoy_exclude/--no-decoy_exclude', default=True, show_default=True, help='Whether decoy interactions also covered by targets should be excluded.')
 @click.option('--min_interaction_confidence', 'min_interaction_confidence', default=0.0, show_default=True, type=float, help='Minimum interaction confidence for prior information from network.')
 @click.option('--interaction_confidence_bins', 'interaction_confidence_bins', default=100, show_default=True, type=int, help='Number of interaction confidence bins for grouped error rate estimation.')
 @click.option('--interaction_confidence_quantile/--no-interaction_confidence_quantile', default=True, show_default=True, help='Whether interaction confidence bins should be grouped by quantiles.')
 @click.option('--use_cached_uniprot', 'cache', default=True, required=False, show_default=True, type=bool, help='Whether to use the Uniprot table parsed from a previous run')
-def preprocess(infiles, outfile, secfile, netfile, posnetfile, negnetfile, uniprotfile, columns, normalize, normalize_window, normalize_padded, decoy_intensity_bins, decoy_left_sec_bins, decoy_right_sec_bins, decoy_oversample, decoy_subsample, decoy_exclude, min_interaction_confidence, interaction_confidence_bins, interaction_confidence_quantile, cache):
+def preprocess(infiles, outfile, secfile, netfile, posnetfile, negnetfile, uniprotfile, columns, normalize, normalize_window, normalize_padded, decoy_intensity_bins, decoy_left_sec_bins, decoy_right_sec_bins, decoy_oversample, decoy_subsample, min_interaction_confidence, interaction_confidence_bins, interaction_confidence_quantile, cache): # decoy_exclude
     """
     Import and preprocess SEC data.
     """
@@ -106,7 +107,7 @@ def preprocess(infiles, outfile, secfile, netfile, posnetfile, negnetfile, unipr
         click.echo("Info: Parsing network file %s." % netfile)
     else:
         click.echo("Info: No reference network file was provided.")
-        decoy_exclude = False
+        # decoy_exclude = False
     net_data = net(netfile, uniprot_data, meta_data)
     net_data.to_df().to_sql('NETWORK', con, index=False)
 
@@ -128,7 +129,7 @@ def preprocess(infiles, outfile, secfile, netfile, posnetfile, negnetfile, unipr
 
     # Generate interaction query data
     click.echo("Info: Generating interaction query data.")
-    query_data = query(net_data, posnet_data, negnet_data, meta_data.protein_meta, min_interaction_confidence, interaction_confidence_bins, interaction_confidence_quantile, decoy_oversample, decoy_subsample, decoy_exclude)
+    query_data = query(net_data, posnet_data, negnet_data, meta_data.protein_meta, min_interaction_confidence, interaction_confidence_bins, interaction_confidence_quantile, decoy_oversample, decoy_subsample) # decoy_exclude
     query_data.to_df().to_sql('QUERY', con, index=False)
 
     # Remove any entries that are not necessary (proteins not covered by LC-MS/MS data)
@@ -321,45 +322,19 @@ def quantify(infile, outfile, control_condition, paired, maximum_interaction_qva
 # SECAT export features
 @cli.command()
 @click.option('--in', 'infile', required=True, type=click.Path(exists=True), help='Input SECAT file.')
-@click.option('--maximum_interaction_qvalue', default=0.05, show_default=True, type=float, help='Maximum q-value to consider interactions for quantification.')
-def export(infile, maximum_interaction_qvalue):
+@click.option('--level', default='bait', show_default=True, type=click.Choice(['bait', 'interaction']), help='Export either all interactions of bait proteins or individual interactions')
+@click.option('--id', required=False, type=str, help='Export specific UniProt bait_id (Q10000) or interaction_id (Q10000_P10000)')
+@click.option('--max_qvalue', default=0.01, show_default=True, type=float, help='Maximum q-value to export baits or interactions.')
+@click.option('--min_abs_log2fx', default=1.0, show_default=True, type=float, help='Minimum absolute log2 fold-change for integrated nodes.')
+@click.option('--mode', default='quantitative', show_default=True, type=click.Choice(['quantitative', 'detection']), help='Select mode to order interaction exported tables by.')
+@click.option('--combined/--no-combined', default=False, show_default=True, help='Select interactions and baits according to combined q-values.')
+@click.option('--peptide_rank', default=6, show_default=True, type=int, help='Number of most intense peptides to export.')
+@click.option('--extra', default=False, show_default=True, type=bool, help='Whether or not to export raw csv files of data used in `secat plot`')
+def export(infile, level, id, max_qvalue, min_abs_log2fx, mode, combined, peptide_rank, extras):
     """
     Export SECAT results.
     """
-
-    outfile_interactions = path.splitext(infile)[0] + "_interactions.csv"
-    outfile_network = path.splitext(infile)[0] + "_network.csv"
-    outfile_nodes = path.splitext(infile)[0] + "_differential_nodes.csv"
-    outfile_nodes_level = path.splitext(infile)[0] + "_differential_nodes_level.csv"
-    outfile_edges = path.splitext(infile)[0] + "_differential_edges.csv"
-    outfile_edges_level = path.splitext(infile)[0] + "_differential_edges_level.csv"
-    outfile_proteins_level = path.splitext(infile)[0] + "_differential_proteins_level.csv"
-
-    con = connect(infile)
-
-    if check_sqlite_table(con, 'FEATURE_SCORED_COMBINED'):
-        interaction_data = read_sql('SELECT DISTINCT bait_id, prey_id FROM FEATURE_SCORED_COMBINED WHERE decoy == 0 and qvalue <= %s;' % maximum_interaction_qvalue , con)
-        interaction_data.to_csv(outfile_interactions, index=False)
-    if check_sqlite_table(con, 'FEATURE_SCORED_COMBINED') and check_sqlite_table(con, 'MONOMER_QM'):
-        network_data = read_sql('SELECT DISTINCT bait_id, prey_id FROM FEATURE_SCORED_COMBINED WHERE decoy == 0 and qvalue <= %s UNION SELECT DISTINCT bait_id, prey_id FROM MONOMER_QM;' % maximum_interaction_qvalue , con)
-        network_data.to_csv(outfile_network, index=False)
-    if check_sqlite_table(con, 'NODE'):
-        node_data = read_sql('SELECT * FROM NODE LEFT OUTER JOIN PROTEIN ON bait_id = protein_id;' , con)
-        node_data.sort_values(by=['pvalue']).to_csv(outfile_nodes, index=False)
-    if check_sqlite_table(con, 'NODE_LEVEL'):
-        node_level_data = read_sql('SELECT * FROM NODE_LEVEL LEFT OUTER JOIN PROTEIN ON bait_id = protein_id;' , con)
-        node_level_data.sort_values(by=['pvalue']).to_csv(outfile_nodes_level, index=False)
-    if check_sqlite_table(con, 'EDGE'):
-        edge_data = read_sql('SELECT * FROM EDGE;' , con)
-        edge_data.sort_values(by=['pvalue']).to_csv(outfile_edges, index=False)
-    if check_sqlite_table(con, 'EDGE_LEVEL'):
-        edge_level_data = read_sql('SELECT * FROM EDGE_LEVEL;' , con)
-        edge_level_data.sort_values(by=['pvalue']).to_csv(outfile_edges_level, index=False)
-    if check_sqlite_table(con, 'PROTEIN_LEVEL'):
-        protein_level_data = read_sql('SELECT * FROM PROTEIN_LEVEL LEFT OUTER JOIN PROTEIN ON bait_id = protein_id;' , con)
-        protein_level_data.sort_values(by=['pvalue']).to_csv(outfile_proteins_level, index=False)
-
-    con.close()
+    export_tables(infile, level, id, max_qvalue, min_abs_log2fx, mode, combined, peptide_rank, extras)    
 
 
 # SECAT plot chromatograms
