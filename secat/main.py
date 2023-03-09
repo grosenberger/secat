@@ -23,7 +23,7 @@ from pyprophet.data_handling import transform_threads, transform_pi0_lambda
 @click.version_option()
 def cli():
     """
-    SECAT: Size-Exclusion Chromatography Algorithmic Toolkit.
+    SECAT: Size-Exclusion Chromatography Algorithmic Toolkit. test
 
     Visit https://github.com/grosenberger/secat for usage instructions and help.
     """
@@ -51,12 +51,12 @@ def cli():
 @click.option('--decoy_right_sec_bins', 'decoy_right_sec_bins', default=1, show_default=True, type=int, help='Number of decoy bins for right SEC fraction.')
 @click.option('--decoy_oversample','decoy_oversample', default=2, show_default=True, type=int, help='Number of iterations to sample decoys.')
 @click.option('--decoy_subsample/--no-decoy_subsample', default=False, show_default=True, help='Whether decoys should be subsampled to be approximately of similar number as targets.')
-@click.option('--decoy_exclude/--no-decoy_exclude', default=True, show_default=True, help='Whether decoy interactions also covered by targets should be excluded.')
+# @click.option('--decoy_exclude/--no-decoy_exclude', default=True, show_default=True, help='Whether decoy interactions also covered by targets should be excluded.')
 @click.option('--min_interaction_confidence', 'min_interaction_confidence', default=0.0, show_default=True, type=float, help='Minimum interaction confidence for prior information from network.')
 @click.option('--interaction_confidence_bins', 'interaction_confidence_bins', default=100, show_default=True, type=int, help='Number of interaction confidence bins for grouped error rate estimation.')
 @click.option('--interaction_confidence_quantile/--no-interaction_confidence_quantile', default=True, show_default=True, help='Whether interaction confidence bins should be grouped by quantiles.')
 @click.option('--use_cached_uniprot', 'cache', default=True, required=False, show_default=True, type=bool, help='Whether to use the Uniprot table parsed from a previous run')
-def preprocess(infiles, outfile, secfile, netfile, posnetfile, negnetfile, uniprotfile, columns, normalize, normalize_window, normalize_padded, decoy_intensity_bins, decoy_left_sec_bins, decoy_right_sec_bins, decoy_oversample, decoy_subsample, decoy_exclude, min_interaction_confidence, interaction_confidence_bins, interaction_confidence_quantile, cache):
+def preprocess(infiles, outfile, secfile, netfile, posnetfile, negnetfile, uniprotfile, columns, normalize, normalize_window, normalize_padded, decoy_intensity_bins, decoy_left_sec_bins, decoy_right_sec_bins, decoy_oversample, decoy_subsample, min_interaction_confidence, interaction_confidence_bins, interaction_confidence_quantile, cache): # decoy_exclude
     """
     Import and preprocess SEC data.
     """
@@ -107,7 +107,7 @@ def preprocess(infiles, outfile, secfile, netfile, posnetfile, negnetfile, unipr
         click.echo("Info: Parsing network file %s." % netfile)
     else:
         click.echo("Info: No reference network file was provided.")
-        decoy_exclude = False
+        # decoy_exclude = False
     net_data = net(netfile, uniprot_data, meta_data)
     net_data.to_df().to_sql('NETWORK', con, index=False)
 
@@ -129,7 +129,7 @@ def preprocess(infiles, outfile, secfile, netfile, posnetfile, negnetfile, unipr
 
     # Generate interaction query data
     click.echo("Info: Generating interaction query data.")
-    query_data = query(net_data, posnet_data, negnet_data, meta_data.protein_meta, min_interaction_confidence, interaction_confidence_bins, interaction_confidence_quantile, decoy_oversample, decoy_subsample, decoy_exclude)
+    query_data = query(net_data, posnet_data, negnet_data, meta_data.protein_meta, min_interaction_confidence, interaction_confidence_bins, interaction_confidence_quantile, decoy_oversample, decoy_subsample) # decoy_exclude
     query_data.to_df().to_sql('QUERY', con, index=False)
 
     # Remove any entries that are not necessary (proteins not covered by LC-MS/MS data)
