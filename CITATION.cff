@@ -1,0 +1,26 @@
+# This CITATION.cff file was generated with cffinit.
+# Visit https://bit.ly/cffinit to generate yours today!
+
+cff-version: 1.2.0
+title: SECAT
+message: >-
+  If you use this software, please cite it using the
+  metadata from this file.
+type: software
+authors:
+  - given-names: George
+    family-names: Rosenberger
+    email: gr2578@cumc.columbia.edu
+    affiliation: Columbia University
+    orcid: 'https://orcid.org/0000-0002-1655-6789'
+identifiers:
+  - type: doi
+    value: 10.1016/j.cels.2020.11.006
+    description: Original SECAT publication
+keywords:
+  - SEC-SWATH-MS
+  - SEC
+  - Proteomics
+  - CF-MS
+  - DIA
+license: BSD-3-Clause
