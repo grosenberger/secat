@@ -329,7 +329,7 @@ def quantify(infile, outfile, control_condition, paired, maximum_interaction_qva
 @click.option('--mode', default='quantitative', show_default=True, type=click.Choice(['quantitative', 'detection']), help='Select mode to order interaction exported tables by.')
 @click.option('--combined/--no-combined', default=False, show_default=True, help='Select interactions and baits according to combined q-values.')
 @click.option('--peptide_rank', default=6, show_default=True, type=int, help='Number of most intense peptides to export.')
-@click.option('--extra', default=False, show_default=True, type=bool, help='Whether or not to export raw csv files of data used in `secat plot`')
+@click.option('--extras', default=False, show_default=True, type=bool, help='Whether or not to export raw csv files of data used in `secat plot`')
 def export(infile, level, id, max_qvalue, min_abs_log2fx, mode, combined, peptide_rank, extras):
     """
     Export SECAT results.
