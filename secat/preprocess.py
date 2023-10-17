@@ -66,6 +66,9 @@ class uniprot:
             mw = entry.xpath('./uniprot:sequence/@mass', namespaces = self.namespaces)
             ensembl = entry.xpath(ensembl_path, namespaces = self.namespaces)
 
+            # To keep Ensembl IDs backwards compatible, ignore the version specifier
+            ensembl = [e.split(".")[0] for e in ensembl]
+
             row = pd.Series({
                 'protein_id': _extract(accession), 
                 'protein_name': _extract(name), 
@@ -77,6 +80,7 @@ class uniprot:
         
         # Append each Series object as a new row to df
         df = pd.concat([df, *[row.to_frame().T for row in rows]], ignore_index=True)
+
         return df
 
     def to_df(self):
