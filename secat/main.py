@@ -23,7 +23,7 @@ from pyprophet.data_handling import transform_threads, transform_pi0_lambda
 @click.version_option()
 def cli():
     """
-    SECAT: Size-Exclusion Chromatography Algorithmic Toolkit. test
+    SECAT: Size-Exclusion Chromatography Algorithmic Toolkit.
 
     Visit https://github.com/grosenberger/secat for usage instructions and help.
     """
